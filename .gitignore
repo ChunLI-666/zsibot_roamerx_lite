@@ -2,3 +2,7 @@
 build
 install
 log
+
+# 冗余模块 — 已被 lightning-lm 替代，暂不删除
+src/slam/
+src/localization/
