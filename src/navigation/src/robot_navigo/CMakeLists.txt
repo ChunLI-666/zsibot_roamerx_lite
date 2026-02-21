@@ -41,6 +41,7 @@ find_package(navigation2 REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(CURL REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(lcm REQUIRED)
@@ -50,7 +51,8 @@ find_package(navigo_core REQUIRED)
 find_package(navigo_costmap_2d REQUIRED)
 find_package(robots_dog_msgs REQUIRED)
 
-find_package(tf2_geometry_msgs REQUIRED) 
+find_package(tf2_geometry_msgs REQUIRED)
+find_package(ament_index_cpp REQUIRED) 
 
 #############################################################################
 # lcm interface lib
@@ -127,9 +129,11 @@ ament_target_dependencies(static_map_publisher
         nav_msgs
         OpenCV
         yaml-cpp
+        ament_index_cpp
 )
 target_link_libraries(static_map_publisher
         yaml-cpp
+        CURL::libcurl
 )
 
 #==========================>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -212,6 +216,9 @@ ament_target_dependencies(costmap_listener
 #==========================>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 install(PROGRAMS
         scripts/emap_publisher.py
+        scripts/lightning_bridge.py
+        scripts/emergency_stop.py
+        scripts/emergency_stop_keyboard.py
         DESTINATION lib/${PROJECT_NAME}
 )
 

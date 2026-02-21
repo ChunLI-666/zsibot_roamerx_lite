@@ -11,6 +11,7 @@ find_package(rclcpp_components REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(nav2_msgs REQUIRED)
 find_package(yaml_cpp_vendor REQUIRED)
+find_package(yaml-cpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(navigo_util REQUIRED)
@@ -118,7 +119,8 @@ target_include_directories(${map_io_library_name} SYSTEM PRIVATE
   ${GRAPHICSMAGICKCPP_INCLUDE_DIRS})
 
 target_link_libraries(${map_io_library_name}
-  ${GRAPHICSMAGICKCPP_LIBRARIES})
+  ${GRAPHICSMAGICKCPP_LIBRARIES}
+  yaml-cpp)
 
 if(WIN32)
   target_compile_definitions(${map_io_library_name} PRIVATE

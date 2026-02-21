@@ -452,8 +452,8 @@ NavFn::updateCell(int n)
       // use quadratic approximation
       // might speed this up through table lookup, but still have to
       //   do the divide
-      float d = dc / hf;
-      float v = -0.2301 * d * d + 0.5307 * d + 0.7040;
+      float d_ratio = dc / hf;
+      float v = -0.2301 * d_ratio * d_ratio + 0.5307 * d_ratio + 0.7040;
       pot = ta + hf * v;
     }
 
@@ -527,8 +527,8 @@ NavFn::updateCellAstar(int n)
       // use quadratic approximation
       // might speed this up through table lookup, but still have to
       //   do the divide
-      float d = dc / hf;
-      float v = -0.2301 * d * d + 0.5307 * d + 0.7040;
+      float d_ratio = dc / hf;
+      float v = -0.2301 * d_ratio * d_ratio + 0.5307 * d_ratio + 0.7040;
       pot = ta + hf * v;
     }
 
@@ -834,22 +834,22 @@ NavFn::calcPath(int n, int * st)
       // check eight neighbors to find the lowest
       int minc = stc;
       int minp = potarr[stc];
-      int st = stcpx - 1;
-      if (potarr[st] < minp) {minp = potarr[st]; minc = st;}
-      st++;
-      if (potarr[st] < minp) {minp = potarr[st]; minc = st;}
-      st++;
-      if (potarr[st] < minp) {minp = potarr[st]; minc = st;}
-      st = stc - 1;
-      if (potarr[st] < minp) {minp = potarr[st]; minc = st;}
-      st = stc + 1;
-      if (potarr[st] < minp) {minp = potarr[st]; minc = st;}
-      st = stcnx - 1;
-      if (potarr[st] < minp) {minp = potarr[st]; minc = st;}
-      st++;
-      if (potarr[st] < minp) {minp = potarr[st]; minc = st;}
-      st++;
-      if (potarr[st] < minp) {minp = potarr[st]; minc = st;}
+      int idx = stcpx - 1;
+      if (potarr[idx] < minp) {minp = potarr[idx]; minc = idx;}
+      idx++;
+      if (potarr[idx] < minp) {minp = potarr[idx]; minc = idx;}
+      idx++;
+      if (potarr[idx] < minp) {minp = potarr[idx]; minc = idx;}
+      idx = stc - 1;
+      if (potarr[idx] < minp) {minp = potarr[idx]; minc = idx;}
+      idx = stc + 1;
+      if (potarr[idx] < minp) {minp = potarr[idx]; minc = idx;}
+      idx = stcnx - 1;
+      if (potarr[idx] < minp) {minp = potarr[idx]; minc = idx;}
+      idx++;
+      if (potarr[idx] < minp) {minp = potarr[idx]; minc = idx;}
+      idx++;
+      if (potarr[idx] < minp) {minp = potarr[idx]; minc = idx;}
       stc = minc;
       dx = 0;
       dy = 0;

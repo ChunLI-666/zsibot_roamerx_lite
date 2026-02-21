@@ -67,6 +67,9 @@ endif()
 # If building one the same hardware to be deployed on, try `-march=native`!
 add_compile_options(-O3 -finline-limit=10000000 -ffp-contract=fast -ffast-math -mtune=generic)
 
+# Suppress false positive array-bounds warning from xtensor with GCC 13+
+add_compile_options(-Wno-array-bounds -Wno-stringop-overflow)
+
 add_library(mppi_controller SHARED
   src/controller.cpp
   src/optimizer.cpp

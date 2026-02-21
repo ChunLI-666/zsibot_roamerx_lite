@@ -1,0 +1,29 @@
+# cmd_vel_to_zsibot parameters
+# Copyright 2024 ZsiBot Team
+#
+# Network Setup (RK3588/NanoPC + ZSL-1 Robot):
+#   - NanoPC eth0: 192.168.168.2 (connects to robot control board)
+#   - Robot control board: 192.168.168.168
+#   - SDK port: 43988
+
+cmd_vel_to_zsibot:
+  ros__parameters:
+    # Network configuration (matching yz_robot_ctrl)
+    local_ip: "192.168.168.2"    # RK3588/NanoPC eth0 IP
+    local_port: 43988            # SDK port
+    robot_ip: "192.168.168.168"  # Robot control board IP
+    
+    # Velocity limits (m/s and rad/s)
+    max_linear_x: 0.3            # Maximum forward/backward velocity (m/s)
+    max_linear_y: 0.3            # Maximum lateral velocity (m/s)
+    max_angular_z: 0.1           # Maximum angular velocity (rad/s)
+    
+    # Timing parameters
+    cmd_timeout: 0.5             # Command timeout in seconds (send zero if no cmd received)
+    publish_rate: 100.0          # Rate at which commands are sent to robot (Hz)
+    
+    # Topic configuration
+    cmd_vel_topic: "cmd_vel"     # Input velocity command topic
+    
+    # Robot behavior
+    auto_standup: false          # Automatically stand up robot on node startup

@@ -223,6 +223,34 @@ def generate_launch_description():
         output='screen'
     )
 
+    # Static TF for simulation: map -> odom (identity transform)
+    # This replaces the missing pub_tf package for simulation use cases
+    # Note: For MUJOCO platform, pub_tf is typically launched separately via run_sim_with_nav.sh
+    # This is a fallback in case pub_tf is not running
+    static_tf_map_odom = Node(
+        condition=IfCondition(PythonExpression([
+            "'", LaunchConfiguration('platform'), "' == 'GAZEBO'"
+        ])),
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        arguments=['0', '0', '0', '0', '0', '0', 'map', 'odom'],
+        output='screen'
+    )
+
+    # Static TF for simulation: odom -> base_link (identity transform)
+    # This is a fallback when no robot_state_publisher or odometry plugin is available
+    # In production, this should come from the robot's odometry or localization system
+    # For MUJOCO, pub_tf handles this transform dynamically
+    static_tf_odom_baselink = Node(
+        condition=IfCondition(PythonExpression([
+            "'", LaunchConfiguration('platform'), "' == 'GAZEBO'"
+        ])),
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        arguments=['0', '0', '0', '0', '0', '0', 'odom', 'base_link'],
+        output='screen'
+    )
+
     load_vel_cmd_pub_node = GroupAction(
         actions=[
             Node(
@@ -326,6 +354,8 @@ def generate_launch_description():
     # ld.add_action(cmd_cel_lcm_publisher_node)
     ld.add_action(load_vel_cmd_pub_node)
     ld.add_action(mode_status_pub_node)
+    ld.add_action(static_tf_map_odom)
+    ld.add_action(static_tf_odom_baselink)
 
     # Add the actions to launch all of the navigation nodes
     ld.add_action(bringup_cmd)

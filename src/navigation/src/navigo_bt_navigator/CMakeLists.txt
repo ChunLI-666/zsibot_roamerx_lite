@@ -20,6 +20,9 @@ find_package(tf2_ros REQUIRED)
 
 nav2_package()
 
+# Suppress false positive null-dereference warning from GCC 13+ with std::string/streambuf
+add_compile_options(-Wno-null-dereference)
+
 include_directories(
   include
 )
@@ -59,7 +62,14 @@ ament_target_dependencies(${executable_name}
   ${dependencies}
 )
 
-target_link_libraries(${executable_name} ${library_name})
+# Link system ncurses explicitly to avoid conda ncurses conflict
+find_library(NCURSES_LIBRARY NAMES ncurses PATHS /usr/lib/x86_64-linux-gnu NO_DEFAULT_PATH)
+find_library(NCURSESW_LIBRARY NAMES ncursesw PATHS /usr/lib/x86_64-linux-gnu NO_DEFAULT_PATH)
+
+target_link_libraries(${executable_name} ${library_name}
+  ${NCURSES_LIBRARY}
+  ${NCURSESW_LIBRARY}
+)
 
 ament_target_dependencies(${library_name}
   ${dependencies}

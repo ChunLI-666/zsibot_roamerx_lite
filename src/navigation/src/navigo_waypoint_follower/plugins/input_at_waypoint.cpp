@@ -49,7 +49,7 @@ void InputAtWaypoint::initialize(
   logger_ = node->get_logger();
   clock_ = node->get_clock();
 
-  double timeout;
+  double timeout = 10.0;
   std::string input_topic;
   navigo_util::declare_parameter_if_not_declared(
     node, plugin_name + ".timeout",

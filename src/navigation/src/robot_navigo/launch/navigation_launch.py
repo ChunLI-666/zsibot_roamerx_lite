@@ -32,7 +32,7 @@ def generate_launch_description():
         'controller_server',
         'planner_server',
         'behavior_server',
-        'velocity_optimizer',
+        'velocity_smoother',
         'bt_navigator',
         'waypoint_follower',
     ]
@@ -164,8 +164,8 @@ def generate_launch_description():
             ),
             Node(
                 package='navigo_velocity_optimizer',
-                executable='velocity_optimizer',
-                name='velocity_optimizer',
+                executable='velocity_smoother',
+                name='velocity_smoother',
                 output='screen',
                 respawn=use_respawn,
                 respawn_delay=2.0,
@@ -262,7 +262,7 @@ def generate_launch_description():
                     ComposableNode(
                         package='navigo_velocity_optimizer',
                         plugin='navigo_velocity_optimizer::VelocityOptimizer',
-                        name='velocity_optimizer',
+                        name='velocity_smoother',
                         parameters=[configured_params],
                         remappings=remappings + [('cmd_vel', 'cmd_vel_nav'),  ('cmd_vel_smoothed', 'cmd_vel')]
                     ),

@@ -117,7 +117,7 @@ namespace navigo_map_server
 
         // Create a service that loads the occupancy grid from a file
         load_map_service_ = create_service<nav2_msgs::srv::LoadMap>(service_prefix + std::string(load_map_service_name_),
-            std::bind(&MapServer::loadMapCallback, this, _1, _2, _3), rmw_qos_profile_services_default, map_callback_group_);
+            std::bind(&MapServer::loadMapCallback, this, _1, _2, _3), rclcpp::ServicesQoS().get_rmw_qos_profile(), map_callback_group_);
 
         return navigo_util::CallbackReturn::SUCCESS;
     }

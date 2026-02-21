@@ -67,6 +67,7 @@ set(dependencies
 
 find_package(Eigen3 REQUIRED)
 find_package(PCL REQUIRED)
+find_package(CURL REQUIRED)
 
 file(GLOB_RECURSE SLAM_SDK
      CONFIGURE_DEPENDS
@@ -82,7 +83,7 @@ include_directories(inlcude
 
 add_executable(mapping ${SLAM_SDK} test/mapping_demo.cpp)
 
-target_link_libraries(mapping ${PCL_LIBRARIES} ${OpenCV_LIBRARIES})
+target_link_libraries(mapping ${PCL_LIBRARIES} ${OpenCV_LIBRARIES} CURL::libcurl)
 
 ament_target_dependencies(mapping ${dependencies})
 

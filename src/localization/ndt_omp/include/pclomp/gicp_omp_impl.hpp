@@ -227,7 +227,7 @@ pclomp::GeneralizedIterativeClosestPoint<PointSource, PointTarget>::estimateRigi
     {
       break;
     }
-    result = bfgs.testGradient(gradient_tol);
+    result = bfgs.testGradient();
   } while(result == BFGSSpace::Running && inner_iterations_ < max_inner_iterations_);
   if(result == BFGSSpace::NoProgress || result == BFGSSpace::Success || inner_iterations_ == max_inner_iterations_)
   {

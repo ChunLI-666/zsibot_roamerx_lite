@@ -2,7 +2,7 @@
 
 set -e
 
-source /opt/ros/humble/setup.bash
+source /opt/ros/jazzy/setup.bash
 
 # 检查是否传入了参数
 if [ $# -eq 0 ]; then

@@ -31,6 +31,11 @@
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>tf2_geometry_msgs</exec_depend>
 
+  <!-- Lightning Bridge dependencies -->
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>livox_ros_driver2</exec_depend>
+  <exec_depend>tf2_msgs</exec_depend>
 
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>navigation2</exec_depend>

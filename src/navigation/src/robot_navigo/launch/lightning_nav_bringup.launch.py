@@ -1,0 +1,155 @@
+"""
+Lightning Navigation Bringup Launch File
+
+This launch file starts the complete navigation stack with Lightning-LM integration:
+1. Lightning Bridge (TF + Odom + Livox + LaserScan)
+2. Navigation stack (via bringup_launch.py)
+
+Usage:
+    ros2 launch robot_navigo lightning_nav_bringup.launch.py \
+        map:=/path/to/map.yaml \
+        params_file:=/path/to/navigo_params.yaml \
+        use_sim_time:=true
+
+Note: Lightning-LM localization should be started separately before running this launch file.
+"""
+
+import os
+from launch import LaunchDescription
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    TimerAction,
+    LogInfo,
+)
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
+from ament_index_python.packages import get_package_share_directory
+
+
+def generate_launch_description():
+    # Get package directory
+    pkg_share = FindPackageShare('robot_navigo')
+    pkg_dir = get_package_share_directory('robot_navigo')
+    launch_dir = os.path.join(pkg_dir, 'launch')
+
+    # Launch configurations
+    use_sim_time = LaunchConfiguration('use_sim_time')
+    map_yaml_file = LaunchConfiguration('map')
+    params_file = LaunchConfiguration('params_file')
+    autostart = LaunchConfiguration('autostart')
+    nav2_delay = LaunchConfiguration('nav2_delay')
+
+    # Lightning Bridge configurations
+    enable_livox_converter = LaunchConfiguration('enable_livox_converter')
+    enable_laserscan = LaunchConfiguration('enable_laserscan')
+
+    # Declare arguments
+    declare_use_sim_time_cmd = DeclareLaunchArgument(
+        'use_sim_time',
+        default_value='true',
+        description='Use simulation (bag) clock if true')
+
+    declare_map_yaml_cmd = DeclareLaunchArgument(
+        'map',
+        default_value='',
+        description='Full path to map yaml file to load')
+
+    declare_params_file_cmd = DeclareLaunchArgument(
+        'params_file',
+        default_value=os.path.join(pkg_dir, 'params', 'navigo_params.yaml'),
+        description='Full path to the ROS2 parameters file to use')
+
+    declare_autostart_cmd = DeclareLaunchArgument(
+        'autostart',
+        default_value='true',
+        description='Automatically startup the nav2 stack')
+
+    declare_nav2_delay_cmd = DeclareLaunchArgument(
+        'nav2_delay',
+        default_value='3.0',
+        description='Delay (seconds) before starting Nav2 to wait for TF chain')
+
+    declare_enable_livox_converter_cmd = DeclareLaunchArgument(
+        'enable_livox_converter',
+        default_value='true',
+        description='Enable Livox CustomMsg to PointCloud2 conversion')
+
+    declare_enable_laserscan_cmd = DeclareLaunchArgument(
+        'enable_laserscan',
+        default_value='true',
+        description='Enable LaserScan generation from PointCloud2')
+
+    # Step 1: Lightning Bridge (starts immediately)
+    # Provides: TF bridge, Odometry publisher, Livox converter, LaserScan generator
+    lightning_bridge = Node(
+        package='robot_navigo',
+        executable='lightning_bridge.py',
+        name='lightning_bridge',
+        output='screen',
+        parameters=[{
+            'use_sim_time': use_sim_time,
+            # TF and Odom (always enabled for Lightning-LM integration)
+            'enable_tf_bridge': True,
+            'enable_odom_publisher': True,
+            # Livox and LaserScan (configurable)
+            'enable_livox_converter': enable_livox_converter,
+            'enable_laserscan': enable_laserscan,
+            # Topics
+            'livox_input_topic': '/livox/lidar',
+            'pointcloud_output_topic': '/livox/lidar/pointcloud2',
+            'laserscan_output_topic': '/laser_scan',
+            'odom_output_topic': '/odom/current_pose',
+            # LaserScan parameters
+            'target_frame': 'base_link',
+            'min_height': -0.5,
+            'max_height': 1.0,
+            'angle_min': -3.14159,
+            'angle_max': 3.14159,
+            'angle_increment': 0.0087,
+            'range_min': 0.5,
+            'range_max': 50.0,
+            'use_inf': True,
+        }]
+    )
+
+    # Step 2: Navigation stack (delayed start to wait for TF chain)
+    nav2_launch_delayed = TimerAction(
+        period=nav2_delay,
+        actions=[
+            LogInfo(msg='Starting Navigo navigation stack after waiting for TF chain...'),
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    os.path.join(launch_dir, 'bringup_launch.py')
+                ),
+                launch_arguments={
+                    'use_sim_time': use_sim_time,
+                    'map': map_yaml_file,
+                    'params_file': params_file,
+                    'autostart': autostart,
+                }.items()
+            )
+        ]
+    )
+
+    # Create launch description
+    ld = LaunchDescription()
+
+    # Add declarations
+    ld.add_action(declare_use_sim_time_cmd)
+    ld.add_action(declare_map_yaml_cmd)
+    ld.add_action(declare_params_file_cmd)
+    ld.add_action(declare_autostart_cmd)
+    ld.add_action(declare_nav2_delay_cmd)
+    ld.add_action(declare_enable_livox_converter_cmd)
+    ld.add_action(declare_enable_laserscan_cmd)
+
+    # Start immediately: Lightning Bridge
+    ld.add_action(lightning_bridge)
+
+    # Delayed start: Navigation stack
+    ld.add_action(nav2_launch_delayed)
+
+    return ld
