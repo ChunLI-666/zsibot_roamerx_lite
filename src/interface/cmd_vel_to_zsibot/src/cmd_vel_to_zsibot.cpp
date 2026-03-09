@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <functional>
+#include <limits>
 #include <thread>
 
 using namespace std::chrono_literals;
@@ -91,6 +92,10 @@ CmdVelToZsibot::CmdVelToZsibot(const rclcpp::NodeOptions & options)
 
   // Create publisher for connection status
   connected_pub_ = this->create_publisher<std_msgs::msg::Bool>("~/connected", 10);
+
+  // Create publisher for battery state
+  battery_pub_ = this->create_publisher<sensor_msgs::msg::BatteryState>(
+    "/battery/state", rclcpp::QoS(10).reliable());
 
   // Create timer for fixed-rate command sending
   double period_ms = 1000.0 / publish_rate_;
@@ -185,6 +190,21 @@ void CmdVelToZsibot::timerCallback()
         connected_ = true;
         RCLCPP_INFO(this->get_logger(), "Connection restored (Battery: %u%%)", battery);
       }
+
+      // Publish battery state
+      auto battery_msg = sensor_msgs::msg::BatteryState();
+      battery_msg.header.stamp = this->now();
+      battery_msg.header.frame_id = "base_link";
+      battery_msg.percentage = static_cast<float>(battery) / 100.0f;
+      battery_msg.voltage = std::numeric_limits<float>::quiet_NaN();
+      battery_msg.current = std::numeric_limits<float>::quiet_NaN();
+      battery_msg.temperature = std::numeric_limits<float>::quiet_NaN();
+      battery_msg.power_supply_status =
+        sensor_msgs::msg::BatteryState::POWER_SUPPLY_STATUS_DISCHARGING;
+      battery_msg.power_supply_technology =
+        sensor_msgs::msg::BatteryState::POWER_SUPPLY_TECHNOLOGY_LION;
+      battery_msg.present = true;
+      battery_pub_->publish(battery_msg);
     } catch (...) {
       if (connected_) {
         connected_ = false;
