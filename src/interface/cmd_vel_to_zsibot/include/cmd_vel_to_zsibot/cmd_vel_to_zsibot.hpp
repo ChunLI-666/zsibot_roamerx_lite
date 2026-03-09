@@ -9,6 +9,7 @@
 
 #include "rclcpp/rclcpp.hpp"
 #include "geometry_msgs/msg/twist.hpp"
+#include "sensor_msgs/msg/battery_state.hpp"
 #include "std_msgs/msg/bool.hpp"
 #include "std_srvs/srv/trigger.hpp"
 #include "zsl-1/highlevel.h"
@@ -93,6 +94,9 @@ private:
   
   // Publisher for connection status
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr connected_pub_;
+
+  // Publisher for battery state
+  rclcpp::Publisher<sensor_msgs::msg::BatteryState>::SharedPtr battery_pub_;
   
   // Timer for sending commands at fixed rate
   rclcpp::TimerBase::SharedPtr timer_;
