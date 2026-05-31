@@ -21,6 +21,11 @@ find_package(pluginlib REQUIRED)
 
 nav2_package()
 
+# Allow deprecated API warnings
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wno-error)
+endif()
+
 include_directories(
   include
 )
@@ -104,8 +109,8 @@ add_executable(${executable_name}
 )
 
 # Link system ncurses explicitly to avoid conda ncurses conflict
-find_library(NCURSES_LIBRARY NAMES ncurses PATHS /usr/lib/x86_64-linux-gnu NO_DEFAULT_PATH)
-find_library(NCURSESW_LIBRARY NAMES ncursesw PATHS /usr/lib/x86_64-linux-gnu NO_DEFAULT_PATH)
+find_library(NCURSES_LIBRARY NAMES ncurses PATHS /usr/lib/${CMAKE_LIBRARY_ARCHITECTURE} /usr/lib NO_DEFAULT_PATH)
+find_library(NCURSESW_LIBRARY NAMES ncursesw PATHS /usr/lib/${CMAKE_LIBRARY_ARCHITECTURE} /usr/lib NO_DEFAULT_PATH)
 
 target_link_libraries(${executable_name} ${library_name}
   ${NCURSES_LIBRARY}

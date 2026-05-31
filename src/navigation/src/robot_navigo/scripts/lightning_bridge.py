@@ -19,7 +19,7 @@ from typing import Optional
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
-from tf2_ros import TransformBroadcaster, Buffer, TransformListener
+from tf2_ros import TransformBroadcaster, StaticTransformBroadcaster, Buffer, TransformListener
 from tf2_msgs.msg import TFMessage
 from geometry_msgs.msg import TransformStamped, Quaternion
 from nav_msgs.msg import Odometry
@@ -32,6 +32,44 @@ def quaternion_to_euler_yaw(q: Quaternion) -> float:
     siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
     cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
     return math.atan2(siny_cosp, cosy_cosp)
+
+
+def euler_to_quaternion(roll: float, pitch: float, yaw: float):
+    """Convert RPY angles (radians) to quaternion (x, y, z, w)."""
+    cr = math.cos(roll * 0.5)
+    sr = math.sin(roll * 0.5)
+    cp = math.cos(pitch * 0.5)
+    sp = math.sin(pitch * 0.5)
+    cy = math.cos(yaw * 0.5)
+    sy = math.sin(yaw * 0.5)
+
+    w = cr * cp * cy + sr * sp * sy
+    x = sr * cp * cy - cr * sp * sy
+    y = cr * sp * cy + sr * cp * sy
+    z = cr * cp * sy - sr * sp * cy
+    return (x, y, z, w)
+
+
+def rpy_to_rotation_matrix(roll: float, pitch: float, yaw: float):
+    """Compute 3x3 rotation matrix from RPY (ZYX extrinsic convention).
+
+    Returns a flat tuple (r00, r01, r02, r10, r11, r12, r20, r21, r22)
+    representing R = Rz(yaw) * Ry(pitch) * Rx(roll).
+
+    Usage: to transform a point from child frame (livox_frame) to parent
+    frame (base_link), given that RPY describes the child's orientation
+    in the parent frame:
+        p_parent = R @ p_child + t
+    """
+    cr, sr = math.cos(roll), math.sin(roll)
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    cy, sy = math.cos(yaw), math.sin(yaw)
+
+    return (
+        cy * cp,                    cy * sp * sr - sy * cr,     cy * sp * cr + sy * sr,
+        sy * cp,                    sy * sp * sr + cy * cr,     sy * sp * cr - cy * sr,
+        -sp,                        cp * sr,                    cp * cr,
+    )
 
 
 class LightningBridge(Node):
@@ -55,6 +93,16 @@ class LightningBridge(Node):
         self.declare_parameter('enable_odom_publisher', True)
         self.declare_parameter('enable_livox_converter', True)
         self.declare_parameter('enable_laserscan', True)
+
+                # LiDAR mounting extrinsics: base_link -> livox_frame (XYZRPY)
+        # Positive pitch = LiDAR tilts forward (前倾). Unit: radians.
+        # Example: Mid360 mounted with 15° forward tilt => lidar_pitch = 0.2618
+        self.declare_parameter('lidar_x', 0.0)      # forward offset (m)
+        self.declare_parameter('lidar_y', 0.0)      # left offset (m)
+        self.declare_parameter('lidar_z', 0.0)      # up offset (m)
+        self.declare_parameter('lidar_roll', 0.0)   # rotation around X (rad)
+        self.declare_parameter('lidar_pitch', -0.2618)  # rotation around Y (rad), -15° = forward tilt
+        self.declare_parameter('lidar_yaw', 0.0)    # rotation around Z (rad)
 
         # LaserScan parameters
         self.declare_parameter('target_frame', 'base_link')
@@ -80,6 +128,20 @@ class LightningBridge(Node):
         self.enable_livox_converter = self.get_parameter('enable_livox_converter').value
         self.enable_laserscan = self.get_parameter('enable_laserscan').value
 
+                # LiDAR extrinsics
+        self.lidar_x = self.get_parameter('lidar_x').value
+        self.lidar_y = self.get_parameter('lidar_y').value
+        self.lidar_z = self.get_parameter('lidar_z').value
+        self.lidar_roll = self.get_parameter('lidar_roll').value
+        self.lidar_pitch = self.get_parameter('lidar_pitch').value
+        self.lidar_yaw = self.get_parameter('lidar_yaw').value
+
+        # Precompute quaternion and rotation matrix for LiDAR extrinsics
+        self.lidar_quat = euler_to_quaternion(
+            self.lidar_roll, self.lidar_pitch, self.lidar_yaw)  # (x, y, z, w)
+        self.lidar_rot = rpy_to_rotation_matrix(
+            self.lidar_roll, self.lidar_pitch, self.lidar_yaw)  # flat 9-tuple
+
         self.target_frame = self.get_parameter('target_frame').value
         self.min_height = self.get_parameter('min_height').value
         self.max_height = self.get_parameter('max_height').value
@@ -97,6 +159,11 @@ class LightningBridge(Node):
         odom_output_topic = self.get_parameter('odom_output_topic').value
 
         self.get_logger().info(f'use_sim_time: {self.get_parameter("use_sim_time").value}')
+        self.get_logger().info(
+            f'LiDAR extrinsics (base_link->livox_frame): '
+            f'xyz=[{self.lidar_x:.4f}, {self.lidar_y:.4f}, {self.lidar_z:.4f}], '
+            f'rpy=[{math.degrees(self.lidar_roll):.2f}, {math.degrees(self.lidar_pitch):.2f}, '
+            f'{math.degrees(self.lidar_yaw):.2f}] deg')
 
         # TF2 buffer and listener for coordinate transforms
         self.tf_buffer = Buffer()
@@ -104,6 +171,11 @@ class LightningBridge(Node):
 
         # TF broadcaster
         self.tf_broadcaster = TransformBroadcaster(self)
+
+        # Static TF: base_link -> livox_frame (LiDAR mounting extrinsics)
+        # Published once on /tf_static, survives for the lifetime of the node
+        self.static_tf_broadcaster = StaticTransformBroadcaster(self)
+        self._publish_static_lidar_tf()
 
         # State tracking
         self.lightning_active = False
@@ -176,10 +248,39 @@ class LightningBridge(Node):
             self.get_logger().info(f'  angle range: [{math.degrees(self.angle_min):.1f}, {math.degrees(self.angle_max):.1f}] deg')
             self.get_logger().info(f'  range: [{self.range_min}, {self.range_max}] m')
 
+        # Independent 50Hz timer for odom->base_link TF
+        # Decoupled from map->odom so the TF chain never breaks
+        # even when lightning-lm has momentary delays
+        if self.enable_tf_bridge:
+            self.create_timer(0.02, self._tf_timer_callback)  # 50 Hz
+            self.get_logger().info('TF Bridge: odom->base_link publishing at 50 Hz (independent timer)')
+
         # Watchdog timer
         self.create_timer(5.0, self.watchdog_callback)
 
         self.get_logger().info('Lightning Bridge node started')
+
+    def _tf_timer_callback(self):
+        """Publish odom->base_link at steady 50 Hz, independent of lightning-lm.
+
+        lightning-lm outputs the LiDAR sensor pose in the gravity-aligned map frame,
+        so odom inherits the physical sensor tilt (~15° pitch).
+        We apply the inverse pitch here to make base_link horizontal (robot body frame).
+        """
+        stamp = self.get_clock().now().to_msg()
+
+        odom_to_base = TransformStamped()
+        odom_to_base.header.stamp = stamp
+        odom_to_base.header.frame_id = 'odom'
+        odom_to_base.child_frame_id = 'base_link'
+        # Compensate sensor tilt: apply lidar_pitch to un-tilt base_link
+        qx, qy, qz, qw = euler_to_quaternion(0.0, self.lidar_pitch, 0.0)
+        odom_to_base.transform.rotation.x = qx
+        odom_to_base.transform.rotation.y = qy
+        odom_to_base.transform.rotation.z = qz
+        odom_to_base.transform.rotation.w = qw
+
+        self.tf_broadcaster.sendTransform(odom_to_base)
 
     def watchdog_callback(self):
         """Warn if no transforms received."""
@@ -203,45 +304,40 @@ class LightningBridge(Node):
                 if self.transform_count % 1000 == 0:
                     self.get_logger().info(f'Processed {self.transform_count} transforms')
 
-                stamp = transform.header.stamp
-
-                # Publish complementary TF transforms
-                if self.enable_tf_bridge:
-                    self._publish_tf_chain(stamp)
-
                 # Publish Odometry message
                 if self.enable_odom_publisher:
                     self._publish_odometry(transform)
 
-    def _publish_tf_chain(self, stamp):
-        """Publish odom->base_link and base_link->livox_frame transforms."""
-        # odom -> base_link (identity, Lightning-LM handles localization)
-        odom_to_base = TransformStamped()
-        odom_to_base.header.stamp = stamp
-        odom_to_base.header.frame_id = 'odom'
-        odom_to_base.child_frame_id = 'base_link'
-        odom_to_base.transform.translation.x = 0.0
-        odom_to_base.transform.translation.y = 0.0
-        odom_to_base.transform.translation.z = 0.0
-        odom_to_base.transform.rotation.x = 0.0
-        odom_to_base.transform.rotation.y = 0.0
-        odom_to_base.transform.rotation.z = 0.0
-        odom_to_base.transform.rotation.w = 1.0
+    def _publish_static_lidar_tf(self):
+        """Publish base_link->livox_frame as a static TF (once, on /tf_static).
 
-        # base_link -> livox_frame (identity, assuming LiDAR at robot center)
+        This avoids conflicts with other nodes publishing on /tf and ensures
+        the LiDAR extrinsics are always available in the TF tree.
+
+        The pitch sign is negated here because lidar_pitch describes the sensor's
+        physical tilt as observed from the outside (negative = forward-down), while
+        the TF convention for base_link->livox_frame needs the inverse rotation
+        to correctly place the sensor frame relative to the horizontal base_link.
+        """
+        inv_qx, inv_qy, inv_qz, inv_qw = euler_to_quaternion(
+            -self.lidar_roll, -self.lidar_pitch, -self.lidar_yaw)
+
         base_to_livox = TransformStamped()
-        base_to_livox.header.stamp = stamp
+        base_to_livox.header.stamp = self.get_clock().now().to_msg()
         base_to_livox.header.frame_id = 'base_link'
         base_to_livox.child_frame_id = 'livox_frame'
-        base_to_livox.transform.translation.x = 0.0
-        base_to_livox.transform.translation.y = 0.0
-        base_to_livox.transform.translation.z = 0.0
-        base_to_livox.transform.rotation.x = 0.0
-        base_to_livox.transform.rotation.y = 0.0
-        base_to_livox.transform.rotation.z = 0.0
-        base_to_livox.transform.rotation.w = 1.0
+        base_to_livox.transform.translation.x = self.lidar_x
+        base_to_livox.transform.translation.y = self.lidar_y
+        base_to_livox.transform.translation.z = self.lidar_z
+        base_to_livox.transform.rotation.x = inv_qx
+        base_to_livox.transform.rotation.y = inv_qy
+        base_to_livox.transform.rotation.z = inv_qz
+        base_to_livox.transform.rotation.w = inv_qw
 
-        self.tf_broadcaster.sendTransform([odom_to_base, base_to_livox])
+        self.static_tf_broadcaster.sendTransform(base_to_livox)
+        self.get_logger().info(
+            f'Published static TF: base_link -> livox_frame '
+            f'(pitch={math.degrees(-self.lidar_pitch):.1f} deg)')
 
     def _publish_odometry(self, map_to_odom: TransformStamped):
         """Convert map->odom TF to Odometry message for /odom/current_pose.
@@ -336,15 +432,25 @@ class LightningBridge(Node):
         else:
             ranges = [self.range_max] * self.num_ranges
 
-        # Process each point
-        for point in msg.points:
-            x, y, z = point.x, point.y, point.z
+        # Preload rotation matrix elements and translation for speed
+        r00, r01, r02, r10, r11, r12, r20, r21, r22 = self.lidar_rot
+        tx, ty, tz = self.lidar_x, self.lidar_y, self.lidar_z
 
-            # Height filter
+        # Process each point: transform from livox_frame to base_link
+        # p_base = R * p_livox + t
+        for point in msg.points:
+            lx, ly, lz = point.x, point.y, point.z
+
+            # Transform to base_link (horizontal frame)
+            x = r00 * lx + r01 * ly + r02 * lz + tx
+            y = r10 * lx + r11 * ly + r12 * lz + ty
+            z = r20 * lx + r21 * ly + r22 * lz + tz
+
+            # Height filter (now in horizontal base_link frame)
             if z < self.min_height or z > self.max_height:
                 continue
 
-            # Calculate range and angle
+            # Calculate range and angle in horizontal plane
             range_val = math.sqrt(x * x + y * y)
 
             # Range filter
@@ -405,22 +511,31 @@ class LightningBridge(Node):
         point_step = msg.point_step
         data = msg.data
 
-        # Process each point
+        # Preload rotation matrix elements and translation for speed
+        r00, r01, r02, r10, r11, r12, r20, r21, r22 = self.lidar_rot
+        tx, ty, tz = self.lidar_x, self.lidar_y, self.lidar_z
+
+        # Process each point: transform from livox_frame to base_link
         for i in range(msg.width * msg.height):
             offset = i * point_step
-            x = struct.unpack_from('f', data, offset + x_offset)[0]
-            y = struct.unpack_from('f', data, offset + y_offset)[0]
-            z = struct.unpack_from('f', data, offset + z_offset)[0]
+            lx = struct.unpack_from('f', data, offset + x_offset)[0]
+            ly = struct.unpack_from('f', data, offset + y_offset)[0]
+            lz = struct.unpack_from('f', data, offset + z_offset)[0]
 
             # Skip NaN points
-            if math.isnan(x) or math.isnan(y) or math.isnan(z):
+            if math.isnan(lx) or math.isnan(ly) or math.isnan(lz):
                 continue
 
-            # Height filter
+            # Transform to base_link (horizontal frame)
+            x = r00 * lx + r01 * ly + r02 * lz + tx
+            y = r10 * lx + r11 * ly + r12 * lz + ty
+            z = r20 * lx + r21 * ly + r22 * lz + tz
+
+            # Height filter (now in horizontal base_link frame)
             if z < self.min_height or z > self.max_height:
                 continue
 
-            # Calculate range and angle
+            # Calculate range and angle in horizontal plane
             range_val = math.sqrt(x * x + y * y)
 
             # Range filter

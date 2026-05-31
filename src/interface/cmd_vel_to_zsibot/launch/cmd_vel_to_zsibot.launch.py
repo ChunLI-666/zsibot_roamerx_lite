@@ -25,13 +25,13 @@ def generate_launch_description():
     
     declare_robot_ip = DeclareLaunchArgument(
         'robot_ip',
-        default_value='192.168.234.1',
+        default_value='192.168.168.168',
         description='IP address of the ZsiBot robot'
     )
     
     declare_local_ip = DeclareLaunchArgument(
         'local_ip',
-        default_value='127.0.0.1',
+        default_value='192.168.168.2',
         description='Local IP address for UDP communication'
     )
     

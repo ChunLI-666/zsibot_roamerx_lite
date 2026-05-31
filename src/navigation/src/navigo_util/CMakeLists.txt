@@ -37,6 +37,11 @@ set(dependencies
 
 nav2_package()
 
+# Remove -Werror to allow deprecated API warnings
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wno-error)
+endif()
+
 include_directories(include)
 
 set(library_name ${PROJECT_NAME}_core)

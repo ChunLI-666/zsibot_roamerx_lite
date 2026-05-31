@@ -16,6 +16,7 @@
 #define NAVIGO_WAYPOINT_FOLLOWER__WAYPOINT_FOLLOWER_HPP_
 
 #include "nav2_msgs/action/follow_waypoints.hpp"
+#include "nav2_msgs/msg/missed_waypoint.hpp"
 #include "nav2_msgs/action/navigate_to_pose.hpp"
 #include "nav2_msgs/srv/load_map.hpp"
 #include "nav_msgs/msg/path.hpp"
@@ -268,7 +269,7 @@ namespace navigo_waypoint_follower
         bool                                                                    stop_on_failure_;
         ActionStatus                                                            current_goal_status_;
         int                                                                     loop_rate_;
-        std::vector<int>                                                        failed_ids_;
+        std::vector<nav2_msgs::msg::MissedWaypoint>                             failed_ids_;
 
         // Navigation Interface
         StartNavigation                                  start_navigation_;

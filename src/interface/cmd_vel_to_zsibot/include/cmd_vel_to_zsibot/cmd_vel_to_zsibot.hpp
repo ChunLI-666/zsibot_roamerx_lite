@@ -4,7 +4,9 @@
 #ifndef CMD_VEL_TO_ZSIBOT__CMD_VEL_TO_ZSIBOT_HPP_
 #define CMD_VEL_TO_ZSIBOT__CMD_VEL_TO_ZSIBOT_HPP_
 
+#include <atomic>
 #include <memory>
+#include <mutex>
 #include <string>
 
 #include "rclcpp/rclcpp.hpp"
@@ -52,9 +54,14 @@ protected:
   void enableCallback(const std_msgs::msg::Bool::SharedPtr msg);
 
   /**
-   * @brief Timer callback to send commands at fixed rate
+   * @brief Timer callback to process pending commands and timeouts
    */
-  void timerCallback();
+  void commandTimerCallback();
+
+  /**
+   * @brief Timer callback for low-rate status polling
+   */
+  void statusTimerCallback();
 
   /**
    * @brief Initialize connection to ZsiBot
@@ -64,12 +71,35 @@ protected:
 
   /**
    * @brief Clamp a value between min and max
-   * @param value Input value
-   * @param min_val Minimum value
-   * @param max_val Maximum value
-   * @return Clamped value
    */
   double clamp(double value, double min_val, double max_val);
+
+  /**
+   * @brief Apply velocity limits and SDK minimum command magnitudes
+   */
+  geometry_msgs::msg::Twist normalizeCommand(const geometry_msgs::msg::Twist & cmd);
+
+  /**
+   * @brief Return true if two commands differ enough to resend to the SDK
+   */
+  bool commandsDiffer(
+    const geometry_msgs::msg::Twist & lhs,
+    const geometry_msgs::msg::Twist & rhs) const;
+
+  /**
+   * @brief Return true if the command is zero in all controlled axes
+   */
+  bool isZeroCommand(const geometry_msgs::msg::Twist & cmd) const;
+
+  /**
+   * @brief Send a normalized move command to the SDK
+   */
+  void sendMoveCommand(const geometry_msgs::msg::Twist & cmd, bool force = false);
+
+  /**
+   * @brief Send a zero velocity command immediately if needed
+   */
+  void sendStopCommand(bool force = false);
 
   /**
    * @brief Service callback to make robot stand up
@@ -88,18 +118,19 @@ protected:
 private:
   // Subscriber for velocity commands
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_sub_;
-  
+
   // Subscriber for enable/disable
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr enable_sub_;
-  
+
   // Publisher for connection status
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr connected_pub_;
 
   // Publisher for battery state
   rclcpp::Publisher<sensor_msgs::msg::BatteryState>::SharedPtr battery_pub_;
-  
-  // Timer for sending commands at fixed rate
-  rclcpp::TimerBase::SharedPtr timer_;
+
+  // Timers for command processing and status polling
+  rclcpp::TimerBase::SharedPtr command_timer_;
+  rclcpp::TimerBase::SharedPtr status_timer_;
 
   // Services for robot control
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr stand_up_srv_;
@@ -110,9 +141,11 @@ private:
 
   // Latest velocity command
   geometry_msgs::msg::Twist latest_cmd_;
-  
+  geometry_msgs::msg::Twist last_sent_cmd_;
+
   // Mutex for thread safety
   std::mutex cmd_mutex_;
+  std::mutex sdk_mutex_;
 
   // Parameters
   std::string local_ip_;
@@ -122,17 +155,24 @@ private:
   double max_linear_y_;
   double max_angular_z_;
   double cmd_timeout_;
-  double publish_rate_;
+  double command_check_rate_;
+  double status_rate_;
+  double min_command_interval_;
+  double command_epsilon_;
   bool enabled_;
 
   // Timestamp of last received command
   rclcpp::Time last_cmd_time_;
-  
+  rclcpp::Time last_send_time_;
+  bool has_pending_cmd_;
+  bool has_sent_cmd_;
+  bool robot_stopped_;
+
   // Connection status
   bool connected_;
-  
+
   // Robot standing status - only send move commands when standing
-  bool standing_;
+  std::atomic<bool> standing_;
 };
 
 }  // namespace cmd_vel_to_zsibot

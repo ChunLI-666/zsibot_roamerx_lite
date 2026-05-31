@@ -37,6 +37,14 @@ def generate_launch_description():
     laserscan_output_topic = LaunchConfiguration('laserscan_output_topic')
     odom_output_topic = LaunchConfiguration('odom_output_topic')
 
+    # LiDAR mounting extrinsics (base_link -> livox_frame)
+    lidar_x = LaunchConfiguration('lidar_x')
+    lidar_y = LaunchConfiguration('lidar_y')
+    lidar_z = LaunchConfiguration('lidar_z')
+    lidar_roll = LaunchConfiguration('lidar_roll')
+    lidar_pitch = LaunchConfiguration('lidar_pitch')
+    lidar_yaw = LaunchConfiguration('lidar_yaw')
+
     # LaserScan parameters
     target_frame = LaunchConfiguration('target_frame')
     min_height = LaunchConfiguration('min_height')
@@ -93,6 +101,31 @@ def generate_launch_description():
         default_value='/odom/current_pose',
         description='Output topic for Odometry')
 
+    # LiDAR mounting extrinsics declarations
+    declare_lidar_x_cmd = DeclareLaunchArgument(
+        'lidar_x', default_value='0.0',
+        description='LiDAR X offset from base_link (forward, meters)')
+
+    declare_lidar_y_cmd = DeclareLaunchArgument(
+        'lidar_y', default_value='0.0',
+        description='LiDAR Y offset from base_link (left, meters)')
+
+    declare_lidar_z_cmd = DeclareLaunchArgument(
+        'lidar_z', default_value='0.0',
+        description='LiDAR Z offset from base_link (up, meters)')
+
+    declare_lidar_roll_cmd = DeclareLaunchArgument(
+        'lidar_roll', default_value='0.0',
+        description='LiDAR roll angle (radians)')
+
+    declare_lidar_pitch_cmd = DeclareLaunchArgument(
+        'lidar_pitch', default_value='-0.2618',
+        description='LiDAR pitch angle (radians). -0.2618 rad = -15 deg forward tilt')
+
+    declare_lidar_yaw_cmd = DeclareLaunchArgument(
+        'lidar_yaw', default_value='0.0',
+        description='LiDAR yaw angle (radians)')
+
     declare_target_frame_cmd = DeclareLaunchArgument(
         'target_frame',
         default_value='base_link',
@@ -141,6 +174,13 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'use_sim_time': use_sim_time,
+            # LiDAR extrinsics (base_link -> livox_frame)
+            'lidar_x': lidar_x,
+            'lidar_y': lidar_y,
+            'lidar_z': lidar_z,
+            'lidar_roll': lidar_roll,
+            'lidar_pitch': lidar_pitch,
+            'lidar_yaw': lidar_yaw,
             # TF and Odom
             'enable_tf_bridge': enable_tf_bridge,
             'enable_odom_publisher': enable_odom_publisher,
@@ -178,6 +218,12 @@ def generate_launch_description():
     ld.add_action(declare_pointcloud_output_topic_cmd)
     ld.add_action(declare_laserscan_output_topic_cmd)
     ld.add_action(declare_odom_output_topic_cmd)
+    ld.add_action(declare_lidar_x_cmd)
+    ld.add_action(declare_lidar_y_cmd)
+    ld.add_action(declare_lidar_z_cmd)
+    ld.add_action(declare_lidar_roll_cmd)
+    ld.add_action(declare_lidar_pitch_cmd)
+    ld.add_action(declare_lidar_yaw_cmd)
     ld.add_action(declare_target_frame_cmd)
     ld.add_action(declare_min_height_cmd)
     ld.add_action(declare_max_height_cmd)

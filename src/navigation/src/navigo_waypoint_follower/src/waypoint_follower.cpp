@@ -209,7 +209,7 @@ namespace navigo_waypoint_follower
 
             if (current_goal_status_ == ActionStatus::FAILED)
             {
-                failed_ids_.push_back(goal_index);
+                {nav2_msgs::msg::MissedWaypoint missed; missed.index = goal_index; missed.goal = goal->poses[goal_index]; failed_ids_.push_back(missed);}
 
                 if (stop_on_failure_)
                 {
@@ -239,7 +239,7 @@ namespace navigo_waypoint_follower
                 // if task execution was failed and stop_on_failure_ is on , terminate action
                 if (!is_task_executed && stop_on_failure_)
                 {
-                    failed_ids_.push_back(goal_index);
+                    {nav2_msgs::msg::MissedWaypoint missed; missed.index = goal_index; missed.goal = goal->poses[goal_index]; failed_ids_.push_back(missed);}
                     RCLCPP_WARN(get_logger(),
                         "Failed to execute task at waypoint %i "
                         " stop on failure is enabled."

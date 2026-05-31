@@ -13,7 +13,8 @@
 - 命令超时安全机制（未收到命令时发送零速度）
 - 通过话题启用/禁用功能
 - 发布连接状态
-- 可配置的发送频率（默认 100Hz）
+- 与 `yz_robot_ctrl` 对齐的事件驱动 SDK 命令
+- 低频命令检查和电量/连接状态轮询
 - 启动时自动站立选项
 
 ## 话题
@@ -35,14 +36,17 @@
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `local_ip` | string | "127.0.0.1" | 本地 UDP 通信 IP |
+| `local_ip` | string | "192.168.168.2" | 本地 UDP 通信 IP |
 | `local_port` | int | 43988 | 本地 UDP 端口 |
-| `robot_ip` | string | "192.168.234.1" | ZsiBot 机器人 IP 地址 |
-| `max_linear_x` | double | 2.0 | 最大前后速度 (m/s) |
-| `max_linear_y` | double | 1.0 | 最大横向速度 (m/s) |
-| `max_angular_z` | double | 2.0 | 最大角速度 (rad/s) |
+| `robot_ip` | string | "192.168.168.168" | ZsiBot 机器人 IP 地址 |
+| `max_linear_x` | double | 0.15 | 最大前后速度 (m/s) |
+| `max_linear_y` | double | 0.15 | 最大横向速度 (m/s) |
+| `max_angular_z` | double | 0.25 | 最大角速度 (rad/s) |
 | `cmd_timeout` | double | 0.5 | 命令超时时间（秒） |
-| `publish_rate` | double | 100.0 | 命令发送频率 (Hz) |
+| `command_check_rate` | double | 20.0 | 检查待发送命令和超时状态的频率 (Hz) |
+| `status_rate` | double | 1.0 | 电量/连接状态轮询频率 (Hz) |
+| `min_command_interval` | double | 1.0 | 非零 SDK `move()` 调用的最小间隔 (s) |
+| `command_epsilon` | double | 0.001 | 重新发送 `move()` 所需的速度变化阈值 |
 | `cmd_vel_topic` | string | "cmd_vel" | 输入速度命令话题 |
 | `auto_standup` | bool | false | 启动时自动站立 |
 
@@ -66,15 +70,14 @@ ros2 launch cmd_vel_to_zsibot cmd_vel_to_zsibot.launch.py
 **使用自定义参数：**
 ```bash
 ros2 launch cmd_vel_to_zsibot cmd_vel_to_zsibot.launch.py \
-    robot_ip:=192.168.234.1 \
-    cmd_vel_topic:=/nav2/cmd_vel \
+    robot_ip:=192.168.168.168 \
     auto_standup:=true
 ```
 
 **直接运行可执行文件：**
 ```bash
 ros2 run cmd_vel_to_zsibot cmd_vel_to_zsibot_node \
-    --ros-args -p robot_ip:=192.168.234.1
+    --ros-args -p robot_ip:=192.168.168.168
 ```
 
 ### 配合键盘遥控测试

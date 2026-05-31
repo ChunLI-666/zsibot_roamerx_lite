@@ -30,6 +30,11 @@ find_package(Eigen3 3.3 REQUIRED)
 
 nav2_package()
 
+# Allow deprecated API warnings
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wno-error)
+endif()
+
 add_library(nav2_costmap_2d_core SHARED
   src/array_parser.cpp
   src/costmap_2d.cpp

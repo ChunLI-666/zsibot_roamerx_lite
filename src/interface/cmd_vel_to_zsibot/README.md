@@ -13,7 +13,8 @@ This package provides a bridge between the standard ROS2 navigation stack (which
 - Command timeout safety (sends zero velocity if no command received)
 - Enable/disable functionality via topic
 - Connection status publishing
-- Configurable publish rate (default 100Hz)
+- Event-driven SDK commands aligned with `yz_robot_ctrl`
+- Low-rate command checking and battery/status polling
 - Auto-standup option on startup
 
 ## Topics
@@ -35,14 +36,17 @@ This package provides a bridge between the standard ROS2 navigation stack (which
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `local_ip` | string | "127.0.0.1" | Local IP for UDP communication |
+| `local_ip` | string | "192.168.168.2" | Local IP for UDP communication |
 | `local_port` | int | 43988 | Local UDP port |
-| `robot_ip` | string | "192.168.234.1" | ZsiBot robot IP address |
-| `max_linear_x` | double | 2.0 | Max forward/backward velocity (m/s) |
-| `max_linear_y` | double | 1.0 | Max lateral velocity (m/s) |
-| `max_angular_z` | double | 2.0 | Max angular velocity (rad/s) |
+| `robot_ip` | string | "192.168.168.168" | ZsiBot robot IP address |
+| `max_linear_x` | double | 0.15 | Max forward/backward velocity (m/s) |
+| `max_linear_y` | double | 0.15 | Max lateral velocity (m/s) |
+| `max_angular_z` | double | 0.25 | Max angular velocity (rad/s) |
 | `cmd_timeout` | double | 0.5 | Command timeout in seconds |
-| `publish_rate` | double | 100.0 | Rate to send commands (Hz) |
+| `command_check_rate` | double | 20.0 | Rate to check pending commands and timeout state (Hz) |
+| `status_rate` | double | 1.0 | Battery/connectivity polling rate (Hz) |
+| `min_command_interval` | double | 1.0 | Minimum interval between non-zero SDK `move()` calls (s) |
+| `command_epsilon` | double | 0.001 | Velocity delta required before resending `move()` |
 | `cmd_vel_topic` | string | "cmd_vel" | Input velocity command topic |
 | `auto_standup` | bool | false | Auto stand up on startup |
 
@@ -66,7 +70,7 @@ ros2 launch cmd_vel_to_zsibot cmd_vel_to_zsibot.launch.py
 **With custom parameters:**
 ```bash
 ros2 launch cmd_vel_to_zsibot cmd_vel_to_zsibot.launch.py \
-    robot_ip:=192.168.234.1 \
+    robot_ip:=192.168.168.168 \
     cmd_vel_topic:=/nav2/cmd_vel \
     auto_standup:=true
 ```
@@ -74,7 +78,7 @@ ros2 launch cmd_vel_to_zsibot cmd_vel_to_zsibot.launch.py \
 **Using executable directly:**
 ```bash
 ros2 run cmd_vel_to_zsibot cmd_vel_to_zsibot_node \
-    --ros-args -p robot_ip:=192.168.234.1
+    --ros-args -p robot_ip:=192.168.168.168
 ```
 
 ### Test with teleop

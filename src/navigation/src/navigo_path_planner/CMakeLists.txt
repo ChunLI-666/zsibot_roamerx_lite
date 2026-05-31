@@ -21,6 +21,11 @@ find_package(navigo_core REQUIRED)
 
 nav2_package()
 
+# Allow deprecated API warnings
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wno-error)
+endif()
+
 include_directories(
   include
 )
