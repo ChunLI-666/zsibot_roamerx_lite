@@ -155,7 +155,21 @@ def generate_launch_description():
         }]
     )
 
-    # 2. cmd_vel_to_zsibot (velocity to robot SDK)
+    # 2. Navigation Safety Gate (blocks cmd_vel when localization not NORMAL)
+    nav_safety_gate = Node(
+        package='robot_navigo',
+        executable='nav_safety_gate.py',
+        name='nav_safety_gate',
+        output='screen',
+        parameters=[{
+            'watchdog_timeout_ms': 200,
+            'cmd_vel_input_topic': '/cmd_vel',
+            'cmd_vel_output_topic': '/cmd_vel_safe',
+            'loc_status_topic': '/lightning/loc_status',
+        }]
+    )
+
+    # 3. cmd_vel_to_zsibot (velocity to robot SDK)
     cmd_vel_to_zsibot = Node(
         package='cmd_vel_to_zsibot',
         executable='cmd_vel_to_zsibot_node',
@@ -165,17 +179,17 @@ def generate_launch_description():
             'robot_ip': robot_ip,
             'local_ip': local_ip,
             'local_port': local_port,
-            'cmd_vel_topic': '/cmd_vel',
-            'max_linear_x': 1.5,  # Conservative limits for safety
-            'max_linear_y': 0.8,
-            'max_angular_z': 1.5,
+            'cmd_vel_topic': '/cmd_vel_safe',
+            'max_linear_x': 0.3,
+            'max_linear_y': 0.0,
+            'max_angular_z': 0.5,
             'cmd_timeout': 0.5,
             'publish_rate': 100.0,
             'auto_standup': auto_standup,
         }]
     )
 
-    # 3. Emergency Stop node (optional but recommended)
+    # 4. Emergency Stop node (optional but recommended)
     emergency_stop = Node(
         condition=IfCondition(enable_emergency_stop),
         package='robot_navigo',
@@ -189,7 +203,7 @@ def generate_launch_description():
         prefix='xterm -e',  # Launch in separate terminal for keyboard input
     )
 
-    # 4. Navigation stack (delayed start)
+    # 5. Navigation stack (delayed start)
     nav2_launch_delayed = TimerAction(
         period=nav2_delay,
         actions=[
@@ -227,16 +241,19 @@ def generate_launch_description():
 
     # Start nodes
     ld.add_action(LogInfo(msg='Starting ZsiBot Navigation System...'))
-    ld.add_action(LogInfo(msg='  [1/4] Lightning Bridge'))
+    ld.add_action(LogInfo(msg='  [1/5] Lightning Bridge'))
     ld.add_action(lightning_bridge)
 
-    ld.add_action(LogInfo(msg='  [2/4] cmd_vel_to_zsibot'))
+    ld.add_action(LogInfo(msg='  [2/5] Navigation Safety Gate'))
+    ld.add_action(nav_safety_gate)
+
+    ld.add_action(LogInfo(msg='  [3/5] cmd_vel_to_zsibot'))
     ld.add_action(cmd_vel_to_zsibot)
 
-    ld.add_action(LogInfo(msg='  [3/4] Emergency Stop (if enabled)'))
+    ld.add_action(LogInfo(msg='  [4/5] Emergency Stop (if enabled)'))
     ld.add_action(emergency_stop)
 
-    ld.add_action(LogInfo(msg='  [4/4] Navigo Navigation (delayed)'))
+    ld.add_action(LogInfo(msg='  [5/5] Navigo Navigation (delayed)'))
     ld.add_action(nav2_launch_delayed)
 
     return ld

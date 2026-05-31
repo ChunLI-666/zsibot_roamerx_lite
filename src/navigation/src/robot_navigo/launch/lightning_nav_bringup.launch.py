@@ -115,7 +115,21 @@ def generate_launch_description():
         }]
     )
 
-    # Step 2: Navigation stack (delayed start to wait for TF chain)
+    # Step 2: Navigation Safety Gate (blocks cmd_vel when localization not NORMAL)
+    nav_safety_gate = Node(
+        package='robot_navigo',
+        executable='nav_safety_gate.py',
+        name='nav_safety_gate',
+        output='screen',
+        parameters=[{
+            'watchdog_timeout_ms': 200,
+            'cmd_vel_input_topic': '/cmd_vel',
+            'cmd_vel_output_topic': '/cmd_vel_safe',
+            'loc_status_topic': '/lightning/loc_status',
+        }]
+    )
+
+    # Step 3: Navigation stack (delayed start to wait for TF chain)
     nav2_launch_delayed = TimerAction(
         period=nav2_delay,
         actions=[
@@ -146,8 +160,9 @@ def generate_launch_description():
     ld.add_action(declare_enable_livox_converter_cmd)
     ld.add_action(declare_enable_laserscan_cmd)
 
-    # Start immediately: Lightning Bridge
+    # Start immediately: Lightning Bridge + Safety Gate
     ld.add_action(lightning_bridge)
+    ld.add_action(nav_safety_gate)
 
     # Delayed start: Navigation stack
     ld.add_action(nav2_launch_delayed)

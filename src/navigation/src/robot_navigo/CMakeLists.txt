@@ -217,6 +217,7 @@ ament_target_dependencies(costmap_listener
 install(PROGRAMS
         scripts/emap_publisher.py
         scripts/lightning_bridge.py
+        scripts/nav_safety_gate.py
         scripts/emergency_stop.py
         scripts/emergency_stop_keyboard.py
         DESTINATION lib/${PROJECT_NAME}

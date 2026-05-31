@@ -25,12 +25,12 @@ CmdVelToZsibot::CmdVelToZsibot(const rclcpp::NodeOptions & options)
   this->declare_parameter<std::string>("local_ip", "192.168.168.2");  // RK3588/NanoPC eth0 IP
   this->declare_parameter<int>("local_port", 43988);
   this->declare_parameter<std::string>("robot_ip", "192.168.168.168");  // Robot control board IP
-  this->declare_parameter<double>("max_linear_x", 2.0);
-  this->declare_parameter<double>("max_linear_y", 1.0);
-  this->declare_parameter<double>("max_angular_z", 2.0);
+  this->declare_parameter<double>("max_linear_x", 0.3);
+  this->declare_parameter<double>("max_linear_y", 0.0);
+  this->declare_parameter<double>("max_angular_z", 0.5);
   this->declare_parameter<double>("cmd_timeout", 0.5);
   this->declare_parameter<double>("publish_rate", 100.0);
-  this->declare_parameter<std::string>("cmd_vel_topic", "cmd_vel");
+  this->declare_parameter<std::string>("cmd_vel_topic", "cmd_vel_safe");
   this->declare_parameter<bool>("auto_standup", false);
 
   // Get parameters
