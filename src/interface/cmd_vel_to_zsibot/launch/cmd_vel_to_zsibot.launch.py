@@ -34,6 +34,24 @@ def generate_launch_description():
         default_value='192.168.168.2',
         description='Local IP address for UDP communication'
     )
+
+    declare_output_mode = DeclareLaunchArgument(
+        'output_mode',
+        default_value='udp',
+        description='Command output mode: udp or fake'
+    )
+
+    declare_control_host = DeclareLaunchArgument(
+        'control_host',
+        default_value='127.0.0.1',
+        description='yz-robot-ctrl UDP host'
+    )
+
+    declare_control_port = DeclareLaunchArgument(
+        'control_port',
+        default_value='6000',
+        description='yz-robot-ctrl UDP port'
+    )
     
     declare_cmd_vel_topic = DeclareLaunchArgument(
         'cmd_vel_topic',
@@ -44,7 +62,7 @@ def generate_launch_description():
     declare_auto_standup = DeclareLaunchArgument(
         'auto_standup',
         default_value='false',
-        description='Automatically stand up the robot on startup'
+        description='Ignored for safety; stand up explicitly'
     )
 
     # Create node
@@ -58,6 +76,9 @@ def generate_launch_description():
             {
                 'robot_ip': LaunchConfiguration('robot_ip'),
                 'local_ip': LaunchConfiguration('local_ip'),
+                'output_mode': LaunchConfiguration('output_mode'),
+                'control_host': LaunchConfiguration('control_host'),
+                'control_port': LaunchConfiguration('control_port'),
                 'cmd_vel_topic': LaunchConfiguration('cmd_vel_topic'),
                 'auto_standup': LaunchConfiguration('auto_standup'),
             }
@@ -71,6 +92,9 @@ def generate_launch_description():
         declare_config_file,
         declare_robot_ip,
         declare_local_ip,
+        declare_output_mode,
+        declare_control_host,
+        declare_control_port,
         declare_cmd_vel_topic,
         declare_auto_standup,
         cmd_vel_to_zsibot_node,
