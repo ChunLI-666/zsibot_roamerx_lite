@@ -227,10 +227,10 @@ controller_server:
       vx_std: 0.2
       vy_std: 0.2
       wz_std: 0.4
-      vx_max: 1.5 #0.5
-      vx_min: -1.5 #-0.35
-      vy_max: 0.5 #0.5
-      wz_max: 1.9
+      vx_max: 0.3 #0.5
+      vx_min: -0.2 #-0.35
+      vy_max: 0.3 #0.5
+      wz_max: 0.5
       ax_max: 2.0
       ay_max: 2.0
       ax_min: -2.0
@@ -330,8 +330,8 @@ velocity_optimizer:
     smoothing_frequency: 20.0
     scale_velocities: false
     feedback: "OPEN_LOOP"
-    max_velocity: [3.0, 2.0, 3.0]
-    min_velocity: [-3.0, -2.0, -3.0]
+    max_velocity: [0.3, 0.3, 0.5]
+    min_velocity: [-0.2, -0.2, -0.5]
     deadband_velocity: [0.0, 0.0, 0.0]
     velocity_timeout: 1.0
     max_accel: [1.5, 1.0, 1.5]

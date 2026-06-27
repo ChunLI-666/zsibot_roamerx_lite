@@ -3,7 +3,7 @@
 Emergency Stop Node with Keyboard Control
 
 This node provides:
-1. Emergency stop (SPACE or 's') - immediately publishes zero velocity
+1. Emergency stop (SPACE or 's') - requests nav_safety_gate to output zero velocity
 2. Resume (ENTER or 'r') - allows navigation to resume
 3. Velocity monitoring - shows current cmd_vel
 
@@ -11,7 +11,7 @@ Usage:
     ros2 run robot_navigo emergency_stop.py
 
 Controls:
-    SPACE / s : Emergency STOP (publish zero velocity continuously)
+    SPACE / s : Emergency STOP
     ENTER / r : Resume (stop overriding, let navigation control)
     q         : Quit
 
@@ -28,6 +28,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from geometry_msgs.msg import Twist
+from std_msgs.msg import Bool
 
 
 class EmergencyStop(Node):
@@ -35,10 +36,10 @@ class EmergencyStop(Node):
         super().__init__('emergency_stop')
 
         # Parameters
-        self.declare_parameter('cmd_vel_topic', '/cmd_vel')
+        self.declare_parameter('emergency_stop_topic', '/emergency_stop')
         self.declare_parameter('publish_rate', 50.0)  # Hz
 
-        cmd_vel_topic = self.get_parameter('cmd_vel_topic').value
+        emergency_stop_topic = self.get_parameter('emergency_stop_topic').value
         publish_rate = self.get_parameter('publish_rate').value
 
         # State
@@ -60,14 +61,12 @@ class EmergencyStop(Node):
             qos
         )
 
-        # Publisher for emergency stop
-        self.cmd_vel_pub = self.create_publisher(
-            Twist,
-            cmd_vel_topic,
-            qos
-        )
+        # Publisher for emergency stop state. nav_safety_gate is the only node
+        # allowed to publish final /cmd_vel_safe.
+        self.emergency_stop_pub = self.create_publisher(
+            Bool, emergency_stop_topic, qos)
 
-        # Timer for publishing stop command when active
+        # Timer for publishing stop state periodically.
         self.timer = self.create_timer(1.0 / publish_rate, self.timer_callback)
 
         # Statistics
@@ -80,6 +79,7 @@ class EmergencyStop(Node):
         self.get_logger().info('  SPACE / s : Emergency STOP')
         self.get_logger().info('  ENTER / r : Resume navigation')
         self.get_logger().info('  q         : Quit')
+        self.get_logger().info(f'Publishing emergency stop state to {emergency_stop_topic}')
         self.get_logger().info('=' * 50)
 
     def nav_vel_callback(self, msg: Twist):
@@ -87,16 +87,11 @@ class EmergencyStop(Node):
         self.last_nav_vel = msg
 
     def timer_callback(self):
-        """Publish zero velocity when emergency stop is active."""
+        """Publish emergency stop state."""
+        msg = Bool()
+        msg.data = self.emergency_stop_active
+        self.emergency_stop_pub.publish(msg)
         if self.emergency_stop_active:
-            stop_msg = Twist()
-            stop_msg.linear.x = 0.0
-            stop_msg.linear.y = 0.0
-            stop_msg.linear.z = 0.0
-            stop_msg.angular.x = 0.0
-            stop_msg.angular.y = 0.0
-            stop_msg.angular.z = 0.0
-            self.cmd_vel_pub.publish(stop_msg)
             self.stop_count += 1
 
     def activate_stop(self):
@@ -174,10 +169,11 @@ def main(args=None):
         # Restore terminal settings
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, settings)
 
-        # Send final stop command
+        # Keep the final state visible to nav_safety_gate on shutdown.
         if node.emergency_stop_active:
-            stop_msg = Twist()
-            node.cmd_vel_pub.publish(stop_msg)
+            stop_msg = Bool()
+            stop_msg.data = True
+            node.emergency_stop_pub.publish(stop_msg)
 
         node.destroy_node()
         rclpy.shutdown()

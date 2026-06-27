@@ -6,13 +6,15 @@ Navigation Safety Gate - Blocks cmd_vel when localization is not NORMAL.
 Subscribes:
   /cmd_vel (Twist) - raw velocity from navigation stack
   /lightning/loc_status (UInt8) - localization status (0=UNKNOWN, 1=NORMAL, 2=DEGRADED, 3=LOST)
+  /emergency_stop (Bool) - emergency stop latch/state
 
 Publishes:
   /cmd_vel_safe (Twist) - safe velocity output
   ~/gate_status (UInt8) - current gate policy for debugging
 
 Policy:
-  NORMAL(1): forward cmd_vel as-is
+  NORMAL(1) and emergency_stop=false: forward cmd_vel as-is
+  emergency_stop=true: output zero velocity
   DEGRADED(2)/LOST(3)/UNKNOWN(0): output zero velocity
   Watchdog timeout: output zero velocity if loc_status not received within timeout
 """
@@ -21,7 +23,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from geometry_msgs.msg import Twist
-from std_msgs.msg import UInt8
+from std_msgs.msg import Bool, UInt8
 
 
 class NavSafetyGate(Node):
@@ -30,6 +32,7 @@ class NavSafetyGate(Node):
     LOC_NORMAL = 1
     LOC_DEGRADED = 2
     LOC_LOST = 3
+    GATE_EMERGENCY_STOP = 4
 
     def __init__(self):
         super().__init__('nav_safety_gate')
@@ -38,13 +41,16 @@ class NavSafetyGate(Node):
         self.declare_parameter('cmd_vel_input_topic', '/cmd_vel')
         self.declare_parameter('cmd_vel_output_topic', '/cmd_vel_safe')
         self.declare_parameter('loc_status_topic', '/lightning/loc_status')
+        self.declare_parameter('emergency_stop_topic', '/emergency_stop')
 
         self.watchdog_timeout_sec = self.get_parameter('watchdog_timeout_ms').value / 1000.0
         cmd_vel_in = self.get_parameter('cmd_vel_input_topic').value
         cmd_vel_out = self.get_parameter('cmd_vel_output_topic').value
         loc_status_topic = self.get_parameter('loc_status_topic').value
+        emergency_stop_topic = self.get_parameter('emergency_stop_topic').value
 
         self.current_status = self.LOC_UNKNOWN
+        self.emergency_stop_active = False
         self.last_status_time = None
 
         qos_reliable = QoSProfile(
@@ -59,13 +65,17 @@ class NavSafetyGate(Node):
         self.loc_status_sub = self.create_subscription(
             UInt8, loc_status_topic, self.loc_status_callback, qos_reliable)
 
+        self.emergency_stop_sub = self.create_subscription(
+            Bool, emergency_stop_topic, self.emergency_stop_callback, qos_reliable)
+
         self.cmd_vel_pub = self.create_publisher(Twist, cmd_vel_out, 10)
         self.gate_status_pub = self.create_publisher(UInt8, '~/gate_status', 1)
 
         self.get_logger().info(
             f'NavSafetyGate started: {cmd_vel_in} -> {cmd_vel_out}, '
+            f'emergency_stop={emergency_stop_topic}, '
             f'watchdog={self.watchdog_timeout_sec*1000:.0f}ms, '
-            f'policy: only NORMAL passes, DEGRADED/LOST/UNKNOWN -> zero')
+            f'policy: only NORMAL and no emergency stop passes')
 
     def loc_status_callback(self, msg: UInt8):
         prev = self.current_status
@@ -75,6 +85,15 @@ class NavSafetyGate(Node):
             self.get_logger().info(
                 f'Loc status changed: {prev} -> {self.current_status}')
 
+    def emergency_stop_callback(self, msg: Bool):
+        prev = self.emergency_stop_active
+        self.emergency_stop_active = msg.data
+        if prev != self.emergency_stop_active:
+            self.get_logger().warn(
+                f'Emergency stop changed: {prev} -> {self.emergency_stop_active}')
+            if self.emergency_stop_active:
+                self.publish_zero(self.GATE_EMERGENCY_STOP)
+
     def cmd_vel_callback(self, msg: Twist):
         now = self.get_clock().now()
         safe_cmd = Twist()
@@ -82,7 +101,9 @@ class NavSafetyGate(Node):
 
         timed_out = self._is_timed_out(now)
 
-        if timed_out:
+        if self.emergency_stop_active:
+            gate_status = self.GATE_EMERGENCY_STOP
+        elif timed_out:
             gate_status = self.LOC_LOST
         elif self.current_status == self.LOC_NORMAL:
             safe_cmd = msg
@@ -92,8 +113,13 @@ class NavSafetyGate(Node):
         # else: UNKNOWN or LOST -> zero velocity (already default)
         # DEGRADED also outputs zero velocity for safety
 
-        self.cmd_vel_pub.publish(safe_cmd)
+        self.publish_cmd(safe_cmd, gate_status)
 
+    def publish_zero(self, gate_status: int):
+        self.publish_cmd(Twist(), gate_status)
+
+    def publish_cmd(self, cmd: Twist, gate_status: int):
+        self.cmd_vel_pub.publish(cmd)
         status_msg = UInt8()
         status_msg.data = gate_status
         self.gate_status_pub.publish(status_msg)

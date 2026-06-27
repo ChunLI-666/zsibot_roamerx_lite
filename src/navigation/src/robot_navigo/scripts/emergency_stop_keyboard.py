@@ -30,7 +30,7 @@ import time
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
-from geometry_msgs.msg import Twist
+from std_msgs.msg import Bool
 
 try:
     import evdev
@@ -89,12 +89,12 @@ class EmergencyStopKeyboard(Node):
         super().__init__('emergency_stop_keyboard')
 
         # Parameters
-        self.declare_parameter('cmd_vel_topic', '/cmd_vel')
+        self.declare_parameter('emergency_stop_topic', '/emergency_stop')
         self.declare_parameter('publish_rate', 50.0)
         self.declare_parameter('keyboard_device', '')  # Auto-detect if empty
         self.declare_parameter('any_key_stops', True)  # Any key triggers stop
 
-        cmd_vel_topic = self.get_parameter('cmd_vel_topic').value
+        emergency_stop_topic = self.get_parameter('emergency_stop_topic').value
         publish_rate = self.get_parameter('publish_rate').value
         keyboard_device = self.get_parameter('keyboard_device').value
         self.any_key_stops = self.get_parameter('any_key_stops').value
@@ -112,14 +112,12 @@ class EmergencyStopKeyboard(Node):
             depth=10
         )
 
-        # Publisher for emergency stop
-        self.cmd_vel_pub = self.create_publisher(
-            Twist,
-            cmd_vel_topic,
-            qos
-        )
+        # Publisher for emergency stop state. nav_safety_gate is the only node
+        # allowed to publish final /cmd_vel_safe.
+        self.emergency_stop_pub = self.create_publisher(
+            Bool, emergency_stop_topic, qos)
 
-        # Timer for publishing stop command
+        # Timer for publishing stop state.
         self.timer = self.create_timer(1.0 / publish_rate, self.timer_callback)
 
         # Status timer (print status every second)
@@ -148,6 +146,7 @@ class EmergencyStopKeyboard(Node):
         self.get_logger().info('=' * 60)
         self.get_logger().info(f'  Keyboard: {self.keyboard_path or "NOT FOUND"}')
         self.get_logger().info(f'  Mode: {"Any key = STOP" if self.any_key_stops else "Space = STOP"}')
+        self.get_logger().info(f'  Publishing emergency stop state to: {emergency_stop_topic}')
         self.get_logger().info('  Controls:')
         self.get_logger().info('    ANY KEY  : Emergency STOP')
         self.get_logger().info('    ESC or R : Resume navigation')
@@ -200,10 +199,11 @@ class EmergencyStopKeyboard(Node):
                 time.sleep(1.0)
 
     def timer_callback(self):
-        """Publish zero velocity when emergency stop is active."""
+        """Publish emergency stop state."""
+        stop_msg = Bool()
+        stop_msg.data = self.emergency_stop_active
+        self.emergency_stop_pub.publish(stop_msg)
         if self.emergency_stop_active:
-            stop_msg = Twist()
-            self.cmd_vel_pub.publish(stop_msg)
             self.stop_count += 1
 
     def status_callback(self):
@@ -237,9 +237,10 @@ class EmergencyStopKeyboard(Node):
     def shutdown(self):
         """Clean shutdown."""
         self.running = False
-        # Send final stop
-        stop_msg = Twist()
-        self.cmd_vel_pub.publish(stop_msg)
+        # Keep the final state visible to nav_safety_gate on shutdown.
+        stop_msg = Bool()
+        stop_msg.data = self.emergency_stop_active
+        self.emergency_stop_pub.publish(stop_msg)
 
 
 def main(args=None):

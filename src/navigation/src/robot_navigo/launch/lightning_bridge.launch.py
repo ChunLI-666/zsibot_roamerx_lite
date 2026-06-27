@@ -49,6 +49,8 @@ def generate_launch_description():
     target_frame = LaunchConfiguration('target_frame')
     min_height = LaunchConfiguration('min_height')
     max_height = LaunchConfiguration('max_height')
+    enable_ground_filter = LaunchConfiguration('enable_ground_filter')
+    ground_filter_distance = LaunchConfiguration('ground_filter_distance')
     angle_min = LaunchConfiguration('angle_min')
     angle_max = LaunchConfiguration('angle_max')
     angle_increment = LaunchConfiguration('angle_increment')
@@ -63,13 +65,13 @@ def generate_launch_description():
 
     declare_enable_tf_bridge_cmd = DeclareLaunchArgument(
         'enable_tf_bridge',
-        default_value='true',
-        description='Enable TF bridge (odom->base_link, base_link->livox_frame)')
+        default_value='false',
+        description='Enable legacy TF bridge (odom->base_link)')
 
     declare_enable_odom_publisher_cmd = DeclareLaunchArgument(
         'enable_odom_publisher',
-        default_value='true',
-        description='Enable Odometry publisher (/odom/current_pose)')
+        default_value='false',
+        description='Enable legacy Odometry publisher (/odom/current_pose)')
 
     declare_enable_livox_converter_cmd = DeclareLaunchArgument(
         'enable_livox_converter',
@@ -133,13 +135,23 @@ def generate_launch_description():
 
     declare_min_height_cmd = DeclareLaunchArgument(
         'min_height',
-        default_value='-0.5',
-        description='Minimum height for LaserScan points')
+        default_value='0.05',
+        description='Minimum obstacle height for virtual LaserScan points')
 
     declare_max_height_cmd = DeclareLaunchArgument(
         'max_height',
-        default_value='1.0',
-        description='Maximum height for LaserScan points')
+        default_value='0.45',
+        description='Maximum obstacle height for virtual LaserScan points')
+
+    declare_enable_ground_filter_cmd = DeclareLaunchArgument(
+        'enable_ground_filter',
+        default_value='false',
+        description='Remove fitted ground plane before generating virtual LaserScan')
+
+    declare_ground_filter_distance_cmd = DeclareLaunchArgument(
+        'ground_filter_distance',
+        default_value='0.12',
+        description='Ground plane removal distance threshold in meters')
 
     declare_angle_min_cmd = DeclareLaunchArgument(
         'angle_min',
@@ -196,6 +208,8 @@ def generate_launch_description():
             'target_frame': target_frame,
             'min_height': min_height,
             'max_height': max_height,
+            'enable_ground_filter': enable_ground_filter,
+            'ground_filter_distance': ground_filter_distance,
             'angle_min': angle_min,
             'angle_max': angle_max,
             'angle_increment': angle_increment,
@@ -227,6 +241,8 @@ def generate_launch_description():
     ld.add_action(declare_target_frame_cmd)
     ld.add_action(declare_min_height_cmd)
     ld.add_action(declare_max_height_cmd)
+    ld.add_action(declare_enable_ground_filter_cmd)
+    ld.add_action(declare_ground_filter_distance_cmd)
     ld.add_action(declare_angle_min_cmd)
     ld.add_action(declare_angle_max_cmd)
     ld.add_action(declare_angle_increment_cmd)

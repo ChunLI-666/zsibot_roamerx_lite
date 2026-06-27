@@ -14,7 +14,7 @@ Author: Claude Code
 
 import math
 import struct
-from typing import Optional
+from typing import Optional, Sequence, Tuple
 
 import rclpy
 from rclpy.node import Node
@@ -72,6 +72,25 @@ def rpy_to_rotation_matrix(roll: float, pitch: float, yaw: float):
     )
 
 
+def _fit_plane_from_points(p1, p2, p3):
+    """Fit normalized plane ax + by + cz + d = 0 from three points."""
+    ux, uy, uz = p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2]
+    vx, vy, vz = p3[0] - p1[0], p3[1] - p1[1], p3[2] - p1[2]
+
+    a = uy * vz - uz * vy
+    b = uz * vx - ux * vz
+    c = ux * vy - uy * vx
+    norm = math.sqrt(a * a + b * b + c * c)
+    if norm < 1e-6:
+        return None
+
+    a, b, c = a / norm, b / norm, c / norm
+    if c < 0.0:
+        a, b, c = -a, -b, -c
+    d = -(a * p1[0] + b * p1[1] + c * p1[2])
+    return a, b, c, d
+
+
 class LightningBridge(Node):
     """
     Unified bridge node for Lightning-LM and Nav2 integration.
@@ -89,8 +108,8 @@ class LightningBridge(Node):
         super().__init__('lightning_bridge')
 
         # Declare parameters
-        self.declare_parameter('enable_tf_bridge', True)
-        self.declare_parameter('enable_odom_publisher', True)
+        self.declare_parameter('enable_tf_bridge', False)
+        self.declare_parameter('enable_odom_publisher', False)
         self.declare_parameter('enable_livox_converter', True)
         self.declare_parameter('enable_laserscan', True)
 
@@ -106,8 +125,11 @@ class LightningBridge(Node):
 
         # LaserScan parameters
         self.declare_parameter('target_frame', 'base_link')
-        self.declare_parameter('min_height', -0.5)
-        self.declare_parameter('max_height', 1.0)
+        # Generate a virtual 2D obstacle scan from a horizontal height band.
+        # Keep this above the ground plane; otherwise ground returns become
+        # the closest range in each angle bin and pollute the local costmap.
+        self.declare_parameter('min_height', 0.8)
+        self.declare_parameter('max_height', 0.85)
         self.declare_parameter('angle_min', -math.pi)
         self.declare_parameter('angle_max', math.pi)
         self.declare_parameter('angle_increment', 0.0087)  # ~0.5 degrees
@@ -115,6 +137,21 @@ class LightningBridge(Node):
         self.declare_parameter('range_min', 0.5)
         self.declare_parameter('range_max', 50.0)
         self.declare_parameter('use_inf', True)
+
+        # Optional ground removal before projecting 3D Livox points to a
+        # virtual 2D scan. Keep it disabled in the hot path; correct TF plus a
+        # stable height band should be enough for normal navigation.
+        self.declare_parameter('enable_ground_filter', False)
+        self.declare_parameter('ground_filter_distance', 0.12)
+        self.declare_parameter('ground_filter_max_tilt_deg', 45.0)
+        self.declare_parameter('ground_filter_candidate_min_range', 0.5)
+        self.declare_parameter('ground_filter_candidate_max_range', 12.0)
+        self.declare_parameter('ground_filter_candidate_min_z', -2.0)
+        self.declare_parameter('ground_filter_candidate_max_z', 2.0)
+        self.declare_parameter('ground_filter_max_samples', 2500)
+        self.declare_parameter('ground_filter_min_inliers', 120)
+        self.declare_parameter('ground_filter_min_inlier_ratio', 0.12)
+        self.declare_parameter('ground_filter_iterations', 48)
 
         # Topic parameters
         self.declare_parameter('livox_input_topic', '/livox/lidar')
@@ -136,11 +173,18 @@ class LightningBridge(Node):
         self.lidar_pitch = self.get_parameter('lidar_pitch').value
         self.lidar_yaw = self.get_parameter('lidar_yaw').value
 
-        # Precompute quaternion and rotation matrix for LiDAR extrinsics
+        # lidar_* describes the physical mounting direction. The TF / point
+        # transform uses the inverse rotation so raw Livox points become
+        # horizontal in base_link, matching Foxglove visualization.
+        self.tf_lidar_roll = -self.lidar_roll
+        self.tf_lidar_pitch = -self.lidar_pitch
+        self.tf_lidar_yaw = -self.lidar_yaw
+
+        # Precompute quaternion and rotation matrix for LiDAR->base projection.
         self.lidar_quat = euler_to_quaternion(
-            self.lidar_roll, self.lidar_pitch, self.lidar_yaw)  # (x, y, z, w)
+            self.tf_lidar_roll, self.tf_lidar_pitch, self.tf_lidar_yaw)  # (x, y, z, w)
         self.lidar_rot = rpy_to_rotation_matrix(
-            self.lidar_roll, self.lidar_pitch, self.lidar_yaw)  # flat 9-tuple
+            self.tf_lidar_roll, self.tf_lidar_pitch, self.tf_lidar_yaw)  # flat 9-tuple
 
         self.target_frame = self.get_parameter('target_frame').value
         self.min_height = self.get_parameter('min_height').value
@@ -152,6 +196,22 @@ class LightningBridge(Node):
         self.range_min = self.get_parameter('range_min').value
         self.range_max = self.get_parameter('range_max').value
         self.use_inf = self.get_parameter('use_inf').value
+        self.enable_ground_filter = self.get_parameter('enable_ground_filter').value
+        self.ground_filter_distance = self.get_parameter('ground_filter_distance').value
+        self.ground_filter_max_tilt_deg = self.get_parameter('ground_filter_max_tilt_deg').value
+        self.ground_filter_candidate_min_range = self.get_parameter(
+            'ground_filter_candidate_min_range').value
+        self.ground_filter_candidate_max_range = self.get_parameter(
+            'ground_filter_candidate_max_range').value
+        self.ground_filter_candidate_min_z = self.get_parameter(
+            'ground_filter_candidate_min_z').value
+        self.ground_filter_candidate_max_z = self.get_parameter(
+            'ground_filter_candidate_max_z').value
+        self.ground_filter_max_samples = self.get_parameter('ground_filter_max_samples').value
+        self.ground_filter_min_inliers = self.get_parameter('ground_filter_min_inliers').value
+        self.ground_filter_min_inlier_ratio = self.get_parameter(
+            'ground_filter_min_inlier_ratio').value
+        self.ground_filter_iterations = self.get_parameter('ground_filter_iterations').value
 
         livox_input_topic = self.get_parameter('livox_input_topic').value
         pointcloud_output_topic = self.get_parameter('pointcloud_output_topic').value
@@ -162,8 +222,10 @@ class LightningBridge(Node):
         self.get_logger().info(
             f'LiDAR extrinsics (base_link->livox_frame): '
             f'xyz=[{self.lidar_x:.4f}, {self.lidar_y:.4f}, {self.lidar_z:.4f}], '
-            f'rpy=[{math.degrees(self.lidar_roll):.2f}, {math.degrees(self.lidar_pitch):.2f}, '
-            f'{math.degrees(self.lidar_yaw):.2f}] deg')
+            f'physical_rpy=[{math.degrees(self.lidar_roll):.2f}, {math.degrees(self.lidar_pitch):.2f}, '
+            f'{math.degrees(self.lidar_yaw):.2f}] deg, '
+            f'tf_rpy=[{math.degrees(self.tf_lidar_roll):.2f}, {math.degrees(self.tf_lidar_pitch):.2f}, '
+            f'{math.degrees(self.tf_lidar_yaw):.2f}] deg')
 
         # TF2 buffer and listener for coordinate transforms
         self.tf_buffer = Buffer()
@@ -247,6 +309,10 @@ class LightningBridge(Node):
             self.get_logger().info(f'  height range: [{self.min_height}, {self.max_height}]')
             self.get_logger().info(f'  angle range: [{math.degrees(self.angle_min):.1f}, {math.degrees(self.angle_max):.1f}] deg')
             self.get_logger().info(f'  range: [{self.range_min}, {self.range_max}] m')
+            self.get_logger().info(
+                f'  ground_filter: enabled={self.enable_ground_filter}, '
+                f'distance={self.ground_filter_distance:.2f}m, '
+                f'max_tilt={self.ground_filter_max_tilt_deg:.1f}deg')
 
         # Independent 50Hz timer for odom->base_link TF
         # Decoupled from map->odom so the TF chain never breaks
@@ -255,8 +321,9 @@ class LightningBridge(Node):
             self.create_timer(0.02, self._tf_timer_callback)  # 50 Hz
             self.get_logger().info('TF Bridge: odom->base_link publishing at 50 Hz (independent timer)')
 
-        # Watchdog timer
-        self.create_timer(5.0, self.watchdog_callback)
+        # Watchdog only applies to the legacy TF/Odometry bridge path.
+        if self.enable_tf_bridge or self.enable_odom_publisher:
+            self.create_timer(5.0, self.watchdog_callback)
 
         self.get_logger().info('Lightning Bridge node started')
 
@@ -314,13 +381,12 @@ class LightningBridge(Node):
         This avoids conflicts with other nodes publishing on /tf and ensures
         the LiDAR extrinsics are always available in the TF tree.
 
-        The pitch sign is negated here because lidar_pitch describes the sensor's
-        physical tilt as observed from the outside (negative = forward-down), while
-        the TF convention for base_link->livox_frame needs the inverse rotation
-        to correctly place the sensor frame relative to the horizontal base_link.
+        lidar_pitch describes the physical mounting direction. The published TF
+        uses the inverse rotation so raw Livox points are level in base_link.
+        LaserScan generation uses the same inverse rotation matrix.
         """
-        inv_qx, inv_qy, inv_qz, inv_qw = euler_to_quaternion(
-            -self.lidar_roll, -self.lidar_pitch, -self.lidar_yaw)
+        qx, qy, qz, qw = euler_to_quaternion(
+            self.tf_lidar_roll, self.tf_lidar_pitch, self.tf_lidar_yaw)
 
         base_to_livox = TransformStamped()
         base_to_livox.header.stamp = self.get_clock().now().to_msg()
@@ -329,15 +395,15 @@ class LightningBridge(Node):
         base_to_livox.transform.translation.x = self.lidar_x
         base_to_livox.transform.translation.y = self.lidar_y
         base_to_livox.transform.translation.z = self.lidar_z
-        base_to_livox.transform.rotation.x = inv_qx
-        base_to_livox.transform.rotation.y = inv_qy
-        base_to_livox.transform.rotation.z = inv_qz
-        base_to_livox.transform.rotation.w = inv_qw
+        base_to_livox.transform.rotation.x = qx
+        base_to_livox.transform.rotation.y = qy
+        base_to_livox.transform.rotation.z = qz
+        base_to_livox.transform.rotation.w = qw
 
         self.static_tf_broadcaster.sendTransform(base_to_livox)
         self.get_logger().info(
             f'Published static TF: base_link -> livox_frame '
-            f'(pitch={math.degrees(-self.lidar_pitch):.1f} deg)')
+            f'(pitch={math.degrees(self.tf_lidar_pitch):.1f} deg)')
 
     def _publish_odometry(self, map_to_odom: TransformStamped):
         """Convert map->odom TF to Odometry message for /odom/current_pose.
@@ -432,26 +498,26 @@ class LightningBridge(Node):
         else:
             ranges = [self.range_max] * self.num_ranges
 
-        # Preload rotation matrix elements and translation for speed
-        r00, r01, r02, r10, r11, r12, r20, r21, r22 = self.lidar_rot
-        tx, ty, tz = self.lidar_x, self.lidar_y, self.lidar_z
-
-        # Process each point: transform from livox_frame to base_link
-        # p_base = R * p_livox + t
+        points = []
         for point in msg.points:
-            lx, ly, lz = point.x, point.y, point.z
+            transformed = self._transform_livox_point(point.x, point.y, point.z)
+            if transformed is None:
+                continue
+            points.append(transformed)
 
-            # Transform to base_link (horizontal frame)
-            x = r00 * lx + r01 * ly + r02 * lz + tx
-            y = r10 * lx + r11 * ly + r12 * lz + ty
-            z = r20 * lx + r21 * ly + r22 * lz + tz
+        ground_plane = self._estimate_ground_plane(points)
+        if self.enable_ground_filter and ground_plane is None:
+            self.get_logger().warn(
+                '地面剔除: 本帧没有可靠地面模型，退回仅按高度窗生成LaserScan',
+                throttle_duration_sec=2.0)
 
-            # Height filter (now in horizontal base_link frame)
-            if z < self.min_height or z > self.max_height:
+        for x, y, z, range_val in points:
+            if self._is_ground_point(x, y, z, ground_plane):
                 continue
 
-            # Calculate range and angle in horizontal plane
-            range_val = math.sqrt(x * x + y * y)
+            height = self._height_for_filter(x, y, z, ground_plane)
+            if height < self.min_height or height > self.max_height:
+                continue
 
             # Range filter
             if range_val < self.range_min or range_val > self.range_max:
@@ -511,11 +577,7 @@ class LightningBridge(Node):
         point_step = msg.point_step
         data = msg.data
 
-        # Preload rotation matrix elements and translation for speed
-        r00, r01, r02, r10, r11, r12, r20, r21, r22 = self.lidar_rot
-        tx, ty, tz = self.lidar_x, self.lidar_y, self.lidar_z
-
-        # Process each point: transform from livox_frame to base_link
+        points = []
         for i in range(msg.width * msg.height):
             offset = i * point_step
             lx = struct.unpack_from('f', data, offset + x_offset)[0]
@@ -526,17 +588,24 @@ class LightningBridge(Node):
             if math.isnan(lx) or math.isnan(ly) or math.isnan(lz):
                 continue
 
-            # Transform to base_link (horizontal frame)
-            x = r00 * lx + r01 * ly + r02 * lz + tx
-            y = r10 * lx + r11 * ly + r12 * lz + ty
-            z = r20 * lx + r21 * ly + r22 * lz + tz
+            transformed = self._transform_livox_point(lx, ly, lz)
+            if transformed is None:
+                continue
+            points.append(transformed)
 
-            # Height filter (now in horizontal base_link frame)
-            if z < self.min_height or z > self.max_height:
+        ground_plane = self._estimate_ground_plane(points)
+        if self.enable_ground_filter and ground_plane is None:
+            self.get_logger().warn(
+                '地面剔除: 本帧没有可靠地面模型，退回仅按高度窗生成LaserScan',
+                throttle_duration_sec=2.0)
+
+        for x, y, z, range_val in points:
+            if self._is_ground_point(x, y, z, ground_plane):
                 continue
 
-            # Calculate range and angle in horizontal plane
-            range_val = math.sqrt(x * x + y * y)
+            height = self._height_for_filter(x, y, z, ground_plane)
+            if height < self.min_height or height > self.max_height:
+                continue
 
             # Range filter
             if range_val < self.range_min or range_val > self.range_max:
@@ -569,6 +638,99 @@ class LightningBridge(Node):
         scan.intensities = []
 
         self.laserscan_pub.publish(scan)
+
+    def _transform_livox_point(self, lx: float, ly: float, lz: float):
+        """Transform one point from livox_frame to the scan target frame."""
+        r00, r01, r02, r10, r11, r12, r20, r21, r22 = self.lidar_rot
+        x = r00 * lx + r01 * ly + r02 * lz + self.lidar_x
+        y = r10 * lx + r11 * ly + r12 * lz + self.lidar_y
+        z = r20 * lx + r21 * ly + r22 * lz + self.lidar_z
+        range_val = math.sqrt(x * x + y * y)
+        if not math.isfinite(range_val) or not math.isfinite(z):
+            return None
+        return x, y, z, range_val
+
+    def _estimate_ground_plane(self, points: Sequence[Tuple[float, float, float, float]]):
+        """Estimate the dominant ground plane in the transformed point cloud.
+
+        The transform can carry pitch/height calibration error. A per-frame
+        plane model removes far ground returns before the height band is applied.
+        """
+        if not self.enable_ground_filter:
+            return None
+
+        candidates = [
+            (x, y, z)
+            for x, y, z, r in points
+            if self.ground_filter_candidate_min_range <= r <= self.ground_filter_candidate_max_range
+            and self.ground_filter_candidate_min_z <= z <= self.ground_filter_candidate_max_z
+        ]
+        if len(candidates) < self.ground_filter_min_inliers:
+            return None
+
+        if len(candidates) > self.ground_filter_max_samples:
+            step = max(1, len(candidates) // self.ground_filter_max_samples)
+            candidates = candidates[::step][:self.ground_filter_max_samples]
+
+        min_normal_z = math.cos(math.radians(self.ground_filter_max_tilt_deg))
+        best_plane = None
+        best_inliers = 0
+        n = len(candidates)
+
+        for i in range(max(1, int(self.ground_filter_iterations))):
+            i1 = (17 * i + 3) % n
+            i2 = (37 * i + n // 3 + 11) % n
+            i3 = (61 * i + 2 * n // 3 + 19) % n
+            if i1 == i2 or i1 == i3 or i2 == i3:
+                continue
+
+            plane = _fit_plane_from_points(candidates[i1], candidates[i2], candidates[i3])
+            if plane is None:
+                continue
+
+            a, b, c, d = plane
+            if abs(c) < min_normal_z:
+                continue
+
+            inliers = 0
+            for x, y, z in candidates:
+                if abs(a * x + b * y + c * z + d) <= self.ground_filter_distance:
+                    inliers += 1
+
+            if inliers > best_inliers:
+                best_inliers = inliers
+                best_plane = plane
+
+        if best_plane is None:
+            return None
+
+        inlier_ratio = best_inliers / float(n)
+        if (best_inliers < self.ground_filter_min_inliers or
+                inlier_ratio < self.ground_filter_min_inlier_ratio):
+            return None
+
+        return best_plane
+
+    def _is_ground_point(self, x: float, y: float, z: float, ground_plane) -> bool:
+        if ground_plane is None:
+            return False
+
+        a, b, c, d = ground_plane
+        signed_distance = a * x + b * y + c * z + d
+        return signed_distance <= self.ground_filter_distance
+
+    def _height_for_filter(self, x: float, y: float, z: float, ground_plane) -> float:
+        """Return obstacle height used by the LaserScan height band.
+
+        When ground fitting succeeds, height is measured relative to the fitted
+        ground plane. This prevents far ground from drifting into the band when
+        LiDAR pitch or mounting height is slightly wrong.
+        """
+        if ground_plane is None:
+            return z
+
+        a, b, c, d = ground_plane
+        return a * x + b * y + c * z + d
 
 
 def main(args=None):
