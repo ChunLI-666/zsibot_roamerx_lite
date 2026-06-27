@@ -217,7 +217,7 @@ TEST(CmdVelToZsibotTest, PublishesActualUdpPayloadForNonzeroCmdVel)
   EXPECT_NE(payload->find("\"type\":\"twist\""), std::string::npos);
   EXPECT_NE(payload->find("\"vx\":0.08"), std::string::npos);
   EXPECT_NE(payload->find("\"vy\":0"), std::string::npos);
-  EXPECT_NE(payload->find("\"wz\":0.12"), std::string::npos);
+  EXPECT_NE(payload->find("\"wz\":0.1"), std::string::npos);
 
   auto debug = harness.waitForSentCommand(std::chrono::milliseconds(1000));
   ASSERT_TRUE(debug.has_value());

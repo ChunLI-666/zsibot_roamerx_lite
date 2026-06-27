@@ -69,7 +69,7 @@ CmdVelToZsibot::CmdVelToZsibot(const rclcpp::NodeOptions & options)
   this->declare_parameter<int>("control_port", 6000);
   this->declare_parameter<double>("max_linear_x", 0.15);
   this->declare_parameter<double>("max_linear_y", 0.15);
-  this->declare_parameter<double>("max_angular_z", 0.25);
+  this->declare_parameter<double>("max_angular_z", 0.1);
   this->declare_parameter<double>("cmd_timeout", 0.5);
   this->declare_parameter<double>("command_check_rate", 20.0);
   this->declare_parameter<double>("status_rate", 1.0);
@@ -389,7 +389,7 @@ void CmdVelToZsibot::sendMoveCommand(
     return;
   }
 
-  if (!force && has_sent_cmd_ && !usingUdpOutput() && !commandsDiffer(cmd, last_sent_cmd_)) {
+  if (!force && has_sent_cmd_ && !canEmitCommands() && !commandsDiffer(cmd, last_sent_cmd_)) {
     return;
   }
 

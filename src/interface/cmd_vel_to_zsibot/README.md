@@ -47,7 +47,7 @@ This package provides a bridge between the standard ROS2 navigation stack (which
 | `control_port` | int | 6000 | Local `yz-robot-ctrl` UDP port |
 | `max_linear_x` | double | 0.15 | Max forward/backward velocity (m/s) |
 | `max_linear_y` | double | 0.15 | Max lateral velocity (m/s) |
-| `max_angular_z` | double | 0.25 | Max angular velocity (rad/s) |
+| `max_angular_z` | double | 0.1 | Max angular velocity (rad/s) |
 | `cmd_timeout` | double | 0.5 | Command timeout in seconds |
 | `command_check_rate` | double | 20.0 | Rate to check pending commands and timeout state (Hz) |
 | `status_rate` | double | 1.0 | Battery/connectivity polling rate (Hz) |

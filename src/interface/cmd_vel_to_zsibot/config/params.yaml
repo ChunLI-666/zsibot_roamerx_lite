@@ -19,7 +19,7 @@ cmd_vel_to_zsibot:
     # Velocity limits (m/s and rad/s)
     max_linear_x: 0.15           # Match yz_robot_ctrl MAX_LINEAR_SPEED (m/s)
     max_linear_y: 0.15           # Match yz_robot_ctrl MAX_STRAFE_SPEED (m/s)
-    max_angular_z: 0.25          # Match yz_robot_ctrl MAX_YAW_RATE (rad/s)
+    max_angular_z: 0.1           # Conservative yaw limit for dog navigation (rad/s)
     
     # Timing parameters
     cmd_timeout: 0.5             # Command timeout in seconds (send zero once if no cmd received)
