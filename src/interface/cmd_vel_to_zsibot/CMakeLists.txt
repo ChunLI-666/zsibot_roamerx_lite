@@ -18,35 +18,12 @@ find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
-
-# Determine architecture for zsibot SDK
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-  set(ZSIBOT_SDK_ARCH "aarch64")
-  set(ZSIBOT_SDK_LIB_NAME "mc_sdk_zsl_1_aarch64")
-else()
-  set(ZSIBOT_SDK_ARCH "x86_64")
-  set(ZSIBOT_SDK_LIB_NAME "mc_sdk_zsl_1_x86_64")
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
 endif()
-
-# Set zsibot SDK paths
-set(ZSIBOT_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../zsibot_sdk")
-set(ZSIBOT_SDK_INCLUDE_DIR "${ZSIBOT_SDK_DIR}/include")
-set(ZSIBOT_SDK_LIB_DIR "${ZSIBOT_SDK_DIR}/lib/zsl-1/${ZSIBOT_SDK_ARCH}")
-
-# Check if SDK exists
-if(NOT EXISTS "${ZSIBOT_SDK_INCLUDE_DIR}/zsl-1/highlevel.h")
-  message(FATAL_ERROR "ZsiBot SDK not found at ${ZSIBOT_SDK_INCLUDE_DIR}")
-endif()
-
-# Get absolute path for SDK library directory (for RPATH)
-get_filename_component(ZSIBOT_SDK_LIB_DIR_ABS "${ZSIBOT_SDK_LIB_DIR}" ABSOLUTE)
-
-# Link directories for SDK
-link_directories(${ZSIBOT_SDK_LIB_DIR_ABS})
 
 include_directories(
   include
-  ${ZSIBOT_SDK_INCLUDE_DIR}
 )
 
 set(executable_name cmd_vel_to_zsibot_node)
@@ -69,7 +46,6 @@ ament_target_dependencies(${library_name}
   ${dependencies}
 )
 target_link_libraries(${library_name}
-  ${ZSIBOT_SDK_LIB_DIR}/lib${ZSIBOT_SDK_LIB_NAME}.so
 )
 
 # Main executable
@@ -112,21 +88,18 @@ install(DIRECTORY config/
   DESTINATION share/${PROJECT_NAME}/config
 )
 
-# Find SDK library file
-set(SDK_LIB_FILE "${ZSIBOT_SDK_LIB_DIR_ABS}/lib${ZSIBOT_SDK_LIB_NAME}.so")
-message(STATUS "ZsiBot SDK library: ${SDK_LIB_FILE}")
-
-if(NOT EXISTS "${SDK_LIB_FILE}")
-  message(FATAL_ERROR "ZsiBot SDK library not found: ${SDK_LIB_FILE}")
-endif()
-
-# Install SDK library to lib directory so it can be found at runtime
-install(
-  FILES "${SDK_LIB_FILE}"
-  DESTINATION lib
-)
-
 ament_export_include_directories(include)
 ament_export_libraries(${library_name})
 ament_export_dependencies(${dependencies})
+
+if(BUILD_TESTING)
+  ament_add_gtest(test_cmd_vel_to_zsibot
+    test/test_cmd_vel_to_zsibot.cpp
+  )
+  ament_target_dependencies(test_cmd_vel_to_zsibot
+    ${dependencies}
+  )
+  target_link_libraries(test_cmd_vel_to_zsibot ${library_name})
+endif()
+
 ament_package()

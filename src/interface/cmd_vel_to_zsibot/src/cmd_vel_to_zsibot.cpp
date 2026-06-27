@@ -7,10 +7,47 @@
 #include <cmath>
 #include <functional>
 #include <limits>
+#include <sstream>
 #include <thread>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <sys/socket.h>
 
 using namespace std::chrono_literals;
 using std::placeholders::_1;
+
+namespace
+{
+
+std::string jsonEscape(const std::string & s)
+{
+  std::ostringstream out;
+  for (char ch : s) {
+    switch (ch) {
+      case '\\':
+        out << "\\\\";
+        break;
+      case '"':
+        out << "\\\"";
+        break;
+      case '\n':
+        out << "\\n";
+        break;
+      case '\r':
+        out << "\\r";
+        break;
+      case '\t':
+        out << "\\t";
+        break;
+      default:
+        out << ch;
+        break;
+    }
+  }
+  return out.str();
+}
+
+}  // namespace
 
 namespace cmd_vel_to_zsibot
 {
@@ -19,6 +56,7 @@ CmdVelToZsibot::CmdVelToZsibot(const rclcpp::NodeOptions & options)
 : Node("cmd_vel_to_zsibot", options),
   enabled_(true),
   connected_(false),
+  udp_sock_(-1),
   standing_(false)
 {
   // Declare parameters
@@ -26,13 +64,16 @@ CmdVelToZsibot::CmdVelToZsibot(const rclcpp::NodeOptions & options)
   this->declare_parameter<std::string>("local_ip", "192.168.168.2");  // RK3588/NanoPC eth0 IP
   this->declare_parameter<int>("local_port", 43988);
   this->declare_parameter<std::string>("robot_ip", "192.168.168.168");  // Robot control board IP
+  this->declare_parameter<std::string>("output_mode", "udp");
+  this->declare_parameter<std::string>("control_host", "127.0.0.1");
+  this->declare_parameter<int>("control_port", 6000);
   this->declare_parameter<double>("max_linear_x", 0.15);
   this->declare_parameter<double>("max_linear_y", 0.15);
   this->declare_parameter<double>("max_angular_z", 0.25);
   this->declare_parameter<double>("cmd_timeout", 0.5);
   this->declare_parameter<double>("command_check_rate", 20.0);
   this->declare_parameter<double>("status_rate", 1.0);
-  this->declare_parameter<double>("min_command_interval", 1.0);
+  this->declare_parameter<double>("min_command_interval", 0.1);
   this->declare_parameter<double>("command_epsilon", 1e-3);
   this->declare_parameter<std::string>("cmd_vel_topic", "cmd_vel_safe");
   this->declare_parameter<bool>("auto_standup", false);
@@ -41,6 +82,9 @@ CmdVelToZsibot::CmdVelToZsibot(const rclcpp::NodeOptions & options)
   local_ip_ = this->get_parameter("local_ip").as_string();
   local_port_ = this->get_parameter("local_port").as_int();
   robot_ip_ = this->get_parameter("robot_ip").as_string();
+  output_mode_ = this->get_parameter("output_mode").as_string();
+  control_host_ = this->get_parameter("control_host").as_string();
+  control_port_ = this->get_parameter("control_port").as_int();
   max_linear_x_ = this->get_parameter("max_linear_x").as_double();
   max_linear_y_ = this->get_parameter("max_linear_y").as_double();
   max_angular_z_ = this->get_parameter("max_angular_z").as_double();
@@ -63,8 +107,15 @@ CmdVelToZsibot::CmdVelToZsibot(const rclcpp::NodeOptions & options)
   }
 
   RCLCPP_INFO(this->get_logger(), "Initializing CmdVelToZsibot node");
-  RCLCPP_INFO(this->get_logger(), "  Local IP: %s:%d", local_ip_.c_str(), local_port_);
-  RCLCPP_INFO(this->get_logger(), "  Robot IP: %s", robot_ip_.c_str());
+  RCLCPP_INFO(this->get_logger(), "  Output mode: %s", output_mode_.c_str());
+  if (usingUdpOutput()) {
+    RCLCPP_INFO(this->get_logger(), "  Control UDP: %s:%d", control_host_.c_str(), control_port_);
+  } else if (usingFakeOutput()) {
+    RCLCPP_INFO(this->get_logger(), "  Fake output enabled: commands are only published to debug topics");
+  } else {
+    RCLCPP_INFO(this->get_logger(), "  Local IP: %s:%d", local_ip_.c_str(), local_port_);
+    RCLCPP_INFO(this->get_logger(), "  Robot IP: %s", robot_ip_.c_str());
+  }
   RCLCPP_INFO(this->get_logger(), "  Max velocities: vx=%.2f, vy=%.2f, wz=%.2f",
     max_linear_x_, max_linear_y_, max_angular_z_);
   RCLCPP_INFO(this->get_logger(), "  Cmd timeout: %.2f s", cmd_timeout_);
@@ -79,6 +130,7 @@ CmdVelToZsibot::CmdVelToZsibot(const rclcpp::NodeOptions & options)
   latest_cmd_.angular.x = 0.0;
   latest_cmd_.angular.y = 0.0;
   latest_cmd_.angular.z = 0.0;
+  latest_input_cmd_ = latest_cmd_;
   last_sent_cmd_ = latest_cmd_;
 
   // Initialize last command time
@@ -88,22 +140,23 @@ CmdVelToZsibot::CmdVelToZsibot(const rclcpp::NodeOptions & options)
   has_sent_cmd_ = false;
   robot_stopped_ = true;
 
-  // Initialize ZsiBot SDK
-  if (!initializeRobot()) {
-    RCLCPP_ERROR(this->get_logger(), "Failed to initialize robot connection");
+  if (usingFakeOutput()) {
+    connected_ = true;
+    RCLCPP_INFO(this->get_logger(), "Fake command output ready");
+  } else if (!usingUdpOutput()) {
+    RCLCPP_ERROR(
+      this->get_logger(),
+      "Unsupported output_mode '%s'. SDK direct control is disabled; use output_mode=udp or fake.",
+      output_mode_.c_str());
+  } else if (!initializeUdpClient()) {
+    RCLCPP_ERROR(this->get_logger(), "Failed to initialize UDP command client");
   }
 
   // Auto standup if configured
-  if (auto_standup && connected_) {
-    RCLCPP_INFO(this->get_logger(), "Auto standing up robot...");
-    {
-      std::lock_guard<std::mutex> lock(sdk_mutex_);
-      highlevel_->standUp();
-    }
-    // Wait for standup to complete before allowing move commands
-    std::this_thread::sleep_for(3000ms);
-    standing_ = true;
-    RCLCPP_INFO(this->get_logger(), "Robot stood up, ready for commands");
+  if (auto_standup) {
+    RCLCPP_WARN(
+      this->get_logger(),
+      "auto_standup is disabled for safety; stand up explicitly via web control or ~/stand_up");
   }
 
   // Create subscribers
@@ -123,6 +176,10 @@ CmdVelToZsibot::CmdVelToZsibot(const rclcpp::NodeOptions & options)
   // Create publisher for battery state
   battery_pub_ = this->create_publisher<sensor_msgs::msg::BatteryState>(
     "/battery/state", rclcpp::QoS(10).reliable());
+
+  // Create publisher for outgoing command debug
+  sent_command_pub_ = this->create_publisher<std_msgs::msg::String>("~/sent_command", 10);
+  debug_command_pub_ = this->create_publisher<std_msgs::msg::String>("~/debug_command", 10);
 
   // Match yz_robot_ctrl semantics: do not stream move() continuously.
   double command_period_ms = 1000.0 / command_check_rate_;
@@ -151,40 +208,40 @@ CmdVelToZsibot::CmdVelToZsibot(const rclcpp::NodeOptions & options)
 CmdVelToZsibot::~CmdVelToZsibot()
 {
   // Send zero velocity before shutdown
-  if (highlevel_ && connected_) {
+  if (connected_) {
     RCLCPP_INFO(this->get_logger(), "Sending zero velocity before shutdown");
-    sendStopCommand(true);
+    sendStopCommand(true, "shutdown");
+  }
+  if (udp_sock_ >= 0) {
+    close(udp_sock_);
+    udp_sock_ = -1;
   }
 }
 
-bool CmdVelToZsibot::initializeRobot()
+bool CmdVelToZsibot::initializeUdpClient()
 {
-  try {
-    highlevel_ = std::make_unique<mc_sdk::zsl_1::HighLevel>();
-
-    RCLCPP_INFO(this->get_logger(), "Initializing robot connection...");
-    highlevel_->initRobot(local_ip_, local_port_, robot_ip_);
-
-    // Wait for connection to establish (yz_robot_ctrl uses 500ms)
-    std::this_thread::sleep_for(500ms);
-
-    // Test connection by actually communicating (like yz_robot_ctrl does)
-    // Use getBatteryPower() instead of checkConnect() as it's more reliable
-    try {
-      uint32_t battery = highlevel_->getBatteryPower();
-      connected_ = true;
-      RCLCPP_INFO(this->get_logger(), "Successfully connected to ZsiBot at %s (Battery: %u%%)",
-                  robot_ip_.c_str(), battery);
-    } catch (...) {
-      connected_ = false;
-      RCLCPP_WARN(this->get_logger(), "Connection test failed - robot may not be responding");
-    }
-
-    return true;
-  } catch (const std::exception & e) {
-    RCLCPP_ERROR(this->get_logger(), "Exception during robot initialization: %s", e.what());
+  udp_sock_ = socket(AF_INET, SOCK_DGRAM, 0);
+  if (udp_sock_ < 0) {
+    RCLCPP_ERROR(this->get_logger(), "Failed to create UDP socket");
+    connected_ = false;
     return false;
   }
+
+  udp_addr_ = {};
+  udp_addr_.sin_family = AF_INET;
+  udp_addr_.sin_port = htons(static_cast<uint16_t>(control_port_));
+  if (inet_pton(AF_INET, control_host_.c_str(), &udp_addr_.sin_addr) != 1) {
+    RCLCPP_ERROR(this->get_logger(), "Invalid control_host: %s", control_host_.c_str());
+    close(udp_sock_);
+    udp_sock_ = -1;
+    connected_ = false;
+    return false;
+  }
+
+  connected_ = true;
+  RCLCPP_INFO(this->get_logger(), "UDP command client ready for yz-robot-ctrl at %s:%d",
+              control_host_.c_str(), control_port_);
+  return true;
 }
 
 void CmdVelToZsibot::cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg)
@@ -192,12 +249,13 @@ void CmdVelToZsibot::cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr m
   {
     std::lock_guard<std::mutex> lock(cmd_mutex_);
     latest_cmd_ = *msg;
+    latest_input_cmd_ = *msg;
     last_cmd_time_ = this->now();
     has_pending_cmd_ = true;
   }
 
   if (isZeroCommand(normalizeCommand(*msg))) {
-    sendStopCommand(false);
+    sendStopCommand(false, "cmd_vel_zero");
   }
 }
 
@@ -207,48 +265,13 @@ void CmdVelToZsibot::enableCallback(const std_msgs::msg::Bool::SharedPtr msg)
   RCLCPP_INFO(this->get_logger(), "Bridge %s", enabled_ ? "enabled" : "disabled");
 
   // If disabled, send zero velocity
-  if (!enabled_ && highlevel_ && connected_) {
-    sendStopCommand(true);
+  if (!enabled_ && connected_) {
+    sendStopCommand(true, "disabled");
   }
 }
 
 void CmdVelToZsibot::statusTimerCallback()
 {
-  if (!highlevel_) {
-    return;
-  }
-
-  try {
-    uint32_t battery = 0;
-    {
-      std::lock_guard<std::mutex> lock(sdk_mutex_);
-      battery = highlevel_->getBatteryPower();
-    }
-    if (!connected_) {
-      connected_ = true;
-      RCLCPP_INFO(this->get_logger(), "Connection restored (Battery: %u%%)", battery);
-    }
-
-    auto battery_msg = sensor_msgs::msg::BatteryState();
-    battery_msg.header.stamp = this->now();
-    battery_msg.header.frame_id = "base_link";
-    battery_msg.percentage = static_cast<float>(battery) / 100.0f;
-    battery_msg.voltage = std::numeric_limits<float>::quiet_NaN();
-    battery_msg.current = std::numeric_limits<float>::quiet_NaN();
-    battery_msg.temperature = std::numeric_limits<float>::quiet_NaN();
-    battery_msg.power_supply_status =
-      sensor_msgs::msg::BatteryState::POWER_SUPPLY_STATUS_DISCHARGING;
-    battery_msg.power_supply_technology =
-      sensor_msgs::msg::BatteryState::POWER_SUPPLY_TECHNOLOGY_LION;
-    battery_msg.present = true;
-    battery_pub_->publish(battery_msg);
-  } catch (...) {
-    if (connected_) {
-      connected_ = false;
-      RCLCPP_WARN(this->get_logger(), "Connection lost");
-    }
-  }
-
   auto connected_msg = std_msgs::msg::Bool();
   connected_msg.data = connected_;
   connected_pub_->publish(connected_msg);
@@ -260,15 +283,14 @@ void CmdVelToZsibot::commandTimerCallback()
     return;
   }
 
-  // Only send move commands when robot is standing
-  if (!standing_) {
+  if (!canEmitCommands()) {
     return;
   }
 
   double time_since_cmd = (this->now() - last_cmd_time_).seconds();
 
   if (time_since_cmd > cmd_timeout_) {
-    sendStopCommand(false);
+    sendStopCommand(false, "cmd_timeout");
     return;
   }
 
@@ -285,7 +307,7 @@ void CmdVelToZsibot::commandTimerCallback()
     return;
   }
 
-  sendMoveCommand(normalizeCommand(cmd));
+  sendMoveCommand(normalizeCommand(cmd), false, "cmd_vel");
 }
 
 double CmdVelToZsibot::clamp(double value, double min_val, double max_val)
@@ -302,6 +324,16 @@ geometry_msgs::msg::Twist CmdVelToZsibot::normalizeCommand(
   normalized.linear.x = clamp(cmd.linear.x, -max_linear_x_, max_linear_x_);
   normalized.linear.y = clamp(cmd.linear.y, -max_linear_y_, max_linear_y_);
   normalized.angular.z = clamp(cmd.angular.z, -max_angular_z_, max_angular_z_);
+
+  if (std::abs(normalized.linear.x) <= command_epsilon_) {
+    normalized.linear.x = 0.0;
+  }
+  if (std::abs(normalized.linear.y) <= command_epsilon_) {
+    normalized.linear.y = 0.0;
+  }
+  if (std::abs(normalized.angular.z) <= command_epsilon_) {
+    normalized.angular.z = 0.0;
+  }
 
   // Same minimums used by yz_robot_ctrl's RobotController::move().
   constexpr double MIN_VX = 0.05;
@@ -337,13 +369,14 @@ bool CmdVelToZsibot::isZeroCommand(const geometry_msgs::msg::Twist & cmd) const
          std::abs(cmd.angular.z) <= command_epsilon_;
 }
 
-void CmdVelToZsibot::sendMoveCommand(const geometry_msgs::msg::Twist & cmd, bool force)
+void CmdVelToZsibot::sendMoveCommand(
+  const geometry_msgs::msg::Twist & cmd,
+  bool force,
+  const std::string & reason)
 {
-  if (!highlevel_ || !connected_) {
+  if (!connected_) {
     return;
   }
-
-  std::lock_guard<std::mutex> sdk_lock(sdk_mutex_);
 
   const bool zero = isZeroCommand(cmd);
   const double since_last_send = (this->now() - last_send_time_).seconds();
@@ -356,14 +389,21 @@ void CmdVelToZsibot::sendMoveCommand(const geometry_msgs::msg::Twist & cmd, bool
     return;
   }
 
-  if (!force && has_sent_cmd_ && !commandsDiffer(cmd, last_sent_cmd_)) {
+  if (!force && has_sent_cmd_ && !usingUdpOutput() && !commandsDiffer(cmd, last_sent_cmd_)) {
     return;
   }
 
-  highlevel_->move(
-    static_cast<float>(cmd.linear.x),
-    static_cast<float>(cmd.linear.y),
-    static_cast<float>(cmd.angular.z));
+  if (!canEmitCommands()) {
+    return;
+  }
+
+  std::ostringstream payload;
+  payload << "{\"type\":\"twist\",\"vx\":" << cmd.linear.x
+          << ",\"vy\":" << cmd.linear.y
+          << ",\"wz\":" << cmd.angular.z << "}";
+  if (!sendUdpPayload(payload.str(), reason, &cmd)) {
+    return;
+  }
 
   last_sent_cmd_ = cmd;
   last_send_time_ = this->now();
@@ -371,26 +411,101 @@ void CmdVelToZsibot::sendMoveCommand(const geometry_msgs::msg::Twist & cmd, bool
   robot_stopped_ = zero;
 }
 
-void CmdVelToZsibot::sendStopCommand(bool force)
+void CmdVelToZsibot::sendStopCommand(bool force, const std::string & reason)
 {
   geometry_msgs::msg::Twist stop_cmd;
-  sendMoveCommand(stop_cmd, force);
+  sendMoveCommand(stop_cmd, force, reason);
+}
+
+bool CmdVelToZsibot::sendUdpPayload(
+  const std::string & payload,
+  const std::string & reason,
+  const geometry_msgs::msg::Twist * normalized_cmd)
+{
+  bool ok = false;
+  const bool fake = usingFakeOutput();
+  if (fake) {
+    ok = true;
+  } else if (udp_sock_ >= 0) {
+    ssize_t sent = sendto(
+      udp_sock_, payload.data(), payload.size(), 0,
+      reinterpret_cast<struct sockaddr *>(&udp_addr_), sizeof(udp_addr_));
+    ok = sent == static_cast<ssize_t>(payload.size());
+  }
+
+  geometry_msgs::msg::Twist input_cmd;
+  {
+    std::lock_guard<std::mutex> lock(cmd_mutex_);
+    input_cmd = latest_input_cmd_;
+  }
+
+  std::ostringstream debug;
+  debug << "{\"reason\":\"" << reason << "\",\"send_ok\":" << (ok ? "true" : "false")
+        << ",\"fake\":" << (fake ? "true" : "false")
+        << ",\"payload\":\"" << jsonEscape(payload) << "\""
+        << ",\"input\":{\"vx\":" << input_cmd.linear.x
+        << ",\"vy\":" << input_cmd.linear.y
+        << ",\"wz\":" << input_cmd.angular.z << "}";
+  if (normalized_cmd != nullptr) {
+    debug << ",\"normalized\":{\"vx\":" << normalized_cmd->linear.x
+          << ",\"vy\":" << normalized_cmd->linear.y
+          << ",\"wz\":" << normalized_cmd->angular.z << "}";
+  }
+  debug << "}";
+
+  if (debug_command_pub_) {
+    auto msg = std_msgs::msg::String();
+    msg.data = debug.str();
+    debug_command_pub_->publish(msg);
+  }
+
+  if (!ok) {
+    RCLCPP_WARN_THROTTLE(
+      this->get_logger(), *this->get_clock(), 2000,
+      "Failed to send UDP command to %s:%d", control_host_.c_str(), control_port_);
+  } else if (sent_command_pub_) {
+    auto msg = std_msgs::msg::String();
+    msg.data = payload;
+    sent_command_pub_->publish(msg);
+  }
+  return ok;
+}
+
+bool CmdVelToZsibot::usingUdpOutput() const
+{
+  return output_mode_ == "udp";
+}
+
+bool CmdVelToZsibot::canEmitCommands() const
+{
+  return usingUdpOutput() || usingFakeOutput();
+}
+
+bool CmdVelToZsibot::usingFakeOutput() const
+{
+  return output_mode_ == "fake";
 }
 
 void CmdVelToZsibot::standUpCallback(
   const std::shared_ptr<std_srvs::srv::Trigger::Request> /*request*/,
   std::shared_ptr<std_srvs::srv::Trigger::Response> response)
 {
-  if (!highlevel_ || !connected_) {
+  if (!connected_) {
     response->success = false;
     response->message = "Robot not connected";
     return;
   }
 
   RCLCPP_INFO(this->get_logger(), "Standing up robot...");
-  {
-    std::lock_guard<std::mutex> lock(sdk_mutex_);
-    highlevel_->standUp();
+  if (!canEmitCommands()) {
+    response->success = false;
+    response->message = "SDK direct control is disabled";
+    return;
+  }
+  if (!sendUdpPayload("c", "stand_up")) {
+    response->success = false;
+    response->message = "Failed to send stand-up command";
+    return;
   }
 
   // Wait for standup to complete
@@ -406,7 +521,7 @@ void CmdVelToZsibot::lieDownCallback(
   const std::shared_ptr<std_srvs::srv::Trigger::Request> /*request*/,
   std::shared_ptr<std_srvs::srv::Trigger::Response> response)
 {
-  if (!highlevel_ || !connected_) {
+  if (!connected_) {
     response->success = false;
     response->message = "Robot not connected";
     return;
@@ -418,11 +533,17 @@ void CmdVelToZsibot::lieDownCallback(
   standing_ = false;
 
   // Stop first, then lie down (like yz_robot_ctrl gracefulShutdown)
-  sendStopCommand(true);
+  sendStopCommand(true, "lie_down_stop");
   std::this_thread::sleep_for(500ms);
-  {
-    std::lock_guard<std::mutex> lock(sdk_mutex_);
-    highlevel_->lieDown();
+  if (!canEmitCommands()) {
+    response->success = false;
+    response->message = "SDK direct control is disabled";
+    return;
+  }
+  if (!sendUdpPayload("x", "lie_down")) {
+    response->success = false;
+    response->message = "Failed to send lie-down command";
+    return;
   }
 
   // Wait for lie down to complete

@@ -8,23 +8,24 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <netinet/in.h>
 
 #include "rclcpp/rclcpp.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "sensor_msgs/msg/battery_state.hpp"
 #include "std_msgs/msg/bool.hpp"
+#include "std_msgs/msg/string.hpp"
 #include "std_srvs/srv/trigger.hpp"
-#include "zsl-1/highlevel.h"
 
 namespace cmd_vel_to_zsibot
 {
 
 /**
  * @class CmdVelToZsibot
- * @brief ROS2 node that converts geometry_msgs/Twist commands to ZsiBot SDK calls
+ * @brief ROS2 node that converts geometry_msgs/Twist commands to yz-robot-ctrl UDP payloads
  *
- * This node subscribes to /cmd_vel topic and forwards the velocity commands
- * to the ZsiBot robot using the mc_sdk HighLevel interface.
+ * This node subscribes to /cmd_vel and forwards normalized velocity commands
+ * to the local yz-robot-ctrl service, which owns the ZsiBot SDK connection.
  */
 class CmdVelToZsibot : public rclcpp::Node
 {
@@ -64,10 +65,9 @@ protected:
   void statusTimerCallback();
 
   /**
-   * @brief Initialize connection to ZsiBot
-   * @return true if connection successful
+   * @brief Initialize the local UDP command client.
    */
-  bool initializeRobot();
+  bool initializeUdpClient();
 
   /**
    * @brief Clamp a value between min and max
@@ -94,12 +94,38 @@ protected:
   /**
    * @brief Send a normalized move command to the SDK
    */
-  void sendMoveCommand(const geometry_msgs::msg::Twist & cmd, bool force = false);
+  void sendMoveCommand(
+    const geometry_msgs::msg::Twist & cmd,
+    bool force = false,
+    const std::string & reason = "cmd_vel");
 
   /**
    * @brief Send a zero velocity command immediately if needed
    */
-  void sendStopCommand(bool force = false);
+  void sendStopCommand(bool force = false, const std::string & reason = "stop");
+
+  /**
+   * @brief Send a raw command payload to the configured UDP endpoint.
+   */
+  bool sendUdpPayload(
+    const std::string & payload,
+    const std::string & reason,
+    const geometry_msgs::msg::Twist * normalized_cmd = nullptr);
+
+  /**
+   * @brief Return true when commands should be sent through yz-robot-ctrl UDP.
+   */
+  bool usingUdpOutput() const;
+
+  /**
+   * @brief Return true when commands should be converted and emitted.
+   */
+  bool canEmitCommands() const;
+
+  /**
+   * @brief Return true when commands should only be published to debug topics.
+   */
+  bool usingFakeOutput() const;
 
   /**
    * @brief Service callback to make robot stand up
@@ -128,6 +154,12 @@ private:
   // Publisher for battery state
   rclcpp::Publisher<sensor_msgs::msg::BatteryState>::SharedPtr battery_pub_;
 
+  // Publisher for debug visibility into actual outgoing UDP payloads
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr sent_command_pub_;
+
+  // Publisher for full command conversion debug records
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr debug_command_pub_;
+
   // Timers for command processing and status polling
   rclcpp::TimerBase::SharedPtr command_timer_;
   rclcpp::TimerBase::SharedPtr status_timer_;
@@ -136,21 +168,21 @@ private:
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr stand_up_srv_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr lie_down_srv_;
 
-  // ZsiBot SDK interface
-  std::unique_ptr<mc_sdk::zsl_1::HighLevel> highlevel_;
-
   // Latest velocity command
   geometry_msgs::msg::Twist latest_cmd_;
+  geometry_msgs::msg::Twist latest_input_cmd_;
   geometry_msgs::msg::Twist last_sent_cmd_;
 
   // Mutex for thread safety
   std::mutex cmd_mutex_;
-  std::mutex sdk_mutex_;
 
   // Parameters
   std::string local_ip_;
   int local_port_;
   std::string robot_ip_;
+  std::string output_mode_;
+  std::string control_host_;
+  int control_port_;
   double max_linear_x_;
   double max_linear_y_;
   double max_angular_z_;
@@ -170,6 +202,10 @@ private:
 
   // Connection status
   bool connected_;
+
+  // UDP client for yz-robot-ctrl local command ingress
+  int udp_sock_;
+  struct sockaddr_in udp_addr_;
 
   // Robot standing status - only send move commands when standing
   std::atomic<bool> standing_;

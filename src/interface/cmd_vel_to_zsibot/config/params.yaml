@@ -12,6 +12,9 @@ cmd_vel_to_zsibot:
     local_ip: "192.168.168.2"    # RK3588/NanoPC eth0 IP
     local_port: 43988            # SDK port
     robot_ip: "192.168.168.168"  # Robot control board IP
+    output_mode: "udp"           # udp: send to yz-robot-ctrl; sdk: legacy direct SDK control
+    control_host: "127.0.0.1"    # yz-robot-ctrl local UDP ingress
+    control_port: 6000           # yz-robot-ctrl UdpControl port
     
     # Velocity limits (m/s and rad/s)
     max_linear_x: 0.15           # Match yz_robot_ctrl MAX_LINEAR_SPEED (m/s)
@@ -22,11 +25,11 @@ cmd_vel_to_zsibot:
     cmd_timeout: 0.5             # Command timeout in seconds (send zero once if no cmd received)
     command_check_rate: 20.0     # Rate to check pending cmd_vel and timeout state (Hz)
     status_rate: 1.0             # Battery/connectivity polling rate (Hz)
-    min_command_interval: 1.0    # Minimum interval between non-zero SDK move() calls (s)
+    min_command_interval: 0.1    # Non-zero command refresh interval; must be below yz-robot-ctrl watchdog
     command_epsilon: 0.001       # Velocity delta required before resending move()
     
     # Topic configuration
     cmd_vel_topic: "cmd_vel"     # Input velocity command topic
     
     # Robot behavior
-    auto_standup: true          # Automatically stand up robot on node startup
+    auto_standup: false         # Disabled by default; stand up must be explicit
