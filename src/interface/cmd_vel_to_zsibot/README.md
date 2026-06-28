@@ -32,8 +32,8 @@ This package provides a bridge between the standard ROS2 navigation stack (which
 | Topic | Type | Description |
 |-------|------|-------------|
 | `~/connected` | `std_msgs/Bool` | Robot connection status |
-| `~/sent_command` | `std_msgs/String` | Actual UDP payload sent to `yz-robot-ctrl` |
-| `~/debug_command` | `std_msgs/String` | JSON debug record with reason, input cmd_vel, normalized command, payload, and send result |
+| `~/sent_command` | `robots_dog_msgs/CmdVelToZsibotDebug` | Actual command record sent to `yz-robot-ctrl` |
+| `~/debug_command` | `robots_dog_msgs/CmdVelToZsibotDebug` | Structured debug record with reason, input cmd_vel, normalized command, payload, and send result |
 
 ## Parameters
 
@@ -44,7 +44,7 @@ This package provides a bridge between the standard ROS2 navigation stack (which
 | `robot_ip` | string | "192.168.168.168" | ZsiBot robot IP address |
 | `output_mode` | string | "udp" | `udp` sends to `yz-robot-ctrl`; `fake` only publishes debug topics; SDK direct control is disabled |
 | `control_host` | string | "127.0.0.1" | Local `yz-robot-ctrl` UDP host |
-| `control_port` | int | 6000 | Local `yz-robot-ctrl` UDP port |
+| `control_port` | int | 6002 | Local `yz-robot-ctrl` algorithm UDP port |
 | `max_linear_x` | double | 0.15 | Max forward/backward velocity (m/s) |
 | `max_linear_y` | double | 0.15 | Max lateral velocity (m/s) |
 | `max_angular_z` | double | 0.1 | Max angular velocity (rad/s) |

@@ -15,7 +15,7 @@
 #include "cmd_vel_to_zsibot/cmd_vel_to_zsibot.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "rclcpp/rclcpp.hpp"
-#include "std_msgs/msg/string.hpp"
+#include "robots_dog_msgs/msg/cmd_vel_to_zsibot_debug.hpp"
 
 namespace
 {
@@ -98,15 +98,15 @@ public:
     test_node_ = std::make_shared<rclcpp::Node>("cmd_vel_to_zsibot_test");
 
     cmd_pub_ = test_node_->create_publisher<geometry_msgs::msg::Twist>("cmd_vel_safe", 10);
-    sent_sub_ = test_node_->create_subscription<std_msgs::msg::String>(
+    sent_sub_ = test_node_->create_subscription<robots_dog_msgs::msg::CmdVelToZsibotDebug>(
       "/cmd_vel_to_zsibot/sent_command", 10,
-      [this](const std_msgs::msg::String::SharedPtr msg) {
-        sent_commands_.push_back(msg->data);
+      [this](const robots_dog_msgs::msg::CmdVelToZsibotDebug::SharedPtr msg) {
+        sent_commands_.push_back(*msg);
       });
-    debug_sub_ = test_node_->create_subscription<std_msgs::msg::String>(
+    debug_sub_ = test_node_->create_subscription<robots_dog_msgs::msg::CmdVelToZsibotDebug>(
       "/cmd_vel_to_zsibot/debug_command", 10,
-      [this](const std_msgs::msg::String::SharedPtr msg) {
-        debug_commands_.push_back(msg->data);
+      [this](const robots_dog_msgs::msg::CmdVelToZsibotDebug::SharedPtr msg) {
+        debug_commands_.push_back(*msg);
       });
 
     exec_.add_node(bridge_);
@@ -135,7 +135,8 @@ public:
     cmd_pub_->publish(msg);
   }
 
-  std::optional<std::string> waitForSentCommand(std::chrono::milliseconds timeout)
+  std::optional<robots_dog_msgs::msg::CmdVelToZsibotDebug> waitForSentCommand(
+    std::chrono::milliseconds timeout)
   {
     auto deadline = std::chrono::steady_clock::now() + timeout;
     while (std::chrono::steady_clock::now() < deadline) {
@@ -147,7 +148,8 @@ public:
     return std::nullopt;
   }
 
-  std::optional<std::string> waitForDebugCommand(std::chrono::milliseconds timeout)
+  std::optional<robots_dog_msgs::msg::CmdVelToZsibotDebug> waitForDebugCommand(
+    std::chrono::milliseconds timeout)
   {
     auto deadline = std::chrono::steady_clock::now() + timeout;
     while (std::chrono::steady_clock::now() < deadline) {
@@ -166,10 +168,10 @@ private:
   std::shared_ptr<cmd_vel_to_zsibot::CmdVelToZsibot> bridge_;
   std::shared_ptr<rclcpp::Node> test_node_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
-  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sent_sub_;
-  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr debug_sub_;
-  std::vector<std::string> sent_commands_;
-  std::vector<std::string> debug_commands_;
+  rclcpp::Subscription<robots_dog_msgs::msg::CmdVelToZsibotDebug>::SharedPtr sent_sub_;
+  rclcpp::Subscription<robots_dog_msgs::msg::CmdVelToZsibotDebug>::SharedPtr debug_sub_;
+  std::vector<robots_dog_msgs::msg::CmdVelToZsibotDebug> sent_commands_;
+  std::vector<robots_dog_msgs::msg::CmdVelToZsibotDebug> debug_commands_;
   std::thread spin_thread_;
 };
 
@@ -190,20 +192,20 @@ std::vector<rclcpp::Parameter> udpParams(int port)
 
 TEST(CmdVelToZsibotTest, DefaultsUseFastUdpRefreshAndNoAutoStandup)
 {
-  UdpCapture udp;
-  NodeHarness harness({
-    rclcpp::Parameter("control_port", udp.port()),
-  });
+  NodeHarness harness({});
 
   double interval = 0.0;
   bool auto_standup = true;
   std::string output_mode;
+  int control_port = 0;
   ASSERT_TRUE(harness.bridge()->get_parameter("min_command_interval", interval));
   ASSERT_TRUE(harness.bridge()->get_parameter("auto_standup", auto_standup));
   ASSERT_TRUE(harness.bridge()->get_parameter("output_mode", output_mode));
+  ASSERT_TRUE(harness.bridge()->get_parameter("control_port", control_port));
   EXPECT_DOUBLE_EQ(interval, 0.1);
   EXPECT_FALSE(auto_standup);
   EXPECT_EQ(output_mode, "udp");
+  EXPECT_EQ(control_port, 6002);
 }
 
 TEST(CmdVelToZsibotTest, PublishesActualUdpPayloadForNonzeroCmdVel)
@@ -221,15 +223,27 @@ TEST(CmdVelToZsibotTest, PublishesActualUdpPayloadForNonzeroCmdVel)
 
   auto debug = harness.waitForSentCommand(std::chrono::milliseconds(1000));
   ASSERT_TRUE(debug.has_value());
-  EXPECT_EQ(*debug, *payload);
+  EXPECT_EQ(debug->reason, "cmd_vel");
+  EXPECT_TRUE(debug->send_ok);
+  EXPECT_FALSE(debug->fake);
+  EXPECT_EQ(debug->payload, *payload);
+  EXPECT_TRUE(debug->has_normalized_cmd);
+  EXPECT_DOUBLE_EQ(debug->input_cmd.linear.x, 0.08);
+  EXPECT_DOUBLE_EQ(debug->input_cmd.angular.z, 0.12);
+  EXPECT_DOUBLE_EQ(debug->normalized_cmd.linear.x, 0.08);
+  EXPECT_DOUBLE_EQ(debug->normalized_cmd.angular.z, 0.1);
 
   auto debug_record = harness.waitForDebugCommand(std::chrono::milliseconds(1000));
   ASSERT_TRUE(debug_record.has_value());
-  EXPECT_NE(debug_record->find("\"reason\":\"cmd_vel\""), std::string::npos);
-  EXPECT_NE(debug_record->find("\"send_ok\":true"), std::string::npos);
-  EXPECT_NE(debug_record->find("\\\"type\\\":\\\"twist\\\""), std::string::npos);
-  EXPECT_NE(debug_record->find("\"input\":{\"vx\":0.08"), std::string::npos);
-  EXPECT_NE(debug_record->find("\"normalized\":{\"vx\":0.08"), std::string::npos);
+  EXPECT_EQ(debug_record->reason, "cmd_vel");
+  EXPECT_TRUE(debug_record->send_ok);
+  EXPECT_FALSE(debug_record->fake);
+  EXPECT_EQ(debug_record->payload, *payload);
+  EXPECT_TRUE(debug_record->has_normalized_cmd);
+  EXPECT_DOUBLE_EQ(debug_record->input_cmd.linear.x, 0.08);
+  EXPECT_DOUBLE_EQ(debug_record->input_cmd.angular.z, 0.12);
+  EXPECT_DOUBLE_EQ(debug_record->normalized_cmd.linear.x, 0.08);
+  EXPECT_DOUBLE_EQ(debug_record->normalized_cmd.angular.z, 0.1);
 }
 
 TEST(CmdVelToZsibotTest, TinyCmdVelBelowEpsilonSendsStopInsteadOfMinimumMotion)
@@ -281,14 +295,20 @@ TEST(CmdVelToZsibotTest, FakeModePublishesDebugButDoesNotSendUdp)
 
   auto sent = harness.waitForSentCommand(std::chrono::milliseconds(1000));
   ASSERT_TRUE(sent.has_value());
-  EXPECT_NE(sent->find("\"type\":\"twist\""), std::string::npos);
-  EXPECT_NE(sent->find("\"vx\":0.08"), std::string::npos);
+  EXPECT_EQ(sent->reason, "cmd_vel");
+  EXPECT_TRUE(sent->fake);
+  EXPECT_TRUE(sent->send_ok);
+  EXPECT_NE(sent->payload.find("\"type\":\"twist\""), std::string::npos);
+  EXPECT_DOUBLE_EQ(sent->input_cmd.linear.x, 0.08);
+  EXPECT_DOUBLE_EQ(sent->normalized_cmd.angular.z, 0.1);
 
   auto debug = harness.waitForDebugCommand(std::chrono::milliseconds(1000));
   ASSERT_TRUE(debug.has_value());
-  EXPECT_NE(debug->find("\"fake\":true"), std::string::npos);
-  EXPECT_NE(debug->find("\"send_ok\":true"), std::string::npos);
-  EXPECT_NE(debug->find("\"reason\":\"cmd_vel\""), std::string::npos);
+  EXPECT_EQ(debug->reason, "cmd_vel");
+  EXPECT_TRUE(debug->fake);
+  EXPECT_TRUE(debug->send_ok);
+  EXPECT_DOUBLE_EQ(debug->input_cmd.angular.z, 0.12);
+  EXPECT_DOUBLE_EQ(debug->normalized_cmd.angular.z, 0.1);
 }
 
 int main(int argc, char ** argv)

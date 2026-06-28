@@ -14,8 +14,8 @@
 #include "geometry_msgs/msg/twist.hpp"
 #include "sensor_msgs/msg/battery_state.hpp"
 #include "std_msgs/msg/bool.hpp"
-#include "std_msgs/msg/string.hpp"
 #include "std_srvs/srv/trigger.hpp"
+#include "robots_dog_msgs/msg/cmd_vel_to_zsibot_debug.hpp"
 
 namespace cmd_vel_to_zsibot
 {
@@ -110,6 +110,7 @@ protected:
   bool sendUdpPayload(
     const std::string & payload,
     const std::string & reason,
+    bool force = false,
     const geometry_msgs::msg::Twist * normalized_cmd = nullptr);
 
   /**
@@ -155,10 +156,10 @@ private:
   rclcpp::Publisher<sensor_msgs::msg::BatteryState>::SharedPtr battery_pub_;
 
   // Publisher for debug visibility into actual outgoing UDP payloads
-  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr sent_command_pub_;
+  rclcpp::Publisher<robots_dog_msgs::msg::CmdVelToZsibotDebug>::SharedPtr sent_command_pub_;
 
   // Publisher for full command conversion debug records
-  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr debug_command_pub_;
+  rclcpp::Publisher<robots_dog_msgs::msg::CmdVelToZsibotDebug>::SharedPtr debug_command_pub_;
 
   // Timers for command processing and status polling
   rclcpp::TimerBase::SharedPtr command_timer_;
@@ -199,6 +200,7 @@ private:
   bool has_pending_cmd_;
   bool has_sent_cmd_;
   bool robot_stopped_;
+  uint32_t debug_seq_;
 
   // Connection status
   bool connected_;

@@ -18,6 +18,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
+find_package(robots_dog_msgs REQUIRED)
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
 endif()
@@ -36,6 +37,7 @@ set(dependencies
   sensor_msgs
   std_msgs
   std_srvs
+  robots_dog_msgs
 )
 
 # Main library

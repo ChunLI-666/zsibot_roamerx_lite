@@ -49,8 +49,8 @@ def generate_launch_description():
 
     declare_control_port = DeclareLaunchArgument(
         'control_port',
-        default_value='6000',
-        description='yz-robot-ctrl UDP port'
+        default_value='6002',
+        description='yz-robot-ctrl local algorithm UDP port'
     )
     
     declare_cmd_vel_topic = DeclareLaunchArgument(

@@ -19,32 +19,9 @@ using std::placeholders::_1;
 namespace
 {
 
-std::string jsonEscape(const std::string & s)
+geometry_msgs::msg::Twist zeroTwist()
 {
-  std::ostringstream out;
-  for (char ch : s) {
-    switch (ch) {
-      case '\\':
-        out << "\\\\";
-        break;
-      case '"':
-        out << "\\\"";
-        break;
-      case '\n':
-        out << "\\n";
-        break;
-      case '\r':
-        out << "\\r";
-        break;
-      case '\t':
-        out << "\\t";
-        break;
-      default:
-        out << ch;
-        break;
-    }
-  }
-  return out.str();
+  return geometry_msgs::msg::Twist();
 }
 
 }  // namespace
@@ -55,6 +32,7 @@ namespace cmd_vel_to_zsibot
 CmdVelToZsibot::CmdVelToZsibot(const rclcpp::NodeOptions & options)
 : Node("cmd_vel_to_zsibot", options),
   enabled_(true),
+  debug_seq_(0),
   connected_(false),
   udp_sock_(-1),
   standing_(false)
@@ -66,7 +44,7 @@ CmdVelToZsibot::CmdVelToZsibot(const rclcpp::NodeOptions & options)
   this->declare_parameter<std::string>("robot_ip", "192.168.168.168");  // Robot control board IP
   this->declare_parameter<std::string>("output_mode", "udp");
   this->declare_parameter<std::string>("control_host", "127.0.0.1");
-  this->declare_parameter<int>("control_port", 6000);
+  this->declare_parameter<int>("control_port", 6002);
   this->declare_parameter<double>("max_linear_x", 0.15);
   this->declare_parameter<double>("max_linear_y", 0.15);
   this->declare_parameter<double>("max_angular_z", 0.1);
@@ -178,8 +156,10 @@ CmdVelToZsibot::CmdVelToZsibot(const rclcpp::NodeOptions & options)
     "/battery/state", rclcpp::QoS(10).reliable());
 
   // Create publisher for outgoing command debug
-  sent_command_pub_ = this->create_publisher<std_msgs::msg::String>("~/sent_command", 10);
-  debug_command_pub_ = this->create_publisher<std_msgs::msg::String>("~/debug_command", 10);
+  sent_command_pub_ =
+    this->create_publisher<robots_dog_msgs::msg::CmdVelToZsibotDebug>("~/sent_command", 10);
+  debug_command_pub_ =
+    this->create_publisher<robots_dog_msgs::msg::CmdVelToZsibotDebug>("~/debug_command", 10);
 
   // Match yz_robot_ctrl semantics: do not stream move() continuously.
   double command_period_ms = 1000.0 / command_check_rate_;
@@ -401,7 +381,7 @@ void CmdVelToZsibot::sendMoveCommand(
   payload << "{\"type\":\"twist\",\"vx\":" << cmd.linear.x
           << ",\"vy\":" << cmd.linear.y
           << ",\"wz\":" << cmd.angular.z << "}";
-  if (!sendUdpPayload(payload.str(), reason, &cmd)) {
+  if (!sendUdpPayload(payload.str(), reason, force, &cmd)) {
     return;
   }
 
@@ -420,6 +400,7 @@ void CmdVelToZsibot::sendStopCommand(bool force, const std::string & reason)
 bool CmdVelToZsibot::sendUdpPayload(
   const std::string & payload,
   const std::string & reason,
+  bool force,
   const geometry_msgs::msg::Twist * normalized_cmd)
 {
   bool ok = false;
@@ -439,24 +420,28 @@ bool CmdVelToZsibot::sendUdpPayload(
     input_cmd = latest_input_cmd_;
   }
 
-  std::ostringstream debug;
-  debug << "{\"reason\":\"" << reason << "\",\"send_ok\":" << (ok ? "true" : "false")
-        << ",\"fake\":" << (fake ? "true" : "false")
-        << ",\"payload\":\"" << jsonEscape(payload) << "\""
-        << ",\"input\":{\"vx\":" << input_cmd.linear.x
-        << ",\"vy\":" << input_cmd.linear.y
-        << ",\"wz\":" << input_cmd.angular.z << "}";
-  if (normalized_cmd != nullptr) {
-    debug << ",\"normalized\":{\"vx\":" << normalized_cmd->linear.x
-          << ",\"vy\":" << normalized_cmd->linear.y
-          << ",\"wz\":" << normalized_cmd->angular.z << "}";
-  }
-  debug << "}";
+  auto debug = robots_dog_msgs::msg::CmdVelToZsibotDebug();
+  debug.header.stamp = this->now();
+  debug.header.frame_id = "cmd_vel_to_zsibot";
+  debug.seq = ++debug_seq_;
+  debug.reason = reason;
+  debug.output_mode = output_mode_;
+  debug.fake = fake;
+  debug.send_ok = ok;
+  debug.connected = connected_;
+  debug.enabled = enabled_;
+  debug.force = force;
+  debug.input_cmd = input_cmd;
+  debug.has_normalized_cmd = normalized_cmd != nullptr;
+  debug.normalized_cmd = normalized_cmd != nullptr ? *normalized_cmd : zeroTwist();
+  debug.zero_command = normalized_cmd != nullptr && isZeroCommand(*normalized_cmd);
+  debug.robot_stopped = robot_stopped_;
+  debug.payload = payload;
+  debug.cmd_age_sec = (this->now() - last_cmd_time_).seconds();
+  debug.last_send_age_sec = (this->now() - last_send_time_).seconds();
 
   if (debug_command_pub_) {
-    auto msg = std_msgs::msg::String();
-    msg.data = debug.str();
-    debug_command_pub_->publish(msg);
+    debug_command_pub_->publish(debug);
   }
 
   if (!ok) {
@@ -464,9 +449,7 @@ bool CmdVelToZsibot::sendUdpPayload(
       this->get_logger(), *this->get_clock(), 2000,
       "Failed to send UDP command to %s:%d", control_host_.c_str(), control_port_);
   } else if (sent_command_pub_) {
-    auto msg = std_msgs::msg::String();
-    msg.data = payload;
-    sent_command_pub_->publish(msg);
+    sent_command_pub_->publish(debug);
   }
   return ok;
 }
@@ -502,7 +485,7 @@ void CmdVelToZsibot::standUpCallback(
     response->message = "SDK direct control is disabled";
     return;
   }
-  if (!sendUdpPayload("c", "stand_up")) {
+  if (!sendUdpPayload("c", "stand_up", true)) {
     response->success = false;
     response->message = "Failed to send stand-up command";
     return;
@@ -540,7 +523,7 @@ void CmdVelToZsibot::lieDownCallback(
     response->message = "SDK direct control is disabled";
     return;
   }
-  if (!sendUdpPayload("x", "lie_down")) {
+  if (!sendUdpPayload("x", "lie_down", true)) {
     response->success = false;
     response->message = "Failed to send lie-down command";
     return;

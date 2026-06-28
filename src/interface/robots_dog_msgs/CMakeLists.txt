@@ -20,6 +20,7 @@ set(msg_files
         "msg/BmsState.msg"
         "msg/Cartesian.msg"
         "msg/CmdVelWithTrajectory.msg"
+        "msg/CmdVelToZsibotDebug.msg"
         "msg/CpuInfo.msg"
         "msg/CustomMsg.msg"
         "msg/CustomPoint.msg"
@@ -70,6 +71,7 @@ set(msg_files
         "msg/UniBestNav.msg"
         "msg/UniHeading.msg"
         "msg/UwbPointStamped.msg"
+        "msg/YzRobotCtrlDebug.msg"
 )
 
 set(srv_files
@@ -164,4 +166,3 @@ set(CPACK_GENERATOR "DEB")
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "kanonwy")
 
 include(CPack)
-

@@ -14,7 +14,7 @@ cmd_vel_to_zsibot:
     robot_ip: "192.168.168.168"  # Robot control board IP
     output_mode: "udp"           # udp: send to yz-robot-ctrl; sdk: legacy direct SDK control
     control_host: "127.0.0.1"    # yz-robot-ctrl local UDP ingress
-    control_port: 6000           # yz-robot-ctrl UdpControl port
+    control_port: 6002           # yz-robot-ctrl local algorithm port
     
     # Velocity limits (m/s and rad/s)
     max_linear_x: 0.15           # Match yz_robot_ctrl MAX_LINEAR_SPEED (m/s)

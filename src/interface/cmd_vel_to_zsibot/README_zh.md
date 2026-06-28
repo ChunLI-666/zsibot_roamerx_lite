@@ -32,8 +32,8 @@
 | 话题 | 类型 | 说明 |
 |------|------|------|
 | `~/connected` | `std_msgs/Bool` | 机器人连接状态 |
-| `~/sent_command` | `std_msgs/String` | 实际发送到 `yz-robot-ctrl` 的 UDP payload |
-| `~/debug_command` | `std_msgs/String` | JSON 调试记录，包含 reason、输入 cmd_vel、归一化命令、payload 和发送结果 |
+| `~/sent_command` | `robots_dog_msgs/CmdVelToZsibotDebug` | 实际发送到 `yz-robot-ctrl` 的结构化命令记录 |
+| `~/debug_command` | `robots_dog_msgs/CmdVelToZsibotDebug` | 结构化调试记录，包含 reason、输入 cmd_vel、归一化命令、payload 和发送结果 |
 
 ## 参数
 
@@ -44,7 +44,7 @@
 | `robot_ip` | string | "192.168.168.168" | ZsiBot 机器人 IP 地址 |
 | `output_mode` | string | "udp" | `udp` 发送到 `yz-robot-ctrl`；`fake` 只发布调试话题；SDK 直连控制已禁用 |
 | `control_host` | string | "127.0.0.1" | 本机 `yz-robot-ctrl` UDP 地址 |
-| `control_port` | int | 6000 | 本机 `yz-robot-ctrl` UDP 端口 |
+| `control_port` | int | 6002 | 本机 `yz-robot-ctrl` 本地算法 UDP 端口 |
 | `max_linear_x` | double | 0.15 | 最大前后速度 (m/s) |
 | `max_linear_y` | double | 0.15 | 最大横向速度 (m/s) |
 | `max_angular_z` | double | 0.1 | 最大角速度 (rad/s) |
