@@ -128,8 +128,8 @@ class LightningBridge(Node):
         # Generate a virtual 2D obstacle scan from a horizontal height band.
         # Keep this above the ground plane; otherwise ground returns become
         # the closest range in each angle bin and pollute the local costmap.
-        self.declare_parameter('min_height', 0.8)
-        self.declare_parameter('max_height', 0.85)
+        self.declare_parameter('min_height', 0.0)
+        self.declare_parameter('max_height', 0.5)
         self.declare_parameter('angle_min', -math.pi)
         self.declare_parameter('angle_max', math.pi)
         self.declare_parameter('angle_increment', 0.0087)  # ~0.5 degrees

@@ -18,7 +18,9 @@
 #include <string>
 #include <utility>
 #include <limits>
+#include <cmath>
 
+#include "angles/angles.h"
 #include "lifecycle_msgs/msg/state.hpp"
 #include "navigo_core/exceptions.hpp"
 #include "nav_2d_utils/conversions.hpp"
@@ -26,6 +28,7 @@
 #include "navigo_util/node_utils.hpp"
 #include "navigo_util/geometry_utils.hpp"
 #include "navigo_path_controller/controller_server.hpp"
+#include "tf2/utils.h"
 
 using namespace std::chrono_literals;
 using rcl_interfaces::msg::ParameterType;
@@ -194,6 +197,8 @@ ControllerServer::on_configure(const rclcpp_lifecycle::State & /*state*/)
 
   odom_sub_ = std::make_unique<nav_2d_utils::OdomSubscriber>(node);
   vel_publisher_ = create_publisher<geometry_msgs::msg::Twist>("cmd_vel", 1);
+  debug_publisher_ =
+    create_publisher<robots_dog_msgs::msg::NavigoControllerDebug>("~/debug", rclcpp::QoS(10));
 
   // Create the action server that we implement with our followPath method
   action_server_ = std::make_unique<ActionServer>(
@@ -223,6 +228,7 @@ ControllerServer::on_activate(const rclcpp_lifecycle::State & /*state*/)
     it->second->activate();
   }
   vel_publisher_->on_activate();
+  debug_publisher_->on_activate();
   action_server_->activate();
 
   auto node = shared_from_this();
@@ -258,6 +264,7 @@ ControllerServer::on_deactivate(const rclcpp_lifecycle::State & /*state*/)
 
   publishZeroVelocity();
   vel_publisher_->on_deactivate();
+  debug_publisher_->on_deactivate();
   dyn_params_handler_.reset();
 
   // destroy bond connection
@@ -288,6 +295,7 @@ ControllerServer::on_cleanup(const rclcpp_lifecycle::State & /*state*/)
   odom_sub_.reset();
   costmap_thread_.reset();
   vel_publisher_.reset();
+  debug_publisher_.reset();
   speed_limit_sub_.reset();
 
   return navigo_util::CallbackReturn::SUCCESS;
@@ -456,6 +464,8 @@ void ControllerServer::setPlannerPath(const nav_msgs::msg::Path & path)
     end_pose_.pose.position.x, end_pose_.pose.position.y);
 
   current_path_ = path;
+  last_path_update_time_ = now();
+  ++path_update_count_;
 }
 
 void ControllerServer::computeAndPublishVelocity()
@@ -501,6 +511,8 @@ void ControllerServer::computeAndPublishVelocity()
       throw navigo_core::PlannerException(e.what());
     }
   }
+
+  publishControllerDebug(pose, nav_2d_utils::twist2Dto3D(twist), cmd_vel_2d);
 
   std::shared_ptr<Action::Feedback> feedback = std::make_shared<Action::Feedback>();
   feedback->speed = std::hypot(cmd_vel_2d.twist.linear.x, cmd_vel_2d.twist.linear.y);
@@ -579,6 +591,107 @@ void ControllerServer::publishZeroVelocity()
   velocity.header.frame_id = costmap_ros_->getBaseFrameID();
   velocity.header.stamp = now();
   publishVelocity(velocity);
+}
+
+void ControllerServer::publishControllerDebug(
+  const geometry_msgs::msg::PoseStamped & pose,
+  const geometry_msgs::msg::Twist & current_velocity,
+  const geometry_msgs::msg::TwistStamped & cmd_vel)
+{
+  if (!debug_publisher_ || !debug_publisher_->is_activated()) {
+    return;
+  }
+
+  robots_dog_msgs::msg::NavigoControllerDebug msg;
+  msg.header.stamp = now();
+  msg.header.frame_id = costmap_ros_->getGlobalFrameID();
+  msg.controller_id = current_controller_;
+  msg.goal_checker_id = current_goal_checker_;
+  msg.robot_pose = pose;
+  msg.cmd_vel = cmd_vel;
+  msg.current_velocity = current_velocity;
+  msg.path_update_count = path_update_count_;
+  msg.seconds_since_path_update =
+    last_path_update_time_.nanoseconds() > 0 ? (now() - last_path_update_time_).seconds() : 0.0;
+
+  msg.plan_size = current_path_.poses.size();
+  if (current_path_.poses.empty()) {
+    msg.phase = "NO_PATH";
+    debug_publisher_->publish(msg);
+    return;
+  }
+
+  msg.path_start_pose = current_path_.poses.front();
+  msg.path_end_pose = end_pose_;
+
+  size_t closest_pose_idx = 0;
+  double closest_dist = std::numeric_limits<double>::max();
+  for (size_t idx = 0; idx < current_path_.poses.size(); ++idx) {
+    const double dist = navigo_util::geometry_utils::euclidean_distance(
+      pose, current_path_.poses[idx]);
+    if (dist < closest_dist) {
+      closest_dist = dist;
+      closest_pose_idx = idx;
+    }
+  }
+
+  msg.closest_path_index = closest_pose_idx;
+  msg.closest_path_distance = closest_dist;
+  msg.closest_path_pose = current_path_.poses[closest_pose_idx];
+  msg.path_length_remaining =
+    navigo_util::geometry_utils::calculate_path_length(current_path_, closest_pose_idx);
+
+  geometry_msgs::msg::PoseStamped transformed_end_pose;
+  try {
+    rclcpp::Duration tolerance(
+      rclcpp::Duration::from_seconds(costmap_ros_->getTransformTolerance()));
+    nav_2d_utils::transformPose(
+      costmap_ros_->getTfBuffer(), costmap_ros_->getGlobalFrameID(),
+      end_pose_, transformed_end_pose, tolerance);
+  } catch (const std::exception &) {
+    transformed_end_pose = end_pose_;
+  }
+  msg.path_end_pose = transformed_end_pose;
+
+  msg.goal_dx = pose.pose.position.x - transformed_end_pose.pose.position.x;
+  msg.goal_dy = pose.pose.position.y - transformed_end_pose.pose.position.y;
+  msg.distance_to_goal_xy = std::hypot(msg.goal_dx, msg.goal_dy);
+  msg.yaw_error_to_goal = angles::shortest_angular_distance(
+    tf2::getYaw(pose.pose.orientation),
+    tf2::getYaw(transformed_end_pose.pose.orientation));
+
+  geometry_msgs::msg::Pose pose_tolerance;
+  geometry_msgs::msg::Twist vel_tolerance;
+  msg.xy_goal_tolerance = 0.0;
+  msg.yaw_goal_tolerance = 0.0;
+  auto goal_checker = goal_checkers_.find(current_goal_checker_);
+  if (goal_checker != goal_checkers_.end() &&
+    goal_checker->second->getTolerances(pose_tolerance, vel_tolerance))
+  {
+    msg.xy_goal_tolerance = std::max(pose_tolerance.position.x, pose_tolerance.position.y);
+    msg.yaw_goal_tolerance = std::abs(tf2::getYaw(pose_tolerance.orientation));
+  }
+
+  msg.xy_goal_reached =
+    msg.xy_goal_tolerance > 0.0 && msg.distance_to_goal_xy <= msg.xy_goal_tolerance;
+  msg.yaw_goal_reached =
+    msg.yaw_goal_tolerance > 0.0 && std::abs(msg.yaw_error_to_goal) <= msg.yaw_goal_tolerance;
+  msg.goal_reached_estimate = msg.xy_goal_reached && msg.yaw_goal_reached;
+
+  msg.cmd_speed_xy = std::hypot(cmd_vel.twist.linear.x, cmd_vel.twist.linear.y);
+  msg.cmd_angular_z = cmd_vel.twist.angular.z;
+  msg.command_is_zero =
+    msg.cmd_speed_xy < 1e-4 && std::abs(cmd_vel.twist.angular.z) < 1e-4;
+
+  if (msg.goal_reached_estimate) {
+    msg.phase = "GOAL_REACHED_ESTIMATE";
+  } else if (msg.xy_goal_reached) {
+    msg.phase = "XY_REACHED_WAITING_YAW";
+  } else {
+    msg.phase = "TRACKING_PATH";
+  }
+
+  debug_publisher_->publish(msg);
 }
 
 bool ControllerServer::isGoalReached()

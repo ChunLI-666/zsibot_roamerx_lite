@@ -141,7 +141,7 @@ def generate_launch_description():
             'odom_output_topic': '/odom/current_pose',
             # LaserScan parameters
             'target_frame': 'base_link',
-            'min_height': 0.4,
+            'min_height': 0.0,
             'max_height': 0.5,
             'enable_ground_filter': False,
             'ground_filter_distance': 0.12,

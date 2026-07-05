@@ -50,6 +50,7 @@ set(msg_files
         "msg/NavigationErrorReport.msg"
         "msg/NavigationErrorSet.msg"
         "msg/NavigationState.msg"
+        "msg/NavigoControllerDebug.msg"
         "msg/NetInfo.msg"
         "msg/Nmea.msg"
         "msg/ObstacleInstance2D.msg"

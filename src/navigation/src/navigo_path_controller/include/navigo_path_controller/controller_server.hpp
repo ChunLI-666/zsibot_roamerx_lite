@@ -35,6 +35,7 @@
 #include "navigo_util/robot_utils.hpp"
 #include "pluginlib/class_loader.hpp"
 #include "pluginlib/class_list_macros.hpp"
+#include "robots_dog_msgs/msg/navigo_controller_debug.hpp"
 
 namespace navigo_path_controller
 {
@@ -166,6 +167,13 @@ protected:
    */
   void publishZeroVelocity();
   /**
+   * @brief Publish controller decision data for navigation debugging.
+   */
+  void publishControllerDebug(
+    const geometry_msgs::msg::PoseStamped & pose,
+    const geometry_msgs::msg::Twist & current_velocity,
+    const geometry_msgs::msg::TwistStamped & cmd_vel);
+  /**
    * @brief Checks if goal is reached
    * @return true or false
    */
@@ -220,6 +228,8 @@ protected:
   // Publishers and subscribers
   std::unique_ptr<nav_2d_utils::OdomSubscriber> odom_sub_;
   rclcpp_lifecycle::LifecyclePublisher<geometry_msgs::msg::Twist>::SharedPtr vel_publisher_;
+  rclcpp_lifecycle::LifecyclePublisher<robots_dog_msgs::msg::NavigoControllerDebug>::SharedPtr
+    debug_publisher_;
   rclcpp::Subscription<nav2_msgs::msg::SpeedLimit>::SharedPtr speed_limit_sub_;
 
   // Progress Checker Plugin
@@ -263,6 +273,10 @@ protected:
 
   // Current path container
   nav_msgs::msg::Path current_path_;
+
+  // Path update diagnostics
+  rclcpp::Time last_path_update_time_;
+  uint32_t path_update_count_{0};
 
 private:
   /**

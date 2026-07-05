@@ -14,6 +14,7 @@ find_package(nav2_msgs REQUIRED)
 find_package(nav_2d_utils REQUIRED)
 find_package(nav_2d_msgs REQUIRED)
 find_package(pluginlib REQUIRED)
+find_package(robots_dog_msgs REQUIRED)
 
 nav2_package()
 
@@ -50,6 +51,7 @@ set(dependencies
   navigo_util
   navigo_core
   pluginlib
+  robots_dog_msgs
 )
 
 add_library(simple_progress_checker SHARED plugins/simple_progress_checker.cpp)

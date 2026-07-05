@@ -1,0 +1,35 @@
+std_msgs/Header header
+
+string controller_id
+string goal_checker_id
+string phase
+
+geometry_msgs/PoseStamped robot_pose
+geometry_msgs/PoseStamped path_start_pose
+geometry_msgs/PoseStamped path_end_pose
+geometry_msgs/PoseStamped closest_path_pose
+
+geometry_msgs/TwistStamped cmd_vel
+geometry_msgs/Twist current_velocity
+
+uint32 plan_size
+uint32 closest_path_index
+uint32 path_update_count
+float64 seconds_since_path_update
+
+float64 closest_path_distance
+float64 path_length_remaining
+float64 distance_to_goal_xy
+float64 goal_dx
+float64 goal_dy
+float64 yaw_error_to_goal
+
+float64 xy_goal_tolerance
+float64 yaw_goal_tolerance
+bool xy_goal_reached
+bool yaw_goal_reached
+bool goal_reached_estimate
+
+float64 cmd_speed_xy
+float64 cmd_angular_z
+bool command_is_zero
