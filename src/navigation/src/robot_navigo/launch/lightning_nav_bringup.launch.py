@@ -134,9 +134,12 @@ def generate_launch_description():
             # Livox and LaserScan (configurable)
             'enable_livox_converter': enable_livox_converter,
             'enable_laserscan': enable_laserscan,
+            'sensor_qos_depth': 1,
+            'max_sensor_age_sec': 0.5,
             # Topics
             'livox_input_topic': '/livox/lidar',
             'pointcloud_output_topic': '/livox/lidar/pointcloud2',
+            'bridge_debug_topic': '/lightning_bridge/debug',
             'laserscan_output_topic': '/laser_scan',
             'odom_output_topic': '/odom/current_pose',
             # LaserScan parameters

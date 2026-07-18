@@ -33,3 +33,24 @@ bool goal_reached_estimate
 float64 cmd_speed_xy
 float64 cmd_angular_z
 bool command_is_zero
+
+# Local costmap/path observability. Costs use navigo_costmap_2d values:
+# free=0, inscribed=253, lethal=254, unknown=255.
+bool local_costmap_current
+bool robot_cost_valid
+uint8 robot_cell_cost
+float64 local_costmap_resolution
+
+bool path_costs_valid
+uint32 path_points_evaluated
+uint32 path_points_outside_costmap
+uint32 path_nonfree_points
+uint32 path_inscribed_or_lethal_points
+uint32 path_unknown_points
+uint8 max_path_cost
+
+bool path_blocked
+uint32 first_blocked_path_index
+geometry_msgs/PoseStamped first_blocked_path_pose
+float64 distance_to_first_blocked_xy
+float64 path_distance_to_first_blocked
