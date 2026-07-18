@@ -120,7 +120,9 @@ protected:
   PathHandler path_handler_;
   TrajectoryVisualizer trajectory_visualizer_;
 
-  bool visualize_;
+  bool visualize_{false};
+  bool visualize_all_sampled_traj_{false};
+  bool visualize_optimized_traj_{true};
 
   double reset_period_;
   // Last time computeVelocityCommands was called

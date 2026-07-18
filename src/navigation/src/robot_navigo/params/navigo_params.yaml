@@ -99,7 +99,8 @@ behavior_server:
     use_sim_time: False
     simulate_ahead_time: 2.0
     max_rotational_vel: 0.1
-    min_rotational_vel: 0.05
+    # Keep recovery commands inside the same executable yaw range as navigation.
+    min_rotational_vel: 0.02
     rotational_acc_lim: 3.2
 
 local_costmap:
@@ -128,6 +129,7 @@ local_costmap:
         observation_sources: scan
         scan:
           topic: /laser_scan
+          expected_update_rate: 0.3
           max_obstacle_height: 2.0
           clearing: True
           marking: True
@@ -220,7 +222,7 @@ controller_server:
     # MPPI parameters
     FollowPath:
       plugin: "navigo_mppi_controller::MPPIController"
-      visualize: false
+      visualize: true
       time_steps: 30
       model_dt: 0.1
       batch_size: 500
@@ -229,7 +231,8 @@ controller_server:
       wz_std: 0.08
       vx_max: 0.15 #0.5
       vx_min: -0.15 #-0.35
-      vy_max: 0.15 #0.5
+      # Navigation uses a DiffDrive model; lateral motion is reserved for docking.
+      vy_max: 0.0
       wz_max: 0.1
       ax_max: 2.0
       ay_max: 2.0
@@ -330,12 +333,15 @@ velocity_optimizer:
     smoothing_frequency: 20.0
     scale_velocities: false
     feedback: "OPEN_LOOP"
-    max_velocity: [0.15, 0.15, 0.1]
-    min_velocity: [-0.15, -0.15, -0.1]
-    deadband_velocity: [0.0, 0.0, 0.0]
-    velocity_timeout: 1.0
-    max_accel: [1.5, 1.0, 1.5]
-    max_decel: [-1.5, -1.0, -1.5]
+    # Nav2 executable command contract: vx=0 or |vx|>=0.05, vy=0,
+    # wz=0 or |wz|>=0.02. Values below the SDK minimums are stopped here
+    # instead of being promoted by the robot controller.
+    max_velocity: [0.15, 0.0, 0.1]
+    min_velocity: [-0.15, 0.0, -0.1]
+    deadband_velocity: [0.05, 0.0, 0.02]
+    velocity_timeout: 0.3
+    max_accel: [1.5, 0.0, 1.5]
+    max_decel: [-1.5, 0.0, -1.5]
     odom_topic: "/odom/current_pose"
     odom_duration: 0.1
     use_realtime_priority: false

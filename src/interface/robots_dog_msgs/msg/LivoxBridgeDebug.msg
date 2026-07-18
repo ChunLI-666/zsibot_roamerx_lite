@@ -1,0 +1,21 @@
+std_msgs/Header header
+builtin_interfaces/Time input_stamp
+string input_frame_id
+
+uint64 callback_sequence
+uint32 input_points
+uint32 scan_points_used
+uint32 finite_scan_bins
+uint32 subscriber_qos_depth
+
+float64 input_age_sec
+float64 callback_duration_ms
+float64 pointcloud_pack_ms
+float64 laserscan_build_ms
+
+bool stale_input
+bool dropped_input
+bool pointcloud_published
+bool laserscan_published
+
+string drop_reason

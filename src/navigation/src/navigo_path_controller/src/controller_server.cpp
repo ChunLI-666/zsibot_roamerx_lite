@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <algorithm>
 #include <chrono>
 #include <vector>
 #include <memory>
@@ -27,6 +28,7 @@
 #include "nav_2d_utils/tf_help.hpp"
 #include "navigo_util/node_utils.hpp"
 #include "navigo_util/geometry_utils.hpp"
+#include "navigo_costmap_2d/cost_values.hpp"
 #include "navigo_path_controller/controller_server.hpp"
 #include "tf2/utils.h"
 
@@ -598,7 +600,9 @@ void ControllerServer::publishControllerDebug(
   const geometry_msgs::msg::Twist & current_velocity,
   const geometry_msgs::msg::TwistStamped & cmd_vel)
 {
-  if (!debug_publisher_ || !debug_publisher_->is_activated()) {
+  if (!debug_publisher_ || !debug_publisher_->is_activated() ||
+    debug_publisher_->get_subscription_count() == 0)
+  {
     return;
   }
 
@@ -640,6 +644,75 @@ void ControllerServer::publishControllerDebug(
   msg.closest_path_pose = current_path_.poses[closest_pose_idx];
   msg.path_length_remaining =
     navigo_util::geometry_utils::calculate_path_length(current_path_, closest_pose_idx);
+
+  msg.local_costmap_current = costmap_ros_->isCurrent();
+  auto * costmap = costmap_ros_->getCostmap();
+  msg.local_costmap_resolution = costmap->getResolution();
+  msg.robot_cell_cost = navigo_costmap_2d::NO_INFORMATION;
+
+  const std::string & costmap_frame = costmap_ros_->getGlobalFrameID();
+  const std::string path_frame = current_path_.header.frame_id.empty() ?
+    current_path_.poses.front().header.frame_id : current_path_.header.frame_id;
+  msg.path_costs_valid = path_frame.empty() || path_frame == costmap_frame;
+
+  if (msg.path_costs_valid) {
+    std::unique_lock<navigo_costmap_2d::Costmap2D::mutex_t> costmap_lock(
+      *(costmap->getMutex()));
+
+    unsigned int robot_mx = 0;
+    unsigned int robot_my = 0;
+    if (costmap->worldToMap(
+        pose.pose.position.x, pose.pose.position.y, robot_mx, robot_my))
+    {
+      msg.robot_cost_valid = true;
+      msg.robot_cell_cost = costmap->getCost(robot_mx, robot_my);
+    }
+
+    double path_distance = 0.0;
+    for (size_t idx = closest_pose_idx; idx < current_path_.poses.size(); ++idx) {
+      if (idx > closest_pose_idx) {
+        path_distance += navigo_util::geometry_utils::euclidean_distance(
+          current_path_.poses[idx - 1], current_path_.poses[idx]);
+      }
+
+      ++msg.path_points_evaluated;
+      const auto & path_pose = current_path_.poses[idx];
+      unsigned int mx = 0;
+      unsigned int my = 0;
+      if (!costmap->worldToMap(
+          path_pose.pose.position.x, path_pose.pose.position.y, mx, my))
+      {
+        ++msg.path_points_outside_costmap;
+        continue;
+      }
+
+      const auto cost = costmap->getCost(mx, my);
+      if (cost == navigo_costmap_2d::NO_INFORMATION) {
+        ++msg.path_unknown_points;
+        continue;
+      }
+
+      msg.max_path_cost = std::max(msg.max_path_cost, cost);
+      if (cost > navigo_costmap_2d::FREE_SPACE) {
+        ++msg.path_nonfree_points;
+      }
+
+      const bool blocked = cost >= navigo_costmap_2d::INSCRIBED_INFLATED_OBSTACLE;
+      if (!blocked) {
+        continue;
+      }
+
+      ++msg.path_inscribed_or_lethal_points;
+      if (!msg.path_blocked) {
+        msg.path_blocked = true;
+        msg.first_blocked_path_index = idx;
+        msg.first_blocked_path_pose = path_pose;
+        msg.distance_to_first_blocked_xy =
+          navigo_util::geometry_utils::euclidean_distance(pose, path_pose);
+        msg.path_distance_to_first_blocked = path_distance;
+      }
+    }
+  }
 
   geometry_msgs::msg::PoseStamped transformed_end_pose;
   try {

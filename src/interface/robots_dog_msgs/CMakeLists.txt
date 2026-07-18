@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD 17)
 option(USE_VERSION_FILE "use version file" OFF)
 
 find_package(ament_cmake REQUIRED)
+find_package(builtin_interfaces REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
@@ -38,6 +39,7 @@ set(msg_files
         "msg/LED.msg"
         "msg/LegControlData.msg"
         "msg/LinktrackAoaNode0.msg"
+        "msg/LivoxBridgeDebug.msg"
         "msg/Localization.msg"
         "msg/LowCmd.msg"
         "msg/LowLevelCmd.msg"
@@ -110,7 +112,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
         ${msg_files}
         ${srv_files}
         ${action_files}
-        DEPENDENCIES std_msgs nav_msgs geometry_msgs sensor_msgs diagnostic_msgs
+        DEPENDENCIES builtin_interfaces std_msgs nav_msgs geometry_msgs sensor_msgs diagnostic_msgs
 )
 
 # 安装其他项目的需求

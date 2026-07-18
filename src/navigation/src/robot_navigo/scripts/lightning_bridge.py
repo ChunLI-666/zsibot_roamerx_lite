@@ -14,10 +14,12 @@ Author: Claude Code
 
 import math
 import struct
+import time
 from typing import Optional, Sequence, Tuple
 
 import rclpy
 from rclpy.node import Node
+from rclpy.time import Time
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from tf2_ros import TransformBroadcaster, StaticTransformBroadcaster, Buffer, TransformListener
 from tf2_msgs.msg import TFMessage
@@ -25,6 +27,7 @@ from geometry_msgs.msg import TransformStamped, Quaternion
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import PointCloud2, PointField, LaserScan
 from livox_ros_driver2.msg import CustomMsg
+from robots_dog_msgs.msg import LivoxBridgeDebug
 
 
 def quaternion_to_euler_yaw(q: Quaternion) -> float:
@@ -112,8 +115,10 @@ class LightningBridge(Node):
         self.declare_parameter('enable_odom_publisher', False)
         self.declare_parameter('enable_livox_converter', True)
         self.declare_parameter('enable_laserscan', True)
+        self.declare_parameter('sensor_qos_depth', 1)
+        self.declare_parameter('max_sensor_age_sec', 0.5)
 
-                # LiDAR mounting extrinsics: base_link -> livox_frame (XYZRPY)
+        # LiDAR mounting extrinsics: base_link -> livox_frame (XYZRPY)
         # Positive pitch = LiDAR tilts forward (前倾). Unit: radians.
         # Example: Mid360 mounted with 15° forward tilt => lidar_pitch = 0.2618
         self.declare_parameter('lidar_x', 0.0)      # forward offset (m)
@@ -156,16 +161,19 @@ class LightningBridge(Node):
         # Topic parameters
         self.declare_parameter('livox_input_topic', '/livox/lidar')
         self.declare_parameter('pointcloud_output_topic', '/livox/lidar/pointcloud2')
+        self.declare_parameter('bridge_debug_topic', '/lightning_bridge/debug')
         self.declare_parameter('laserscan_output_topic', '/laser_scan')
         self.declare_parameter('odom_output_topic', '/odom/current_pose')
 
         # Get parameters
         self.enable_tf_bridge = self.get_parameter('enable_tf_bridge').value
         self.enable_odom_publisher = self.get_parameter('enable_odom_publisher').value
+        self.sensor_qos_depth = max(1, int(self.get_parameter('sensor_qos_depth').value))
+        self.max_sensor_age_sec = float(self.get_parameter('max_sensor_age_sec').value)
         self.enable_livox_converter = self.get_parameter('enable_livox_converter').value
         self.enable_laserscan = self.get_parameter('enable_laserscan').value
 
-                # LiDAR extrinsics
+        # LiDAR extrinsics
         self.lidar_x = self.get_parameter('lidar_x').value
         self.lidar_y = self.get_parameter('lidar_y').value
         self.lidar_z = self.get_parameter('lidar_z').value
@@ -216,6 +224,7 @@ class LightningBridge(Node):
         livox_input_topic = self.get_parameter('livox_input_topic').value
         pointcloud_output_topic = self.get_parameter('pointcloud_output_topic').value
         laserscan_output_topic = self.get_parameter('laserscan_output_topic').value
+        bridge_debug_topic = self.get_parameter('bridge_debug_topic').value
         odom_output_topic = self.get_parameter('odom_output_topic').value
 
         self.get_logger().info(f'use_sim_time: {self.get_parameter("use_sim_time").value}')
@@ -242,6 +251,7 @@ class LightningBridge(Node):
         # State tracking
         self.lightning_active = False
         self.transform_count = 0
+        self.callback_sequence = 0
         self.last_map_to_odom: Optional[TransformStamped] = None
 
         # Calculate number of laser scan ranges
@@ -251,7 +261,12 @@ class LightningBridge(Node):
         qos_best_effort = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             durability=DurabilityPolicy.VOLATILE,
-            depth=10
+            depth=self.sensor_qos_depth
+        )
+        self.bridge_debug_pub = self.create_publisher(
+            LivoxBridgeDebug,
+            bridge_debug_topic,
+            qos_best_effort
         )
 
         # === TF Bridge ===
@@ -447,39 +462,75 @@ class LightningBridge(Node):
         self.odom_pub.publish(odom_msg)
 
     def livox_callback(self, msg: CustomMsg):
-        """Convert Livox CustomMsg to PointCloud2 and optionally LaserScan."""
-        # Convert to PointCloud2
-        cloud = PointCloud2()
-        cloud.header = msg.header  # Preserve original timestamp and frame_id
-        cloud.height = 1
-        cloud.width = msg.point_num
-        cloud.is_dense = False
-        cloud.is_bigendian = False
+        """Convert the newest Livox frame and report processing freshness."""
+        callback_start = time.perf_counter()
+        now = self.get_clock().now()
+        self.callback_sequence += 1
 
-        cloud.fields = [
-            PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
-            PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
-            PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1),
-            PointField(name='intensity', offset=12, datatype=PointField.FLOAT32, count=1),
-        ]
+        debug = LivoxBridgeDebug()
+        debug.header.stamp = now.to_msg()
+        debug.header.frame_id = self.target_frame
+        debug.input_stamp = msg.header.stamp
+        debug.input_frame_id = msg.header.frame_id
+        debug.callback_sequence = self.callback_sequence
+        debug.input_points = len(msg.points)
+        debug.subscriber_qos_depth = self.sensor_qos_depth
 
-        cloud.point_step = 16
-        cloud.row_step = cloud.point_step * cloud.width
+        input_stamp_ns = Time.from_msg(msg.header.stamp).nanoseconds
+        if input_stamp_ns > 0:
+            debug.input_age_sec = (now.nanoseconds - input_stamp_ns) * 1e-9
 
-        # Convert points to binary data
-        data = []
-        for point in msg.points:
-            data.append(struct.pack('ffff', point.x, point.y, point.z, float(point.reflectivity)))
+        if (self.max_sensor_age_sec > 0.0 and input_stamp_ns > 0 and
+                debug.input_age_sec > self.max_sensor_age_sec):
+            debug.stale_input = True
+            debug.dropped_input = True
+            debug.drop_reason = 'input_age_exceeded'
+            debug.callback_duration_ms = (time.perf_counter() - callback_start) * 1000.0
+            self.bridge_debug_pub.publish(debug)
+            self.get_logger().warn(
+                f'Dropping stale Livox frame: age={debug.input_age_sec:.3f}s, '
+                f'limit={self.max_sensor_age_sec:.3f}s',
+                throttle_duration_sec=2.0)
+            return
 
-        cloud.data = b''.join(data)
+        # PointCloud2 packing is expensive in Python. Skip it unless another
+        # process is actually consuming the converted cloud.
+        if self.enable_livox_converter and self.pointcloud_pub.get_subscription_count() > 0:
+            pack_start = time.perf_counter()
+            cloud = PointCloud2()
+            cloud.header = msg.header
+            cloud.height = 1
+            cloud.width = len(msg.points)
+            cloud.is_dense = False
+            cloud.is_bigendian = False
+            cloud.fields = [
+                PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
+                PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
+                PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1),
+                PointField(name='intensity', offset=12, datatype=PointField.FLOAT32, count=1),
+            ]
+            cloud.point_step = 16
+            cloud.row_step = cloud.point_step * cloud.width
 
-        # Publish PointCloud2
-        if self.enable_livox_converter:
+            data = bytearray(cloud.row_step)
+            for index, point in enumerate(msg.points):
+                struct.pack_into(
+                    '<ffff', data, index * cloud.point_step,
+                    point.x, point.y, point.z, float(point.reflectivity))
+            cloud.data = bytes(data)
             self.pointcloud_pub.publish(cloud)
+            debug.pointcloud_published = True
+            debug.pointcloud_pack_ms = (time.perf_counter() - pack_start) * 1000.0
 
-        # Generate LaserScan directly from Livox points (more efficient)
         if self.enable_laserscan:
-            self._generate_laserscan_from_livox(msg)
+            scan_start = time.perf_counter()
+            (debug.scan_points_used,
+             debug.finite_scan_bins) = self._generate_laserscan_from_livox(msg)
+            debug.laserscan_published = True
+            debug.laserscan_build_ms = (time.perf_counter() - scan_start) * 1000.0
+
+        debug.callback_duration_ms = (time.perf_counter() - callback_start) * 1000.0
+        self.bridge_debug_pub.publish(debug)
 
     def pointcloud_callback(self, msg: PointCloud2):
         """Convert PointCloud2 to LaserScan (used if livox converter is disabled)."""
@@ -487,17 +538,13 @@ class LightningBridge(Node):
             self._generate_laserscan_from_pointcloud2(msg)
 
     def _generate_laserscan_from_livox(self, msg: CustomMsg):
-        """Generate LaserScan directly from Livox CustomMsg points.
-
-        This is more efficient than going through PointCloud2 since we can
-        directly access the point coordinates.
-        """
-        # Initialize ranges with inf or max range
+        """Generate LaserScan directly from Livox CustomMsg points."""
         if self.use_inf:
             ranges = [float('inf')] * self.num_ranges
         else:
             ranges = [self.range_max] * self.num_ranges
 
+        scan_points_used = 0
         points = []
         for point in msg.points:
             transformed = self._transform_livox_point(point.x, point.y, point.z)
@@ -519,27 +566,22 @@ class LightningBridge(Node):
             if height < self.min_height or height > self.max_height:
                 continue
 
-            # Range filter
             if range_val < self.range_min or range_val > self.range_max:
                 continue
 
             angle = math.atan2(y, x)
-
-            # Angle filter
             if angle < self.angle_min or angle > self.angle_max:
                 continue
 
-            # Calculate index
             index = int((angle - self.angle_min) / self.angle_increment)
             if 0 <= index < self.num_ranges:
-                # Keep the closest point for each angle bin
+                scan_points_used += 1
                 if range_val < ranges[index]:
                     ranges[index] = range_val
 
-        # Create LaserScan message
         scan = LaserScan()
         scan.header = msg.header
-        scan.header.frame_id = self.target_frame  # LaserScan should be in target frame
+        scan.header.frame_id = self.target_frame
         scan.angle_min = self.angle_min
         scan.angle_max = self.angle_max
         scan.angle_increment = self.angle_increment
@@ -548,9 +590,11 @@ class LightningBridge(Node):
         scan.range_min = self.range_min
         scan.range_max = self.range_max
         scan.ranges = ranges
-        scan.intensities = []  # Not populated for simplicity
+        scan.intensities = []
 
         self.laserscan_pub.publish(scan)
+        finite_scan_bins = sum(1 for range_value in ranges if math.isfinite(range_value))
+        return scan_points_used, finite_scan_bins
 
     def _generate_laserscan_from_pointcloud2(self, msg: PointCloud2):
         """Generate LaserScan from PointCloud2 message."""
