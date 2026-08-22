@@ -32,6 +32,7 @@ from launch.actions import (
     ExecuteProcess,
     OpaqueFunction,
 )
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
@@ -111,48 +112,60 @@ def generate_launch_description():
 
     declare_enable_livox_converter_cmd = DeclareLaunchArgument(
         'enable_livox_converter',
-        default_value='true',
-        description='Enable Livox CustomMsg to PointCloud2 conversion')
+        default_value='false',
+        description='Enable optional Livox CustomMsg to PointCloud2 visualization output')
 
     declare_enable_laserscan_cmd = DeclareLaunchArgument(
         'enable_laserscan',
         default_value='true',
-        description='Enable LaserScan generation from PointCloud2')
+        description='Enable direct Livox CustomMsg to LaserScan projection')
 
-    # Step 1: Lightning Bridge (starts immediately)
-    # Provides: TF bridge, Odometry publisher, Livox converter, LaserScan generator
-    lightning_bridge = Node(
+    # Optional visualization path. It is deliberately outside the navigation
+    # hot path so PointCloud2 packing cannot delay obstacle observations.
+    pointcloud_bridge = Node(
+        condition=IfCondition(enable_livox_converter),
         package='robot_navigo',
         executable='lightning_bridge.py',
-        name='lightning_bridge',
+        name='lightning_pointcloud_bridge',
         output='both',
         parameters=[{
             'use_sim_time': use_sim_time,
-            # TF and Odom are now published natively by lightning_slam.
             'enable_tf_bridge': False,
             'enable_odom_publisher': False,
-            # Livox and LaserScan (configurable)
-            'enable_livox_converter': enable_livox_converter,
-            'enable_laserscan': enable_laserscan,
+            'enable_livox_converter': True,
+            'enable_laserscan': False,
+            'publish_lidar_static_tf': False,
             'sensor_qos_depth': 1,
-            'max_sensor_age_sec': 0.5,
-            # Topics
+            'max_sensor_age_sec': 0.3,
             'livox_input_topic': '/livox/lidar',
             'pointcloud_output_topic': '/livox/lidar/pointcloud2',
-            'bridge_debug_topic': '/lightning_bridge/debug',
+            'bridge_debug_topic': '/lightning_pointcloud_bridge/debug',
+        }]
+    )
+
+    # Navigation hot path: one C++ pass over CustomMsg, no intermediate cloud.
+    scan_projector = Node(
+        condition=IfCondition(enable_laserscan),
+        package='robot_navigo',
+        executable='livox_scan_projector',
+        name='livox_scan_projector',
+        output='both',
+        parameters=[{
+            'use_sim_time': use_sim_time,
+            'sensor_qos_depth': 1,
+            'max_sensor_age_sec': 0.3,
+            'livox_input_topic': '/livox/lidar',
             'laserscan_output_topic': '/laser_scan',
-            'odom_output_topic': '/odom/current_pose',
-            # LaserScan parameters
+            'bridge_debug_topic': '/lightning_bridge/debug',
             'target_frame': 'base_link',
-            'min_height': 0.0,
-            'max_height': 0.5,
-            'enable_ground_filter': False,
-            'ground_filter_distance': 0.12,
-            'angle_min': -3.14159,
-            'angle_max': 3.14159,
+            'min_height': 0.05,
+            'max_height': 0.45,
+            'angle_min': -3.141592653589793,
+            'angle_max': 3.141592653589793,
             'angle_increment': 0.0087,
-            'range_min': 0.5,
+            'range_min': 0.1,
             'range_max': 50.0,
+            'exclude_robot_footprint': True,
             'use_inf': True,
         }]
     )
@@ -206,8 +219,9 @@ def generate_launch_description():
     ld.add_action(declare_enable_livox_converter_cmd)
     ld.add_action(declare_enable_laserscan_cmd)
 
-    # Start immediately: Lightning Bridge + Safety Gate
-    ld.add_action(lightning_bridge)
+    # Start immediately: sensor projection + optional visualization + safety gate
+    ld.add_action(pointcloud_bridge)
+    ld.add_action(scan_projector)
     ld.add_action(nav_safety_gate)
 
     # Delayed start: Navigation stack

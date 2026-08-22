@@ -153,8 +153,8 @@ def generate_launch_description():
     # Sensor processing arguments
     declare_enable_livox_converter_cmd = DeclareLaunchArgument(
         'enable_livox_converter',
-        default_value='true',
-        description='Enable Livox CustomMsg to PointCloud2 conversion')
+        default_value='false',
+        description='Enable optional Livox CustomMsg to PointCloud2 visualization output')
 
     declare_enable_laserscan_cmd = DeclareLaunchArgument(
         'enable_laserscan',
@@ -163,32 +163,51 @@ def generate_launch_description():
 
     # ==================== Nodes ====================
 
-    # 1. Lightning Bridge (TF + Odom + Livox + LaserScan)
-    lightning_bridge = Node(
+    # Optional PointCloud2 visualization path. Navigation does not depend on it.
+    pointcloud_bridge = Node(
+        condition=IfCondition(enable_livox_converter),
         package='robot_navigo',
         executable='lightning_bridge.py',
-        name='lightning_bridge',
+        name='lightning_pointcloud_bridge',
         output='both',
         parameters=[{
             'use_sim_time': use_sim_time,
             'enable_tf_bridge': False,
             'enable_odom_publisher': False,
-            'enable_livox_converter': enable_livox_converter,
-            'enable_laserscan': enable_laserscan,
+            'enable_livox_converter': True,
+            'enable_laserscan': False,
+            'publish_lidar_static_tf': False,
+            'sensor_qos_depth': 1,
+            'max_sensor_age_sec': 0.3,
             'livox_input_topic': '/livox/lidar',
             'pointcloud_output_topic': '/livox/lidar/pointcloud2',
+            'bridge_debug_topic': '/lightning_pointcloud_bridge/debug',
+        }]
+    )
+
+    # Real-time obstacle path: direct C++ CustomMsg -> LaserScan projection.
+    scan_projector = Node(
+        condition=IfCondition(enable_laserscan),
+        package='robot_navigo',
+        executable='livox_scan_projector',
+        name='livox_scan_projector',
+        output='both',
+        parameters=[{
+            'use_sim_time': use_sim_time,
+            'sensor_qos_depth': 1,
+            'max_sensor_age_sec': 0.3,
+            'livox_input_topic': '/livox/lidar',
             'laserscan_output_topic': '/laser_scan',
-            'odom_output_topic': '/odom/current_pose',
+            'bridge_debug_topic': '/lightning_bridge/debug',
             'target_frame': 'base_link',
             'min_height': 0.05,
             'max_height': 0.45,
-            'enable_ground_filter': False,
-            'ground_filter_distance': 0.12,
-            'angle_min': -3.14159,
-            'angle_max': 3.14159,
+            'angle_min': -3.141592653589793,
+            'angle_max': 3.141592653589793,
             'angle_increment': 0.0087,
-            'range_min': 0.5,
+            'range_min': 0.1,
             'range_max': 50.0,
+            'exclude_robot_footprint': True,
             'use_inf': True,
         }]
     )
@@ -220,7 +239,7 @@ def generate_launch_description():
             'local_port': local_port,
             'cmd_vel_topic': '/cmd_vel_safe',
             'max_linear_x': 0.15,
-            'max_linear_y': 0.0,
+            'max_linear_y': 0.15,
             'max_angular_z': 0.1,
             'cmd_timeout': 0.5,
             'publish_rate': 100.0,
@@ -283,8 +302,9 @@ def generate_launch_description():
 
     # Start nodes
     ld.add_action(LogInfo(msg='Starting ZsiBot Navigation System...'))
-    ld.add_action(LogInfo(msg='  [1/5] Lightning Bridge'))
-    ld.add_action(lightning_bridge)
+    ld.add_action(LogInfo(msg='  [1/5] Direct Livox LaserScan projector'))
+    ld.add_action(pointcloud_bridge)
+    ld.add_action(scan_projector)
 
     ld.add_action(LogInfo(msg='  [2/5] Navigation Safety Gate'))
     ld.add_action(nav_safety_gate)

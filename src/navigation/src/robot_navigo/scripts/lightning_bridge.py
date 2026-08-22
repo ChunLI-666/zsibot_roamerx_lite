@@ -115,6 +115,7 @@ class LightningBridge(Node):
         self.declare_parameter('enable_odom_publisher', False)
         self.declare_parameter('enable_livox_converter', True)
         self.declare_parameter('enable_laserscan', True)
+        self.declare_parameter('publish_lidar_static_tf', True)
         self.declare_parameter('sensor_qos_depth', 1)
         self.declare_parameter('max_sensor_age_sec', 0.5)
 
@@ -172,6 +173,7 @@ class LightningBridge(Node):
         self.max_sensor_age_sec = float(self.get_parameter('max_sensor_age_sec').value)
         self.enable_livox_converter = self.get_parameter('enable_livox_converter').value
         self.enable_laserscan = self.get_parameter('enable_laserscan').value
+        self.publish_lidar_static_tf = self.get_parameter('publish_lidar_static_tf').value
 
         # LiDAR extrinsics
         self.lidar_x = self.get_parameter('lidar_x').value
@@ -245,8 +247,9 @@ class LightningBridge(Node):
 
         # Static TF: base_link -> livox_frame (LiDAR mounting extrinsics)
         # Published once on /tf_static, survives for the lifetime of the node
-        self.static_tf_broadcaster = StaticTransformBroadcaster(self)
-        self._publish_static_lidar_tf()
+        if self.publish_lidar_static_tf:
+            self.static_tf_broadcaster = StaticTransformBroadcaster(self)
+            self._publish_static_lidar_tf()
 
         # State tracking
         self.lightning_active = False

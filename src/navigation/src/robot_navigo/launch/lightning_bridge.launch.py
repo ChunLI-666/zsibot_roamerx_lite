@@ -11,6 +11,7 @@ This launch file starts the Lightning Bridge node which provides:
 import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
@@ -75,13 +76,13 @@ def generate_launch_description():
 
     declare_enable_livox_converter_cmd = DeclareLaunchArgument(
         'enable_livox_converter',
-        default_value='true',
-        description='Enable Livox CustomMsg to PointCloud2 conversion')
+        default_value='false',
+        description='Enable optional Livox CustomMsg to PointCloud2 conversion')
 
     declare_enable_laserscan_cmd = DeclareLaunchArgument(
         'enable_laserscan',
         default_value='true',
-        description='Enable LaserScan generation from PointCloud2')
+        description='Enable direct C++ CustomMsg to LaserScan projection')
 
     declare_livox_input_topic_cmd = DeclareLaunchArgument(
         'livox_input_topic',
@@ -155,12 +156,12 @@ def generate_launch_description():
 
     declare_angle_min_cmd = DeclareLaunchArgument(
         'angle_min',
-        default_value='-3.14159',
+        default_value='-3.141592653589793',
         description='Minimum angle for LaserScan')
 
     declare_angle_max_cmd = DeclareLaunchArgument(
         'angle_max',
-        default_value='3.14159',
+        default_value='3.141592653589793',
         description='Maximum angle for LaserScan')
 
     declare_angle_increment_cmd = DeclareLaunchArgument(
@@ -170,7 +171,7 @@ def generate_launch_description():
 
     declare_range_min_cmd = DeclareLaunchArgument(
         'range_min',
-        default_value='0.5',
+        default_value='0.1',
         description='Minimum range for LaserScan')
 
     declare_range_max_cmd = DeclareLaunchArgument(
@@ -178,11 +179,12 @@ def generate_launch_description():
         default_value='50.0',
         description='Maximum range for LaserScan')
 
-    # Lightning Bridge node
+    # Optional legacy/visualization functions. LaserScan is handled by the
+    # direct C++ projector below and never passes through PointCloud2.
     lightning_bridge_node = Node(
         package='robot_navigo',
         executable='lightning_bridge.py',
-        name='lightning_bridge',
+        name='lightning_legacy_bridge',
         output='screen',
         parameters=[{
             'use_sim_time': use_sim_time,
@@ -196,13 +198,14 @@ def generate_launch_description():
             # TF and Odom
             'enable_tf_bridge': enable_tf_bridge,
             'enable_odom_publisher': enable_odom_publisher,
-            # Livox and LaserScan
+            # Optional PointCloud2 only
             'enable_livox_converter': enable_livox_converter,
-            'enable_laserscan': enable_laserscan,
+            'enable_laserscan': False,
+            'publish_lidar_static_tf': False,
             # Topics
             'livox_input_topic': livox_input_topic,
             'pointcloud_output_topic': pointcloud_output_topic,
-            'laserscan_output_topic': laserscan_output_topic,
+            'bridge_debug_topic': '/lightning_pointcloud_bridge/debug',
             'odom_output_topic': odom_output_topic,
             # LaserScan parameters
             'target_frame': target_frame,
@@ -215,6 +218,36 @@ def generate_launch_description():
             'angle_increment': angle_increment,
             'range_min': range_min,
             'range_max': range_max,
+            'use_inf': True,
+        }]
+    )
+
+    scan_projector_node = Node(
+        condition=IfCondition(enable_laserscan),
+        package='robot_navigo',
+        executable='livox_scan_projector',
+        name='livox_scan_projector',
+        output='screen',
+        parameters=[{
+            'use_sim_time': use_sim_time,
+            'livox_input_topic': livox_input_topic,
+            'laserscan_output_topic': laserscan_output_topic,
+            'bridge_debug_topic': '/lightning_bridge/debug',
+            'lidar_x': lidar_x,
+            'lidar_y': lidar_y,
+            'lidar_z': lidar_z,
+            'lidar_roll': lidar_roll,
+            'lidar_pitch': lidar_pitch,
+            'lidar_yaw': lidar_yaw,
+            'target_frame': target_frame,
+            'min_height': min_height,
+            'max_height': max_height,
+            'angle_min': angle_min,
+            'angle_max': angle_max,
+            'angle_increment': angle_increment,
+            'range_min': range_min,
+            'range_max': range_max,
+            'exclude_robot_footprint': True,
             'use_inf': True,
         }]
     )
@@ -251,5 +284,6 @@ def generate_launch_description():
 
     # Add node
     ld.add_action(lightning_bridge_node)
+    ld.add_action(scan_projector_node)
 
     return ld
