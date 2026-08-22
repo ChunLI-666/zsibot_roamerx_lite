@@ -30,6 +30,7 @@
 #include "navigo_util/geometry_utils.hpp"
 #include "navigo_costmap_2d/cost_values.hpp"
 #include "navigo_path_controller/controller_server.hpp"
+#include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 #include "tf2/utils.h"
 
 using namespace std::chrono_literals;
@@ -65,6 +66,7 @@ ControllerServer::ControllerServer(const rclcpp::NodeOptions & options)
   declare_parameter("speed_limit_topic", rclcpp::ParameterValue("speed_limit"));
 
   declare_parameter("failure_tolerance", rclcpp::ParameterValue(0.0));
+  declare_parameter("costmap_update_timeout", rclcpp::ParameterValue(0.3));
 
   // The costmap node is used in the implementation of the controller
   costmap_ros_ = std::make_shared<navigo_costmap_2d::Costmap2DROS>(
@@ -124,6 +126,7 @@ ControllerServer::on_configure(const rclcpp_lifecycle::State & /*state*/)
   std::string speed_limit_topic;
   get_parameter("speed_limit_topic", speed_limit_topic);
   get_parameter("failure_tolerance", failure_tolerance_);
+  get_parameter("costmap_update_timeout", costmap_update_timeout_);
 
   costmap_ros_->configure();
   // Launch a thread to run the costmap node
@@ -405,9 +408,23 @@ void ControllerServer::computeControl()
         return;
       }
 
-      // Don't compute a trajectory until costmap is valid (after clear costmap)
+      // Never leave the previous command active while obstacle observations are stale.
+      const auto costmap_wait_start = std::chrono::steady_clock::now();
+      bool stale_stop_published = false;
       rclcpp::Rate r(100);
       while (!costmap_ros_->isCurrent()) {
+        if (!stale_stop_published) {
+          publishZeroVelocity();
+          stale_stop_published = true;
+        }
+        if (!rclcpp::ok() || action_server_->is_cancel_requested()) {
+          throw navigo_core::PlannerException("Controller stopped while waiting for costmap");
+        }
+        const double wait_seconds = std::chrono::duration<double>(
+          std::chrono::steady_clock::now() - costmap_wait_start).count();
+        if (wait_seconds > costmap_update_timeout_) {
+          throw navigo_core::PlannerException("Costmap observations are stale");
+        }
         r.sleep();
       }
 
@@ -478,9 +495,9 @@ void ControllerServer::computeAndPublishVelocity()
     throw navigo_core::PlannerException("Failed to obtain robot pose");
   }
 
-  // if (!progress_checker_->check(pose)) {
-  //   throw navigo_core::PlannerException("Failed to make progress");
-  // }
+  if (!progress_checker_->check(pose)) {
+    throw navigo_core::PlannerException("Failed to make progress");
+  }
 
   nav_2d_msgs::msg::Twist2D twist = getThresholdedTwist(odom_sub_->getTwist());
 
@@ -521,13 +538,29 @@ void ControllerServer::computeAndPublishVelocity()
 
   // Find the closest pose to current pose on global path
   nav_msgs::msg::Path & current_path = current_path_;
+  geometry_msgs::msg::PoseStamped pose_in_path_frame = pose;
+  const std::string path_frame = current_path.header.frame_id.empty() ?
+    current_path.poses.front().header.frame_id : current_path.header.frame_id;
+  if (!path_frame.empty() && path_frame != pose.header.frame_id) {
+    rclcpp::Duration tolerance(
+      rclcpp::Duration::from_seconds(costmap_ros_->getTransformTolerance()));
+    if (!nav_2d_utils::transformPose(
+        costmap_ros_->getTfBuffer(), path_frame, pose, pose_in_path_frame, tolerance))
+    {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 2000,
+        "Unable to transform controller feedback pose from %s to %s",
+        pose.header.frame_id.c_str(), path_frame.c_str());
+      pose_in_path_frame = pose;
+    }
+  }
   auto find_closest_pose_idx =
-    [&pose, &current_path]() {
+    [&pose_in_path_frame, &current_path]() {
       size_t closest_pose_idx = 0;
       double curr_min_dist = std::numeric_limits<double>::max();
       for (size_t curr_idx = 0; curr_idx < current_path.poses.size(); ++curr_idx) {
         double curr_dist = navigo_util::geometry_utils::euclidean_distance(
-          pose, current_path.poses[curr_idx]);
+          pose_in_path_frame, current_path.poses[curr_idx]);
         if (curr_dist < curr_min_dist) {
           curr_min_dist = curr_dist;
           closest_pose_idx = curr_idx;
@@ -653,7 +686,22 @@ void ControllerServer::publishControllerDebug(
   const std::string & costmap_frame = costmap_ros_->getGlobalFrameID();
   const std::string path_frame = current_path_.header.frame_id.empty() ?
     current_path_.poses.front().header.frame_id : current_path_.header.frame_id;
-  msg.path_costs_valid = path_frame.empty() || path_frame == costmap_frame;
+  geometry_msgs::msg::TransformStamped path_to_costmap;
+  const bool transform_path = !path_frame.empty() && path_frame != costmap_frame;
+  msg.path_costs_valid = true;
+  if (transform_path) {
+    try {
+      path_to_costmap = costmap_ros_->getTfBuffer()->lookupTransform(
+        costmap_frame, path_frame, tf2::TimePointZero,
+        tf2::durationFromSec(costmap_ros_->getTransformTolerance()));
+    } catch (const tf2::TransformException & ex) {
+      msg.path_costs_valid = false;
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 2000,
+        "Unable to transform debug path from %s to %s: %s",
+        path_frame.c_str(), costmap_frame.c_str(), ex.what());
+    }
+  }
 
   if (msg.path_costs_valid) {
     std::unique_lock<navigo_costmap_2d::Costmap2D::mutex_t> costmap_lock(
@@ -677,10 +725,14 @@ void ControllerServer::publishControllerDebug(
 
       ++msg.path_points_evaluated;
       const auto & path_pose = current_path_.poses[idx];
+      geometry_msgs::msg::PoseStamped costmap_path_pose = path_pose;
+      if (transform_path) {
+        tf2::doTransform(path_pose, costmap_path_pose, path_to_costmap);
+      }
       unsigned int mx = 0;
       unsigned int my = 0;
       if (!costmap->worldToMap(
-          path_pose.pose.position.x, path_pose.pose.position.y, mx, my))
+          costmap_path_pose.pose.position.x, costmap_path_pose.pose.position.y, mx, my))
       {
         ++msg.path_points_outside_costmap;
         continue;
@@ -706,9 +758,9 @@ void ControllerServer::publishControllerDebug(
       if (!msg.path_blocked) {
         msg.path_blocked = true;
         msg.first_blocked_path_index = idx;
-        msg.first_blocked_path_pose = path_pose;
+        msg.first_blocked_path_pose = costmap_path_pose;
         msg.distance_to_first_blocked_xy =
-          navigo_util::geometry_utils::euclidean_distance(pose, path_pose);
+          navigo_util::geometry_utils::euclidean_distance(pose, costmap_path_pose);
         msg.path_distance_to_first_blocked = path_distance;
       }
     }

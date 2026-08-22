@@ -106,9 +106,11 @@ behavior_server:
 local_costmap:
   local_costmap:
     ros__parameters:
-      update_frequency: 5.0
+      update_frequency: 10.0
       publish_frequency: 2.0
-      global_frame: map
+      # Keep short-horizon obstacle tracking isolated from global localization
+      # corrections. The global path is transformed from map into odom.
+      global_frame: odom
       robot_base_frame: base_link
       use_sim_time: False
       rolling_window: true
@@ -120,16 +122,18 @@ local_costmap:
       inflation_layer:
         plugin: "navigo_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.0
-        inflation_radius: 0.01
+        # The footprint circumscribed radius is 0.335m. Keep a small margin
+        # beyond it so MPPI can safely use center-cell costs as a fast gate.
+        inflation_radius: 0.40
       obstacle_layer:
         plugin: "navigo_costmap_2d::ObstacleLayer"
         enabled: True
         footprint_clearing_enabled: true
-        observation_persistence: 0.0
+        observation_persistence: 0.2
         observation_sources: scan
         scan:
           topic: /laser_scan
-          expected_update_rate: 0.3
+          expected_update_rate: 0.2
           max_obstacle_height: 2.0
           clearing: True
           marking: True
@@ -138,8 +142,8 @@ local_costmap:
           raytrace_max_range: 8.0
           raytrace_min_range: 0.0
           obstacle_max_range: 8.5
-          obstacle_min_range: 0.5
-      always_send_full_costmap: True
+          obstacle_min_range: 0.1
+      always_send_full_costmap: False
   local_costmap_client:
     ros__parameters:
       use_sim_time: False
@@ -150,25 +154,45 @@ local_costmap:
 global_costmap:
   global_costmap:
     ros__parameters:
-      update_frequency: 10.0
-      publish_frequency: 10.0
+      # The planner replans at 1 Hz. Updating at 2 Hz keeps dynamic obstacles
+      # fresh without serializing the full 1.5M-cell map ten times per second.
+      update_frequency: 2.0
+      publish_frequency: 1.0
       global_frame: map
       robot_base_frame: base_link
       use_sim_time: False
       footprint: "[[0.30,0.15],[0.30,-0.15],[-0.30,-0.15],[-0.30,0.15]]"
       resolution: 0.05
       track_unknown_space: true
-      plugins: ["static_layer", "inflation_layer"]
+      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
       static_layer:
         plugin: "navigo_costmap_2d::StaticLayer"
-        map_subscribe_transient_local: False
+        map_subscribe_transient_local: True
         footprint_clearing_enabled: True
         restore_cleared_footprint: True
+      obstacle_layer:
+        plugin: "navigo_costmap_2d::ObstacleLayer"
+        enabled: True
+        footprint_clearing_enabled: true
+        observation_persistence: 0.2
+        observation_sources: scan
+        scan:
+          topic: /laser_scan
+          expected_update_rate: 0.2
+          max_obstacle_height: 2.0
+          clearing: True
+          marking: True
+          inf_is_valid: true
+          data_type: "LaserScan"
+          raytrace_max_range: 8.0
+          raytrace_min_range: 0.0
+          obstacle_max_range: 8.5
+          obstacle_min_range: 0.1
       inflation_layer:
         plugin: "navigo_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.0
-        inflation_radius: 0.01
-      always_send_full_costmap: True
+        inflation_radius: 0.40
+      always_send_full_costmap: False
 
 map_server:
   ros__parameters:
@@ -185,7 +209,7 @@ map_saver:
 
 planner_server:
   ros__parameters:
-    expected_planner_frequency: 20.0
+    expected_planner_frequency: 1.0
     odom_topic: /odom/current_pose
     use_sim_time: False
     planner_plugins: ["GridBased"]
@@ -198,6 +222,7 @@ planner_server:
 controller_server:
   ros__parameters:
     controller_frequency: 10.0
+    costmap_update_timeout: 0.3
     odom_topic: "/odom/current_pose"
     progress_checker_plugin: "progress_checker"
     goal_checker_plugins: ["general_goal_checker"] # "precise_goal_checker"
@@ -205,8 +230,9 @@ controller_server:
 
     # Progress checker parameters
     progress_checker:
-      plugin: "navigo_path_controller::SimpleProgressChecker"
-      required_movement_radius: 0.5
+      plugin: "navigo_path_controller::PoseProgressChecker"
+      required_movement_radius: 0.15
+      required_movement_angle: 0.2
       movement_time_allowance: 10.0
     # Goal checker parameters
     #precise_goal_checker:
@@ -231,8 +257,9 @@ controller_server:
       wz_std: 0.08
       vx_max: 0.15 #0.5
       vx_min: -0.15 #-0.35
-      # Navigation uses a DiffDrive model; lateral motion is reserved for docking.
-      vy_max: 0.0
+      # ZsiBot high-level control accepts body-frame vx/vy/wz setpoints.
+      # Keep every stage of the command chain within these same limits.
+      vy_max: 0.15
       wz_max: 0.1
       ax_max: 2.0
       ay_max: 2.0
@@ -243,7 +270,7 @@ controller_server:
       transform_tolerance: 0.1
       temperature: 0.3
       gamma: 0.015 #0.015
-      motion_model: "DiffDrive"
+      motion_model: "Omni"
       visualize_all_sampled_traj: false
       visualize_optimized_traj: true
       TrajectoryVisualizer:
@@ -311,9 +338,9 @@ smoother_server:
     use_sim_time: False
     smoother_plugins: [ "simple_smoother" ]
     simple_smoother:
-      plugin: "navigo_smoother::SimpleSmoother"
-      tolerance: 1.0e-10
-      max_its: 1000
+      plugin: "nav2_smoother::SimpleSmoother"
+      tolerance: 1.0e-5
+      max_its: 200
       do_refinement: True
 
 waypoint_follower:
@@ -328,20 +355,20 @@ waypoint_follower:
       enabled: True
       waypoint_pause_duration: 200
 
-velocity_optimizer:
+velocity_smoother:
   ros__parameters:
     smoothing_frequency: 20.0
     scale_velocities: false
     feedback: "OPEN_LOOP"
-    # Nav2 executable command contract: vx=0 or |vx|>=0.05, vy=0,
-    # wz=0 or |wz|>=0.02. Values below the SDK minimums are stopped here
+    # Nav2 executable command contract: vx=0 or |vx|>=0.05,
+    # vy=0 or |vy|>=0.10, wz=0 or |wz|>=0.02. Values below SDK minimums are stopped here
     # instead of being promoted by the robot controller.
-    max_velocity: [0.15, 0.0, 0.1]
-    min_velocity: [-0.15, 0.0, -0.1]
-    deadband_velocity: [0.05, 0.0, 0.02]
-    velocity_timeout: 0.3
-    max_accel: [1.5, 0.0, 1.5]
-    max_decel: [-1.5, 0.0, -1.5]
+    max_velocity: [0.15, 0.15, 0.1]
+    min_velocity: [-0.15, -0.15, -0.1]
+    deadband_velocity: [0.05, 0.10, 0.02]
+    velocity_timeout: 0.25
+    max_accel: [1.5, 1.5, 1.5]
+    max_decel: [-1.5, -1.5, -1.5]
     odom_topic: "/odom/current_pose"
     odom_duration: 0.1
     use_realtime_priority: false

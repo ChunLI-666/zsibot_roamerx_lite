@@ -26,10 +26,16 @@ def generate_launch_description():
     log_level = LaunchConfiguration('log_level')
     container_name = LaunchConfiguration('container_name')
     container_name_full = (namespace, '/', container_name)
+    ros_distro = os.environ.get('ROS_DISTRO', 'jazzy')
+    ros_lib_dir = os.path.join('/opt/ros', ros_distro, 'lib')
+    smoother_library_path = ros_lib_dir
+    if os.environ.get('LD_LIBRARY_PATH'):
+        smoother_library_path += ':' + os.environ['LD_LIBRARY_PATH']
 
     lifecycle_nodes = [
         'map_server',
         'controller_server',
+        'smoother_server',
         'planner_server',
         'behavior_server',
         'velocity_smoother',
@@ -58,6 +64,25 @@ def generate_launch_description():
 
     stdout_linebuf_envvar = SetEnvironmentVariable(
         'RCUTILS_LOGGING_BUFFERED_STREAM', '1'
+    )
+
+    # nav2_smoother links against upstream nav2_costmap_2d while this stack
+    # loads the navigo costmap fork. Keep it in a separate process to prevent
+    # ABI symbol collisions inside the composition container.
+    smoother_server = Node(
+        package='nav2_smoother',
+        executable='smoother_server',
+        namespace=namespace,
+        name='smoother_server',
+        output='screen',
+        respawn=use_respawn,
+        respawn_delay=2.0,
+        parameters=[configured_params],
+        arguments=['--ros-args', '--log-level', log_level],
+        remappings=remappings,
+        # The navigo overlay installs forked libraries with upstream SONAMEs.
+        # Force the upstream costmap client ahead of the overlay for this node.
+        additional_env={'LD_LIBRARY_PATH': smoother_library_path},
     )
 
     declare_namespace_cmd = DeclareLaunchArgument(
@@ -314,6 +339,7 @@ def generate_launch_description():
     ld.add_action(declare_use_respawn_cmd)
     ld.add_action(declare_log_level_cmd)
     ld.add_action(declare_container_name_cmd)
+    ld.add_action(smoother_server)
     # Add the actions to launch all of the navigation nodes
     ld.add_action(load_nodes)
     ld.add_action(load_composable_nodes)

@@ -41,6 +41,7 @@ find_package(navigation2 REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(livox_ros_driver2 REQUIRED)
 find_package(CURL REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
@@ -213,6 +214,19 @@ ament_target_dependencies(costmap_listener
         nav2_msgs
         rclcpp)
 
+# Direct CustomMsg -> LaserScan projection for the navigation hot path.
+add_executable(livox_scan_projector
+        src/livox_scan_projector.cpp
+)
+target_include_directories(livox_scan_projector PRIVATE include)
+ament_target_dependencies(livox_scan_projector
+        geometry_msgs
+        livox_ros_driver2
+        rclcpp
+        robots_dog_msgs
+        sensor_msgs
+        tf2_ros)
+
 #==========================>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 install(PROGRAMS
         scripts/emap_publisher.py
@@ -273,6 +287,12 @@ install(TARGETS costmap_listener
 install(TARGETS mode_status_pub
         DESTINATION lib/${PROJECT_NAME}
 )
+install(TARGETS livox_scan_projector
+        DESTINATION lib/${PROJECT_NAME}
+)
+install(DIRECTORY include/
+        DESTINATION include
+)
 # install(TARGETS detector_node
 #         DESTINATION lib/${PROJECT_NAME}
 # )
@@ -286,6 +306,19 @@ install(DIRECTORY launch params map rviz
         GROUP_READ GROUP_WRITE GROUP_EXECUTE
         WORLD_READ WORLD_WRITE WORLD_EXECUTE
 )
+
+if(BUILD_TESTING)
+    find_package(ament_cmake_gtest REQUIRED)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    ament_add_gtest(test_livox_scan_projection
+            test/test_livox_scan_projection.cpp)
+    target_include_directories(test_livox_scan_projection PRIVATE include)
+    add_test(
+            NAME test_navigation_contract
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_navigation_contract.py
+                    ${CMAKE_CURRENT_SOURCE_DIR})
+endif()
 
 ament_package()
 
