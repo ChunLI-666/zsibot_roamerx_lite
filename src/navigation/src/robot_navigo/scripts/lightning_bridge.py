@@ -1,4 +1,4 @@
-#!/usr/bin/python3.12
+#!/usr/bin/env python3
 
 """
 Lightning-LM Bridge Node - Unified sensor bridge for Nav2 integration
@@ -161,6 +161,7 @@ class LightningBridge(Node):
 
         # Topic parameters
         self.declare_parameter('livox_input_topic', '/livox/lidar')
+        self.declare_parameter('pointcloud_input_topic', '')
         self.declare_parameter('pointcloud_output_topic', '/livox/lidar/pointcloud2')
         self.declare_parameter('bridge_debug_topic', '/lightning_bridge/debug')
         self.declare_parameter('laserscan_output_topic', '/laser_scan')
@@ -224,7 +225,12 @@ class LightningBridge(Node):
         self.ground_filter_iterations = self.get_parameter('ground_filter_iterations').value
 
         livox_input_topic = self.get_parameter('livox_input_topic').value
+        pointcloud_input_topic = self.get_parameter('pointcloud_input_topic').value
         pointcloud_output_topic = self.get_parameter('pointcloud_output_topic').value
+        if not pointcloud_input_topic:
+            # Backward compatibility: older launch files used the output topic
+            # as the PointCloud2 input whenever Livox conversion was disabled.
+            pointcloud_input_topic = pointcloud_output_topic
         laserscan_output_topic = self.get_parameter('laserscan_output_topic').value
         bridge_debug_topic = self.get_parameter('bridge_debug_topic').value
         odom_output_topic = self.get_parameter('odom_output_topic').value
@@ -313,10 +319,12 @@ class LightningBridge(Node):
             if not self.enable_livox_converter:
                 self.pc2_sub = self.create_subscription(
                     PointCloud2,
-                    pointcloud_output_topic,
+                    pointcloud_input_topic,
                     self.pointcloud_callback,
                     qos_best_effort
                 )
+                self.get_logger().info(
+                    f'PointCloud2 LaserScan input: {pointcloud_input_topic}')
             self.laserscan_pub = self.create_publisher(
                 LaserScan,
                 laserscan_output_topic,

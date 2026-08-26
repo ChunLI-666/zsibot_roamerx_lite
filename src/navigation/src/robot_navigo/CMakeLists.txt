@@ -45,6 +45,7 @@ find_package(livox_ros_driver2 REQUIRED)
 find_package(CURL REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(lcm REQUIRED)
 find_package(navigo_behavior_tree REQUIRED)
 find_package(navigo_bt_navigator REQUIRED)
@@ -157,7 +158,8 @@ add_executable(vel_cmd_lcm_pub
 )
 ament_target_dependencies(vel_cmd_lcm_pub
         geometry_msgs
-        rclcpp)
+        rclcpp
+        std_srvs)
 target_link_libraries(vel_cmd_lcm_pub
         lcm_msg
         lcm
@@ -234,6 +236,9 @@ install(PROGRAMS
         scripts/nav_safety_gate.py
         scripts/emergency_stop.py
         scripts/emergency_stop_keyboard.py
+        scripts/matrix_closed_loop_preflight.sh
+        scripts/matrix_closed_loop_e2e.py
+        scripts/matrix_closed_loop_run.sh
         DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -296,7 +301,7 @@ install(DIRECTORY include/
 # install(TARGETS detector_node
 #         DESTINATION lib/${PROJECT_NAME}
 # )
-install(DIRECTORY launch params map rviz
+install(DIRECTORY launch params map rviz doc
         DESTINATION share/${PROJECT_NAME}
         DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
         GROUP_READ GROUP_WRITE GROUP_EXECUTE

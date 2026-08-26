@@ -12,6 +12,8 @@
 #include "rclcpp/rclcpp.hpp"
 #include "robots_dog_msgs/msg/livox_bridge_debug.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
+#include "sensor_msgs/msg/point_cloud2.hpp"
+#include "sensor_msgs/point_cloud2_iterator.hpp"
 #include "tf2_ros/static_transform_broadcaster.h"
 
 #include "robot_navigo/livox_scan_projection.hpp"
@@ -58,6 +60,7 @@ public:
 
     validateConfig();
 
+    const std::string input_type = declare_parameter("input_type", "livox_custom");
     const std::string input_topic = declare_parameter("livox_input_topic", "/livox/lidar");
     const std::string output_topic = declare_parameter("laserscan_output_topic", "/laser_scan");
     const std::string debug_topic = declare_parameter(
@@ -66,17 +69,26 @@ public:
     const auto qos = rclcpp::QoS(rclcpp::KeepLast(qos_depth_)).best_effort().durability_volatile();
     scan_pub_ = create_publisher<sensor_msgs::msg::LaserScan>(output_topic, qos);
     debug_pub_ = create_publisher<robots_dog_msgs::msg::LivoxBridgeDebug>(debug_topic, qos);
-    livox_sub_ = create_subscription<livox_ros_driver2::msg::CustomMsg>(
-      input_topic, qos,
-      std::bind(&LivoxScanProjector::onLivox, this, std::placeholders::_1));
+    if (input_type == "livox_custom") {
+      livox_sub_ = create_subscription<livox_ros_driver2::msg::CustomMsg>(
+        input_topic, qos,
+        std::bind(&LivoxScanProjector::onLivox, this, std::placeholders::_1));
+    } else if (input_type == "pointcloud2") {
+      pointcloud_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
+        input_topic, qos,
+        std::bind(&LivoxScanProjector::onPointCloud2, this, std::placeholders::_1));
+    } else {
+      throw std::invalid_argument("input_type must be 'livox_custom' or 'pointcloud2'");
+    }
 
     static_tf_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this);
     publishStaticTransform(lidar_x, lidar_y, lidar_z, -lidar_roll, -lidar_pitch, -lidar_yaw);
 
     RCLCPP_INFO(
       get_logger(),
-      "Direct Livox scan projection: %s -> %s, frame=%s, bins=%zu, height=[%.2f, %.2f]",
-      input_topic.c_str(), output_topic.c_str(), target_frame_.c_str(), scanBinCount(config_),
+      "Direct scan projection (%s): %s -> %s, frame=%s, bins=%zu, height=[%.2f, %.2f]",
+      input_type.c_str(), input_topic.c_str(), output_topic.c_str(), target_frame_.c_str(),
+      scanBinCount(config_),
       config_.min_height, config_.max_height);
   }
 
@@ -123,19 +135,49 @@ private:
 
   void onLivox(const livox_ros_driver2::msg::CustomMsg::SharedPtr msg)
   {
+    projectMessage(
+      msg->header, static_cast<std::uint32_t>(msg->points.size()),
+      [msg](const ScanProjectionConfig & config, std::vector<float> & ranges,
+      ScanProjectionStats & stats) {
+        for (const auto & point : msg->points) {
+          projectPoint(point.x, point.y, point.z, config, ranges, stats);
+        }
+      });
+  }
+
+  void onPointCloud2(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
+  {
+    projectMessage(
+      msg->header, msg->width * msg->height,
+      [msg](const ScanProjectionConfig & config, std::vector<float> & ranges,
+      ScanProjectionStats & stats) {
+        sensor_msgs::PointCloud2ConstIterator<float> x(*msg, "x");
+        sensor_msgs::PointCloud2ConstIterator<float> y(*msg, "y");
+        sensor_msgs::PointCloud2ConstIterator<float> z(*msg, "z");
+        for (; x != x.end(); ++x, ++y, ++z) {
+          projectPoint(*x, *y, *z, config, ranges, stats);
+        }
+      });
+  }
+
+  template<typename ProjectPoints>
+  void projectMessage(
+    const std_msgs::msg::Header & header, std::uint32_t input_points,
+    ProjectPoints project_points)
+  {
     const auto callback_start = std::chrono::steady_clock::now();
     const auto callback_now = now();
 
     robots_dog_msgs::msg::LivoxBridgeDebug debug;
     debug.header.stamp = callback_now;
     debug.header.frame_id = target_frame_;
-    debug.input_stamp = msg->header.stamp;
-    debug.input_frame_id = msg->header.frame_id;
+    debug.input_stamp = header.stamp;
+    debug.input_frame_id = header.frame_id;
     debug.callback_sequence = ++callback_sequence_;
-    debug.input_points = static_cast<std::uint32_t>(msg->points.size());
+    debug.input_points = input_points;
     debug.subscriber_qos_depth = static_cast<std::uint32_t>(qos_depth_);
 
-    const rclcpp::Time input_stamp(msg->header.stamp, get_clock()->get_clock_type());
+    const rclcpp::Time input_stamp(header.stamp, get_clock()->get_clock_type());
     if (input_stamp.nanoseconds() > 0) {
       debug.input_age_sec = (callback_now - input_stamp).seconds();
     }
@@ -154,12 +196,19 @@ private:
     const auto scan_start = std::chrono::steady_clock::now();
     auto ranges = makeEmptyScan(config_);
     ScanProjectionStats stats;
-    for (const auto & point : msg->points) {
-      projectPoint(point.x, point.y, point.z, config_, ranges, stats);
+    try {
+      project_points(config_, ranges, stats);
+    } catch (const std::runtime_error & error) {
+      debug.dropped_input = true;
+      debug.drop_reason = std::string("invalid_pointcloud_fields: ") + error.what();
+      finishAndPublishDebug(callback_start, debug);
+      RCLCPP_ERROR_THROTTLE(
+        get_logger(), *get_clock(), 2000, "%s", debug.drop_reason.c_str());
+      return;
     }
 
     sensor_msgs::msg::LaserScan scan;
-    scan.header = msg->header;
+    scan.header = header;
     scan.header.frame_id = target_frame_;
     scan.angle_min = static_cast<float>(config_.angle_min);
     scan.angle_max = static_cast<float>(config_.angle_max);
@@ -199,6 +248,7 @@ private:
   std::uint64_t callback_sequence_{0};
   std::size_t qos_depth_{1};
   rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr livox_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_sub_;
   rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr scan_pub_;
   rclcpp::Publisher<robots_dog_msgs::msg::LivoxBridgeDebug>::SharedPtr debug_pub_;
   std::shared_ptr<tf2_ros::StaticTransformBroadcaster> static_tf_broadcaster_;

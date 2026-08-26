@@ -36,6 +36,7 @@ from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 from ament_index_python.packages import get_package_share_directory
 
@@ -79,10 +80,15 @@ def generate_launch_description():
     params_file = LaunchConfiguration('params_file')
     autostart = LaunchConfiguration('autostart')
     nav2_delay = LaunchConfiguration('nav2_delay')
+    nav_cmd_timeout_ms = LaunchConfiguration('nav_cmd_timeout_ms')
 
     # Lightning Bridge configurations
     enable_livox_converter = LaunchConfiguration('enable_livox_converter')
     enable_laserscan = LaunchConfiguration('enable_laserscan')
+    waypoint_follower_package = LaunchConfiguration('waypoint_follower_package')
+    waypoint_follower_executable = LaunchConfiguration('waypoint_follower_executable')
+    waypoint_follower_plugin = LaunchConfiguration('waypoint_follower_plugin')
+    waypoint_task_executor_plugin = LaunchConfiguration('waypoint_task_executor_plugin')
 
     # Declare arguments
     declare_use_sim_time_cmd = DeclareLaunchArgument(
@@ -110,6 +116,11 @@ def generate_launch_description():
         default_value='3.0',
         description='Delay (seconds) before starting Nav2 to wait for TF chain')
 
+    declare_nav_cmd_timeout_cmd = DeclareLaunchArgument(
+        'nav_cmd_timeout_ms',
+        default_value='300',
+        description='Stop actuator output if smoothed cmd_vel is stale for this many milliseconds')
+
     declare_enable_livox_converter_cmd = DeclareLaunchArgument(
         'enable_livox_converter',
         default_value='false',
@@ -119,6 +130,17 @@ def generate_launch_description():
         'enable_laserscan',
         default_value='true',
         description='Enable direct Livox CustomMsg to LaserScan projection')
+
+    declare_waypoint_follower_package_cmd = DeclareLaunchArgument(
+        'waypoint_follower_package', default_value='navigo_waypoint_follower')
+    declare_waypoint_follower_executable_cmd = DeclareLaunchArgument(
+        'waypoint_follower_executable', default_value='waypoint_follower')
+    declare_waypoint_follower_plugin_cmd = DeclareLaunchArgument(
+        'waypoint_follower_plugin',
+        default_value='navigo_waypoint_follower::WaypointFollower')
+    declare_waypoint_task_executor_plugin_cmd = DeclareLaunchArgument(
+        'waypoint_task_executor_plugin',
+        default_value='navigo_waypoint_follower::WaitAtWaypoint')
 
     # Optional visualization path. It is deliberately outside the navigation
     # hot path so PointCloud2 packing cannot delay obstacle observations.
@@ -178,6 +200,7 @@ def generate_launch_description():
         output='both',
         parameters=[{
             'watchdog_timeout_ms': 200,
+            'cmd_timeout_ms': ParameterValue(nav_cmd_timeout_ms, value_type=int),
             'cmd_vel_input_topic': '/cmd_vel',
             'cmd_vel_output_topic': '/cmd_vel_safe',
             'loc_status_topic': '/lightning/loc_status',
@@ -199,6 +222,10 @@ def generate_launch_description():
                     'map': map_yaml_file,
                     'params_file': params_file,
                     'autostart': autostart,
+                    'waypoint_follower_package': waypoint_follower_package,
+                    'waypoint_follower_executable': waypoint_follower_executable,
+                    'waypoint_follower_plugin': waypoint_follower_plugin,
+                    'waypoint_task_executor_plugin': waypoint_task_executor_plugin,
                 }.items()
             )
         ]
@@ -216,8 +243,13 @@ def generate_launch_description():
     ld.add_action(declare_params_file_cmd)
     ld.add_action(declare_autostart_cmd)
     ld.add_action(declare_nav2_delay_cmd)
+    ld.add_action(declare_nav_cmd_timeout_cmd)
     ld.add_action(declare_enable_livox_converter_cmd)
     ld.add_action(declare_enable_laserscan_cmd)
+    ld.add_action(declare_waypoint_follower_package_cmd)
+    ld.add_action(declare_waypoint_follower_executable_cmd)
+    ld.add_action(declare_waypoint_follower_plugin_cmd)
+    ld.add_action(declare_waypoint_task_executor_plugin_cmd)
 
     # Start immediately: sensor projection + optional visualization + safety gate
     ld.add_action(pointcloud_bridge)

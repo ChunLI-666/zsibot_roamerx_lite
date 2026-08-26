@@ -25,6 +25,10 @@ def generate_launch_description():
     use_respawn = LaunchConfiguration('use_respawn')
     log_level = LaunchConfiguration('log_level')
     container_name = LaunchConfiguration('container_name')
+    waypoint_follower_package = LaunchConfiguration('waypoint_follower_package')
+    waypoint_follower_executable = LaunchConfiguration('waypoint_follower_executable')
+    waypoint_follower_plugin = LaunchConfiguration('waypoint_follower_plugin')
+    waypoint_task_executor_plugin = LaunchConfiguration('waypoint_task_executor_plugin')
     container_name_full = (namespace, '/', container_name)
     ros_distro = os.environ.get('ROS_DISTRO', 'jazzy')
     ros_lib_dir = os.path.join('/opt/ros', ros_distro, 'lib')
@@ -133,6 +137,30 @@ def generate_launch_description():
         description='the name of conatiner that nodes will load in if use composition',
     )
 
+    declare_waypoint_follower_package_cmd = DeclareLaunchArgument(
+        'waypoint_follower_package',
+        default_value='navigo_waypoint_follower',
+        description='Waypoint follower package used by this deployment',
+    )
+
+    declare_waypoint_follower_executable_cmd = DeclareLaunchArgument(
+        'waypoint_follower_executable',
+        default_value='waypoint_follower',
+        description='Waypoint follower executable for non-composed bringup',
+    )
+
+    declare_waypoint_follower_plugin_cmd = DeclareLaunchArgument(
+        'waypoint_follower_plugin',
+        default_value='navigo_waypoint_follower::WaypointFollower',
+        description='Waypoint follower component plugin for composed bringup',
+    )
+
+    declare_waypoint_task_executor_plugin_cmd = DeclareLaunchArgument(
+        'waypoint_task_executor_plugin',
+        default_value='navigo_waypoint_follower::WaitAtWaypoint',
+        description='Waypoint task executor implementation for this deployment',
+    )
+
     load_nodes = GroupAction(
         condition=IfCondition(PythonExpression(['not ', use_composition])),
         actions=[
@@ -220,13 +248,15 @@ def generate_launch_description():
                 # ],
             ),
             Node(
-                package='navigo_waypoint_follower',
-                executable='waypoint_follower',
+                package=waypoint_follower_package,
+                executable=waypoint_follower_executable,
                 name='waypoint_follower',
                 output='screen',
                 respawn=use_respawn,
                 respawn_delay=2.0,
-                parameters=[configured_params],
+                parameters=[configured_params, {
+                    'wait_at_waypoint.plugin': waypoint_task_executor_plugin,
+                }],
                 arguments=['--ros-args', '--log-level', log_level],
                 remappings=remappings,
                 # prefix=[
@@ -302,10 +332,12 @@ def generate_launch_description():
                         remappings=remappings,
                     ),
                     ComposableNode(
-                        package='navigo_waypoint_follower',
-                        plugin='navigo_waypoint_follower::WaypointFollower',
+                        package=waypoint_follower_package,
+                        plugin=waypoint_follower_plugin,
                         name='waypoint_follower',
-                        parameters=[configured_params],
+                        parameters=[configured_params, {
+                            'wait_at_waypoint.plugin': waypoint_task_executor_plugin,
+                        }],
                         remappings=remappings,
                     ),
                     ComposableNode(
@@ -339,6 +371,10 @@ def generate_launch_description():
     ld.add_action(declare_use_respawn_cmd)
     ld.add_action(declare_log_level_cmd)
     ld.add_action(declare_container_name_cmd)
+    ld.add_action(declare_waypoint_follower_package_cmd)
+    ld.add_action(declare_waypoint_follower_executable_cmd)
+    ld.add_action(declare_waypoint_follower_plugin_cmd)
+    ld.add_action(declare_waypoint_task_executor_plugin_cmd)
     ld.add_action(smoother_server)
     # Add the actions to launch all of the navigation nodes
     ld.add_action(load_nodes)

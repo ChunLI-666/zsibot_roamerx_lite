@@ -32,6 +32,10 @@ def generate_launch_description():
     use_composition = LaunchConfiguration('use_composition')
     use_respawn = LaunchConfiguration('use_respawn')
     log_level = LaunchConfiguration('log_level')
+    waypoint_follower_package = LaunchConfiguration('waypoint_follower_package')
+    waypoint_follower_executable = LaunchConfiguration('waypoint_follower_executable')
+    waypoint_follower_plugin = LaunchConfiguration('waypoint_follower_plugin')
+    waypoint_task_executor_plugin = LaunchConfiguration('waypoint_task_executor_plugin')
 
     remappings = [('/tf', 'tf'), ('/tf_static', 'tf_static')]
 
@@ -104,6 +108,17 @@ def generate_launch_description():
         'log_level', default_value='info', description='log level'
     )
 
+    declare_waypoint_follower_package_cmd = DeclareLaunchArgument(
+        'waypoint_follower_package', default_value='navigo_waypoint_follower')
+    declare_waypoint_follower_executable_cmd = DeclareLaunchArgument(
+        'waypoint_follower_executable', default_value='waypoint_follower')
+    declare_waypoint_follower_plugin_cmd = DeclareLaunchArgument(
+        'waypoint_follower_plugin',
+        default_value='navigo_waypoint_follower::WaypointFollower')
+    declare_waypoint_task_executor_plugin_cmd = DeclareLaunchArgument(
+        'waypoint_task_executor_plugin',
+        default_value='navigo_waypoint_follower::WaitAtWaypoint')
+
     # Specify the actions
     bringup_cmd_group = GroupAction(
         [
@@ -132,6 +147,10 @@ def generate_launch_description():
                     'use_respawn': use_respawn,
                     'log_level': log_level,
                     'container_name': 'navigo_container',
+                    'waypoint_follower_package': waypoint_follower_package,
+                    'waypoint_follower_executable': waypoint_follower_executable,
+                    'waypoint_follower_plugin': waypoint_follower_plugin,
+                    'waypoint_task_executor_plugin': waypoint_task_executor_plugin,
                 }.items(),
             ),
         ]
@@ -153,6 +172,10 @@ def generate_launch_description():
     ld.add_action(declare_use_composition_cmd)
     ld.add_action(declare_use_respawn_cmd)
     ld.add_action(declare_log_level_cmd)
+    ld.add_action(declare_waypoint_follower_package_cmd)
+    ld.add_action(declare_waypoint_follower_executable_cmd)
+    ld.add_action(declare_waypoint_follower_plugin_cmd)
+    ld.add_action(declare_waypoint_task_executor_plugin_cmd)
 
     # Add the actions to launch all of the navigation nodes
     ld.add_action(bringup_cmd_group)

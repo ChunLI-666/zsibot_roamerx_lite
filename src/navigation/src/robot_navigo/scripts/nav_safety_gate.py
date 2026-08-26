@@ -33,17 +33,23 @@ class NavSafetyGate(Node):
     LOC_DEGRADED = 2
     LOC_LOST = 3
     GATE_EMERGENCY_STOP = 4
+    GATE_CMD_TIMEOUT = 5
 
     def __init__(self):
         super().__init__('nav_safety_gate')
 
         self.declare_parameter('watchdog_timeout_ms', 200)
+        self.declare_parameter('cmd_timeout_ms', 300)
+        self.declare_parameter('stop_publish_period_ms', 50)
         self.declare_parameter('cmd_vel_input_topic', '/cmd_vel')
         self.declare_parameter('cmd_vel_output_topic', '/cmd_vel_safe')
         self.declare_parameter('loc_status_topic', '/lightning/loc_status')
         self.declare_parameter('emergency_stop_topic', '/emergency_stop')
 
         self.watchdog_timeout_sec = self.get_parameter('watchdog_timeout_ms').value / 1000.0
+        self.cmd_timeout_sec = self.get_parameter('cmd_timeout_ms').value / 1000.0
+        stop_publish_period_sec = (
+            self.get_parameter('stop_publish_period_ms').value / 1000.0)
         cmd_vel_in = self.get_parameter('cmd_vel_input_topic').value
         cmd_vel_out = self.get_parameter('cmd_vel_output_topic').value
         loc_status_topic = self.get_parameter('loc_status_topic').value
@@ -52,6 +58,7 @@ class NavSafetyGate(Node):
         self.current_status = self.LOC_UNKNOWN
         self.emergency_stop_active = False
         self.last_status_time = None
+        self.last_cmd_time = None
 
         qos_reliable = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
@@ -70,11 +77,14 @@ class NavSafetyGate(Node):
 
         self.cmd_vel_pub = self.create_publisher(Twist, cmd_vel_out, 10)
         self.gate_status_pub = self.create_publisher(UInt8, '~/gate_status', 1)
+        self.watchdog_timer = self.create_timer(
+            max(0.02, stop_publish_period_sec), self.watchdog_callback)
 
         self.get_logger().info(
             f'NavSafetyGate started: {cmd_vel_in} -> {cmd_vel_out}, '
             f'emergency_stop={emergency_stop_topic}, '
-            f'watchdog={self.watchdog_timeout_sec*1000:.0f}ms, '
+            f'loc_watchdog={self.watchdog_timeout_sec*1000:.0f}ms, '
+            f'cmd_watchdog={self.cmd_timeout_sec*1000:.0f}ms, '
             f'policy: only NORMAL and no emergency stop passes')
 
     def loc_status_callback(self, msg: UInt8):
@@ -96,6 +106,7 @@ class NavSafetyGate(Node):
 
     def cmd_vel_callback(self, msg: Twist):
         now = self.get_clock().now()
+        self.last_cmd_time = now
         safe_cmd = Twist()
         gate_status = self.LOC_UNKNOWN
 
@@ -115,6 +126,16 @@ class NavSafetyGate(Node):
 
         self.publish_cmd(safe_cmd, gate_status)
 
+    def watchdog_callback(self):
+        """Continuously enforce stop when either heartbeat becomes stale."""
+        now = self.get_clock().now()
+        if self.emergency_stop_active:
+            self.publish_zero(self.GATE_EMERGENCY_STOP)
+        elif self._is_timed_out(now):
+            self.publish_zero(self.LOC_LOST)
+        elif self._is_cmd_timed_out(now):
+            self.publish_zero(self.GATE_CMD_TIMEOUT)
+
     def publish_zero(self, gate_status: int):
         self.publish_cmd(Twist(), gate_status)
 
@@ -129,6 +150,12 @@ class NavSafetyGate(Node):
             return True
         elapsed = (now - self.last_status_time).nanoseconds / 1e9
         return elapsed > self.watchdog_timeout_sec
+
+    def _is_cmd_timed_out(self, now) -> bool:
+        if self.last_cmd_time is None:
+            return True
+        elapsed = (now - self.last_cmd_time).nanoseconds / 1e9
+        return elapsed > self.cmd_timeout_sec
 
 
 def main(args=None):
