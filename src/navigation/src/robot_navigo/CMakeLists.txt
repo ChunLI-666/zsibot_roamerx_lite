@@ -240,6 +240,7 @@ install(PROGRAMS
         scripts/matrix_sensor_probe.py
         scripts/matrix_closed_loop_e2e.py
         scripts/matrix_closed_loop_run.sh
+        scripts/matrix_localization_batch.py
         DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -302,7 +303,7 @@ install(DIRECTORY include/
 # install(TARGETS detector_node
 #         DESTINATION lib/${PROJECT_NAME}
 # )
-install(DIRECTORY launch params map rviz doc routes
+install(DIRECTORY launch params map rviz doc routes regression
         DESTINATION share/${PROJECT_NAME}
         DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
         GROUP_READ GROUP_WRITE GROUP_EXECUTE

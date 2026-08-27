@@ -1,0 +1,430 @@
+schema: robot_navigo.matrix_localization_suite
+schema_version: 1
+name: matrix_lightning_localization
+output_root: /mnt/data/regression/matrix_localization
+
+# charles-pc defaults. Every path can be replaced with --set KEY=VALUE.
+variables:
+  workspace: /home/charles/project/matrix_closed_loop_ws
+  lightning_root: "{workspace}/src/lightning-lm"
+  overlay_setup: "{workspace}/install/setup.bash"
+  lightning_loc_executable: "{workspace}/install/lightning/lib/lightning/run_loc_online"
+  lightning_runtime_library: "{workspace}/install/lightning/lib/liblightning.libs.so"
+  warehouse_mapping_bag: /mnt/data/datasets/quadrobot_nav/rosbag2_2026_03_15-17_13_12
+  # Independent from the mapping bag; this is a later closed-loop Warehouse run.
+  warehouse_localization_bag: /home/charles/project/matrix_closed_loop_ws/log/matrix_warehouse_loop_final_20260827/closed_loop_bag
+  # Frozen successful baseline. Current-source mapping reproducibility is tracked
+  # separately and must not replace this map unless mapping regression passes.
+  warehouse_map: /home/charles/project/locnav_ws/data/matrix/scene_terrain_wh/20260315_lightning
+  warehouse_map_start_timestamp_sec: "1773565993.3555"
+  ground_truth_topic: /odom/mujoco_odom
+  lidar_topic: /livox/lidar
+  imu_topic: /imu/data_raw
+
+defaults:
+  timeout_sec: 1200
+
+scenes:
+  - name: warehouse
+    scene_id: 1
+    available: true
+    enabled: true
+    inputs:
+      mapping_bag: "{warehouse_mapping_bag}"
+      localization_bag: "{warehouse_localization_bag}"
+      mapping_config: "{lightning_root}/config/sim_matrix.yaml"
+      localization_config: "{lightning_root}/config/sim_matrix.yaml"
+      replay_script: "{lightning_root}/scripts/run_localization_nav_replay.sh"
+      mapping_evaluator: "{lightning_root}/scripts/evaluate_mapping_regression.py"
+      alignment_generator: "{lightning_root}/scripts/generate_map_ground_truth_alignment.py"
+      localization_evaluator: "{lightning_root}/scripts/evaluate_localization_accuracy.py"
+      map_gt_alignment: "{scene_dir}/map/map_ground_truth_alignment.json"
+    stages:
+      map:
+        timeout_sec: 1800
+        signature_inputs:
+          - "{mapping_bag}"
+          - "{warehouse_map}"
+          - "{mapping_evaluator}"
+          - "{alignment_generator}"
+        commands:
+          - name: verify_archived_map_provenance
+            argv:
+              - /bin/bash
+              - -lc
+              - >-
+                cd {warehouse_map} && sha256sum --check SHA256SUMS
+          - name: record_map_source_boundary
+            argv:
+              - python3
+              - -c
+              - >-
+                import json, pathlib, sys;
+                pathlib.Path(sys.argv[1]).write_text(json.dumps({
+                "map_source": "archived_baseline",
+                "mapping_reproducible": False,
+                "mapping_status": "FAIL",
+                "map_dir": sys.argv[2]}, indent=2) + "\n")
+              - "{stage_output}/map_provenance.json"
+              - "{warehouse_map}"
+          - name: archived_map_artifact_check
+            success_exit_codes: [0, 1]
+            argv:
+              - python3
+              - "{mapping_evaluator}"
+              - "{warehouse_map}"
+              - --min-keyframes
+              - "0"
+              - --z-span-max-m
+              - "2.0"
+              - --max-keyframe-step-m
+              - "3.0"
+              - --unknown-ratio-max
+              - "0.90"
+              - --output
+              - "{stage_output}/mapping_regression.json"
+          - name: validate_dense_fp
+            argv:
+              - python3
+              - "{lightning_root}/scripts/validate_dense_fp_map.py"
+              - "{warehouse_map}"
+              - --min-fp-count
+              - "1"
+          - name: fixed_map_ground_truth_alignment
+            argv:
+              - python3
+              - "{alignment_generator}"
+              - --map-dir
+              - "{warehouse_map}"
+              - --mapping-bag
+              - "{mapping_bag}"
+              - --source-bag
+              - "{localization_bag}"
+              - --gt-topic
+              - "{ground_truth_topic}"
+              - --tracking-extrinsic-xyz
+              - "0.13011"
+              - "0.02329"
+              - "0.17598"
+              - --tracking-extrinsic-rpy
+              - "0.0"
+              - "0.0"
+              - "0.0"
+              - --tracking-frame
+              - imu
+              - --ground-truth-body-frame
+              - base_link
+              - --estimate-body-frame
+              - base_link
+              - --allow-empty-ground-truth-child-frame
+              - --start-timestamp-sec
+              - "{warehouse_map_start_timestamp_sec}"
+              - --output
+              - "{map_gt_alignment}"
+        required_outputs:
+          - "{warehouse_map}/index.txt"
+          - "{warehouse_map}/0.pcd"
+          - "{warehouse_map}/map.yaml"
+          - "{warehouse_map}/map.pgm"
+          - "{warehouse_map}/SHA256SUMS"
+          - "{stage_output}/mapping_regression.json"
+          - "{stage_output}/map_provenance.json"
+          - "{map_gt_alignment}"
+        metrics:
+          - name: map_source
+            file: "{stage_output}/map_provenance.json"
+            path: map_source
+            op: report
+          - name: current_mapping_reproducible
+            file: "{stage_output}/map_provenance.json"
+            path: mapping_reproducible
+            op: report
+          - name: current_mapping_status
+            file: "{stage_output}/map_provenance.json"
+            path: mapping_status
+            op: report
+          - name: archived_map_artifacts
+            file: "{stage_output}/mapping_regression.json"
+            path: status
+            op: eq
+            value: PASS
+          - name: map_width_cells
+            file: "{stage_output}/mapping_regression.json"
+            path: metrics.grid.width
+            op: report
+          - name: map_height_cells
+            file: "{stage_output}/mapping_regression.json"
+            path: metrics.grid.height
+            op: report
+          - name: unknown_pixel_ratio
+            file: "{stage_output}/mapping_regression.json"
+            path: metrics.pixels.unknown_ratio
+            op: report
+
+      init:
+        depends_on: [map]
+        # Preserve all initialization evidence, then still execute independent tracking.
+        continue_on_failure: true
+        timeout_sec: 420
+        signature_inputs:
+          - "{localization_bag}"
+          - "{localization_config}"
+          - "{warehouse_map}"
+          - "{map_gt_alignment}"
+          - "{replay_script}"
+          - "{localization_evaluator}"
+          - "{lightning_loc_executable}"
+          - "{lightning_runtime_library}"
+        cases:
+          - name: offset_000s
+            variables:
+              start_offset_sec: "0"
+            commands: &init_commands
+              - name: localization_init_replay
+                success_exit_codes: [0, 1]
+                argv:
+                  - "{replay_script}"
+                  - --bag
+                  - "{localization_bag}"
+                  - --map-dir
+                  - "{warehouse_map}"
+                  - --config
+                  - "{localization_config}"
+                  - --output
+                  - "{case_output}/replay"
+                  - --mode
+                  - localization
+                  - --start-offset
+                  - "{start_offset_sec}"
+                  - --duration
+                  - "75"
+                  - --initialization-timeout
+                  - "60"
+                  - --lidar-topic
+                  - "{lidar_topic}"
+                  - --imu-topic
+                  - "{imu_topic}"
+                  - --ground-truth-topic
+                  - "{ground_truth_topic}"
+                  - --ros-distro
+                  - humble
+                  - --overlay-setup
+                  - "{overlay_setup}"
+              - name: absolute_localization_accuracy
+                success_exit_codes: [0, 1, 2]
+                argv:
+                  - python3
+                  - "{localization_evaluator}"
+                  - --bag
+                  - "{case_output}/replay/output_bag"
+                  - --map
+                  - "{warehouse_map}"
+                  - --alignment
+                  - "{map_gt_alignment}"
+                  - --source-bag
+                  - "{localization_bag}"
+                  - --calibration-bag
+                  - "{mapping_bag}"
+                  - --ground-truth-topic
+                  - "{ground_truth_topic}"
+                  - --initialization-timeout
+                  - "60"
+                  - --output-json
+                  - "{case_output}/localization_accuracy.json"
+            required_outputs: &init_outputs
+              - "{case_output}/replay/initialization_status.json"
+              - "{case_output}/replay/output_bag"
+              - "{case_output}/localization_accuracy.json"
+            metrics: &init_metrics
+              - name: evaluator_input_valid
+                file: "{case_output}/localization_accuracy.json"
+                path: valid_input
+                op: eq
+                value: true
+              - name: initialization_success
+                file: "{case_output}/localization_accuracy.json"
+                path: metrics.initialization.success
+                optional: true
+                op: eq
+                value: true
+              - name: absolute_evaluation_passed
+                file: "{case_output}/localization_accuracy.json"
+                path: passed
+                op: eq
+                value: true
+              - name: initialization_time_sec
+                file: "{case_output}/localization_accuracy.json"
+                path: metrics.initialization.time_sec
+                optional: true
+                op: report
+              - name: initialization_translation_error_m
+                file: "{case_output}/localization_accuracy.json"
+                path: metrics.initialization.translation_error_m
+                optional: true
+                op: report
+              - name: initialization_yaw_error_deg
+                file: "{case_output}/localization_accuracy.json"
+                path: metrics.initialization.yaw_error_deg
+                optional: true
+                op: report
+              - name: ate_rmse_m
+                file: "{case_output}/localization_accuracy.json"
+                path: metrics.absolute_error.translation_m.rmse
+                optional: true
+                op: report
+          - name: offset_120s
+            variables:
+              start_offset_sec: "120"
+            commands: *init_commands
+            required_outputs: *init_outputs
+            metrics: *init_metrics
+          - name: offset_240s
+            variables:
+              start_offset_sec: "240"
+            commands: *init_commands
+            required_outputs: *init_outputs
+            metrics: *init_metrics
+
+      tracking:
+        # Tracking remains measurable even when one initialization offset fails.
+        depends_on: [map]
+        timeout_sec: 1200
+        signature_inputs:
+          - "{localization_bag}"
+          - "{localization_config}"
+          - "{warehouse_map}"
+          - "{map_gt_alignment}"
+          - "{replay_script}"
+          - "{localization_evaluator}"
+          - "{lightning_loc_executable}"
+          - "{lightning_runtime_library}"
+        commands:
+          - name: localization_tracking_replay
+            success_exit_codes: [0, 1]
+            argv:
+              - "{replay_script}"
+              - --bag
+              - "{localization_bag}"
+              - --map-dir
+              - "{warehouse_map}"
+              - --config
+              - "{localization_config}"
+              - --output
+              - "{stage_output}/replay"
+              - --mode
+              - localization
+              - --initialization-timeout
+              - "120"
+              - --lidar-topic
+              - "{lidar_topic}"
+              - --imu-topic
+              - "{imu_topic}"
+              - --ground-truth-topic
+              - "{ground_truth_topic}"
+              - --ros-distro
+              - humble
+              - --overlay-setup
+              - "{overlay_setup}"
+          - name: absolute_localization_accuracy
+            success_exit_codes: [0, 1, 2]
+            argv:
+              - python3
+              - "{localization_evaluator}"
+              - --bag
+              - "{stage_output}/replay/output_bag"
+              - --map
+              - "{warehouse_map}"
+              - --alignment
+              - "{map_gt_alignment}"
+              - --source-bag
+              - "{localization_bag}"
+              - --calibration-bag
+              - "{mapping_bag}"
+              - --ground-truth-topic
+              - "{ground_truth_topic}"
+              - --initialization-timeout
+              - "120"
+              - --output-json
+              - "{stage_output}/localization_accuracy.json"
+        required_outputs:
+          - "{stage_output}/replay/output_bag"
+          - "{stage_output}/localization_accuracy.json"
+        metrics:
+          - name: evaluator_input_valid
+            file: "{stage_output}/localization_accuracy.json"
+            path: valid_input
+            op: eq
+            value: true
+          - name: absolute_evaluation_passed
+            file: "{stage_output}/localization_accuracy.json"
+            path: passed
+            op: eq
+            value: true
+          - name: ate_rmse_m
+            file: "{stage_output}/localization_accuracy.json"
+            path: metrics.absolute_error.translation_m.rmse
+            optional: true
+            op: report
+          - name: ate_p95_m
+            file: "{stage_output}/localization_accuracy.json"
+            path: metrics.absolute_error.translation_m.p95
+            optional: true
+            op: report
+          - name: ate_max_m
+            file: "{stage_output}/localization_accuracy.json"
+            path: metrics.absolute_error.translation_m.max
+            optional: true
+            op: report
+          - name: yaw_p95_deg
+            file: "{stage_output}/localization_accuracy.json"
+            path: metrics.absolute_error.yaw_deg.p95
+            optional: true
+            op: report
+          - name: rpe_translation_rmse_m
+            file: "{stage_output}/localization_accuracy.json"
+            path: metrics.rpe.translation_m.rmse
+            optional: true
+            op: report
+          - name: jump_count
+            file: "{stage_output}/localization_accuracy.json"
+            path: metrics.jumps.count
+            optional: true
+            op: report
+          - name: trust_violation_count
+            file: "{stage_output}/localization_accuracy.json"
+            path: metrics.status_trust.trust_violation_count
+            optional: true
+            op: report
+
+      report:
+        always_run: true
+        timeout_sec: 30
+        signature_inputs:
+          - "{scene_dir}/map/stage_status.json"
+          - "{scene_dir}/init/stage_status.json"
+          - "{scene_dir}/tracking/stage_status.json"
+        commands: []
+
+  - name: house
+    scene_id: 6
+    available: false
+    enabled: false
+    reason: HouseWorld 缺少版本化建图 bag 和对应 Lightning 地图。
+
+  - name: office
+    scene_id: 13
+    available: false
+    enabled: false
+    reason: OfficeWorld 缺少可复现的单层建图路线、建图 bag 和 Lightning 地图。
+
+  - name: iros_flat
+    scene_id: 9
+    available: false
+    enabled: false
+    reason: IROSFlatWorld 缺少建图 bag 和 Lightning 地图，弱几何场景尚未验证。
+
+  - name: yard
+    scene_id: 3
+    available: false
+    enabled: false
+    reason: YardWorld 缺少建图 bag 和 Lightning 地图，LiDAR 几何冒烟测试尚未通过。
