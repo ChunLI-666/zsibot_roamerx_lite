@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import json
 import pathlib
 import sys
 
@@ -134,45 +135,101 @@ def main():
             'Matrix stand-up can replay a cached nonzero velocity')
     require("'vx_to_stick_scale': 2.0" in matrix_launch and
             "'vy_to_stick_scale': 1.0 / 0.3" in matrix_launch and
-            "'wz_to_stick_scale': 1.0" in matrix_launch,
+            "'wz_to_stick_scale': 1.0" in matrix_launch and
+            "'invert_lateral_axis': True" in matrix_launch,
             'Matrix physical velocity commands are not normalized to gamepad axes')
+    require('lateral_direction = invert_lateral_axis_ ? -1.0 : 1.0' in matrix_adapter,
+            'Matrix lateral command does not honor the ROS base_link Y convention')
 
     matrix_e2e = (package_dir / 'scripts' / 'matrix_closed_loop_e2e.py').read_text()
     require("'/odom/mujoco_odom'" in matrix_e2e,
             'Matrix E2E test does not record evaluation ground truth')
     require("lookup_transform(\n                'map', 'base_link'" in matrix_e2e,
             'Matrix E2E test does not score the global Lightning pose')
-    require(matrix_e2e.count('self.create_publisher(') == 1 and
+    require(matrix_e2e.count('self.create_publisher(') == 3 and
             'PoseStamped,' in matrix_e2e and
             "'/matrix_closed_loop/goal_pose'" in matrix_e2e and
+            "'/matrix_closed_loop/route'" in matrix_e2e and
+            "'/matrix_closed_loop/route_status'" in matrix_e2e and
             'TransformBroadcaster' not in matrix_e2e,
-            'Matrix E2E evaluator publishes more than the action-goal mirror')
+            'Matrix E2E evaluator publisher contract is inconsistent')
 
     matrix_runner = (package_dir / 'scripts' / 'matrix_closed_loop_run.sh').read_text()
     require('"$MATRIX_ROOT/scripts/run_sim.sh"' in matrix_runner,
             'Matrix runner does not use the no-ground-truth-TF simulator entry')
+    require("grep -q 'MATRIX_UE_ROS_DOMAIN_ID'" in matrix_runner and
+            'MATRIX_UE_ROS_DOMAIN_ID=42' in matrix_runner and
+            'export ROS_DOMAIN_ID="$MATRIX_UE_ROS_DOMAIN_ID"' in matrix_runner and
+            'sleep 30' in matrix_runner and
+            'ros2 run domain_bridge domain_bridge' not in matrix_runner and
+            'start_sensor_domain_bridge' not in matrix_runner,
+            'Matrix simulation stack does not use one isolated ROS domain')
+    require(".robot.sensors.lidar.draw_points == false" in matrix_runner and
+            'Rendering every LiDAR point can exhaust UE memory' in matrix_runner,
+            'Matrix runner permits the unstable per-point UE rendering mode')
     require('"$MATRIX_ROOT/run_sim.sh"' not in matrix_runner,
             'Matrix runner can invoke the legacy pub_tf entry')
-    require('--qos-reliability best_effort' in matrix_runner,
-            'Matrix sensor readiness probes do not match BEST_EFFORT publishers')
-    require('for attempt in 1 2' in matrix_runner and
-            'matrix.retry.log' in matrix_runner,
-            'Matrix runner does not retry a failed simulator cold start')
+    lightning_nav_launch = (
+        package_dir / 'launch' / 'lightning_nav_bringup.launch.py').read_text()
+    require("'use_composition': 'False'" in matrix_launch and
+            "use_composition = LaunchConfiguration('use_composition')" in
+            lightning_nav_launch and
+            "'use_composition': use_composition" in lightning_nav_launch,
+            'Matrix navigation callbacks are not isolated into server processes')
+    require('matrix_sensor_probe.py' in matrix_runner and
+            '--timeout 90 --minimum-samples 300' in matrix_runner and
+            'wait_for_topic' not in matrix_runner,
+            'Matrix readiness recreates DDS participants while UE is loading')
+    matrix_probe = (package_dir / 'scripts' / 'matrix_sensor_probe.py').read_text()
+    require("PointCloud2, '/livox/lidar'" in matrix_probe and
+            "Imu, '/imu/data_raw'" in matrix_probe and
+            "Odometry, '/odom/mujoco_odom'" in matrix_probe and
+            'qos_profile_sensor_data' in matrix_probe and
+            'len(message.data) != expected_size' in matrix_probe and
+            'advancing_stamps' in matrix_probe and
+            'def lidar_stalled(self):' in matrix_probe and
+            'self.max_lidar_gap <= 0.5' in matrix_probe,
+            'Matrix native sensor probe does not validate all sensor contracts')
+    require('for attempt in 1 2 3 4 5' in matrix_runner and
+            'matrix.attempt${attempt}.log' in matrix_runner,
+            'Matrix runner does not screen unstable simulator cold starts')
+    require('free_thresh:.*|free_thresh: 0.196' in matrix_runner,
+            'Matrix runtime map can classify unknown 205-valued cells as free')
     require('timeout 180 ros2 run robot_navigo matrix_closed_loop_preflight.sh' in
             matrix_runner,
             'Matrix closed-loop preflight budget is shorter than its bounded checks')
     require(matrix_runner.index('matrix_closed_loop_preflight.sh closed-loop') <
-            matrix_runner.index('wait_for_topic /odom/current_pose 180'),
+            matrix_runner.index('ros2 bag record'),
             'Matrix ownership preflight consumes the ACTIVE-state holdover window')
+    require("'--readiness-only'" in matrix_e2e and
+            '--readiness-only' in matrix_runner and
+            matrix_runner.index('--readiness-only') <
+            matrix_runner.index('ros2 bag record'),
+            'Matrix recorder starts before localization and Nav2 are fully ready')
+    require('--initial-localization-only' in matrix_runner and
+            "config['system']['lidar_loc_skip_num'] = 100000" in matrix_runner and
+            "['global_match_holdover_sec'] = 3600.0" in matrix_runner and
+            "config['fasterlio']['point_filter_num'] = 2" in matrix_runner and
+            "config['fasterlio']['max_iteration'] = 4" in matrix_runner and
+            'initial_localization_only' in matrix_runner,
+            'Matrix runner cannot isolate LIO tracking from periodic global corrections')
+    require('OMP_NUM_THREADS=2' in matrix_runner and
+            "critic != 'PathAngleCritic'" in matrix_runner and
+            "follow_path['TwirlingCritic']" in matrix_runner and
+            "follow_path['GoalAngleCritic']['cost_weight'] = 10.0" in matrix_runner and
+            "controller['progress_checker']['required_movement_angle'] = 0.1" in
+            matrix_runner,
+            'Matrix runtime does not bound LIO load or stabilize Omni heading control')
     require('bash --noprofile --norc' in matrix_runner and
             'unset AMENT_PREFIX_PATH COLCON_PREFIX_PATH CMAKE_PREFIX_PATH' in
             matrix_runner and
             'unset LD_LIBRARY_PATH PYTHONPATH RMW_IMPLEMENTATION' in matrix_runner,
             'Matrix process is not isolated from Lightning/Nav overlay libraries')
     require('start_lightning:=false' in matrix_runner and
+            'nav2_delay:=55.0' in matrix_runner and
             'standing Matrix robot before localization initialization' in matrix_runner and
             'starting Lightning after stand-up settling' in matrix_runner,
-            'Matrix runner does not stand and settle the robot before localization')
+            'Matrix runner does not order localization before Nav2 activation')
     require(matrix_runner.index('standing Matrix robot before localization initialization') <
             matrix_runner.index('starting Lightning after stand-up settling'),
             'Matrix stand-up/localization startup order is reversed')
@@ -182,12 +239,15 @@ def main():
             'Matrix stand-up still depends on flaky ROS CLI graph discovery')
     require('matrix_navigo.runtime.yaml' in matrix_runner and
             "for costmap_name in ('local_costmap', 'global_costmap')" in matrix_runner and
-            "costmap['transform_tolerance'] = 0.3" in matrix_runner and
+            "costmap['transform_tolerance'] = 0.5" in matrix_runner and
             "['expected_update_rate'] = 0.5" in matrix_runner and
             "['costmap_update_timeout'] = 0.6" in matrix_runner and
-            "['FollowPath']['transform_tolerance'] = 0.5" in matrix_runner and
+            "follow_path['transform_tolerance'] = 0.5" in matrix_runner and
+            "['default_nav_to_pose_bt_xml']" in matrix_runner and
+            'nav_to_pose_with_consistent_replanning_and_if_path_becomes_invalid.xml' in
+            matrix_runner and
             'params_file:="$RUNTIME_NAV_PARAMS"' in matrix_runner,
-            'Matrix costmap timing override is missing or can affect real-robot params')
+            'Matrix timing or behavior-tree override is missing or can affect real-robot params')
     require('readlink -f "/proc/$pid/cwd"' in matrix_runner and
             'readlink -f "/proc/$pid/exe"' in matrix_runner,
             'Matrix cleanup can kill unrelated host controller processes')
@@ -203,11 +263,28 @@ def main():
             'Matrix runner does not default to or verify visible rendering')
     require('verify_recording()' in matrix_runner and
             '/matrix_closed_loop/goal_pose' in matrix_runner and
+            '/matrix_closed_loop/route' in matrix_runner and
+            '/matrix_closed_loop/route_status' in matrix_runner and
             '--include-hidden-topics' in matrix_runner,
             'Matrix runner does not enforce a complete regression recording')
     require("'/matrix_closed_loop/goal_pose'" in matrix_e2e and
             'self.goal_pose_publisher.publish(goal.pose)' in matrix_e2e,
             'Matrix action goal is not mirrored into the regression bag')
+    require("parser.add_argument(\n        '--route'" in matrix_e2e and
+            'def execute_route(self, goals):' in matrix_e2e and
+            "waypoint_result['within_tolerance']" in matrix_e2e and
+            "route_data.get('return_to_start', False)" in matrix_e2e and
+            '--route) ROUTE_FILE=$2' in matrix_runner and
+            'E2E_ARGS+=(--route "$ROUTE_FILE")' in matrix_runner,
+            'Matrix runner does not support reproducible sequential routes')
+
+    route_path = package_dir / 'routes' / 'matrix_warehouse_loop.json'
+    route = json.loads(route_path.read_text())
+    require(route['frame_id'] == 'map' and route['return_to_start'] is True and
+            len(route['waypoints']) >= 8,
+            'Matrix warehouse route is missing a closed map-frame waypoint loop')
+    require('north_west' not in {waypoint['name'] for waypoint in route['waypoints']},
+            'Matrix warehouse route still contains the footprint-invalid north_west goal')
 
     controller_server = (package_dir.parent / 'navigo_path_controller' / 'src' /
                          'controller_server.cpp').read_text()
@@ -249,10 +326,9 @@ def main():
             'Matrix preflight does not tolerate bounded DDS discovery churn')
     require(matrix_preflight.count('deadline=$((SECONDS + 10))') >= 3,
             'Matrix endpoint ownership checks do not retry DDS discovery')
-    require('--qos-reliability best_effort' in matrix_preflight,
-            'Matrix preflight liveness probes do not match sensor QoS')
-    require('deadline=$((SECONDS + 15))' in matrix_preflight,
-            'Matrix liveness probes do not tolerate bounded DDS discovery churn')
+    require('require_message()' not in matrix_preflight and
+            'native probe verified liveness' in matrix_preflight,
+            'Matrix preflight duplicates native sensor liveness subscriptions')
     require(matrix_preflight.count('--no-daemon') >= 3,
             'Matrix preflight still depends on stale ROS CLI daemon discovery')
     require(matrix_preflight.count('--spin-time 0.5') >= 3 and

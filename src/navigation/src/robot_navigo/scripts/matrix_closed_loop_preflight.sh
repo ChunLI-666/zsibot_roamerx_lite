@@ -53,24 +53,6 @@ require_topic_type() {
   fail "$topic type is '${actual:-missing}', expected '$expected'"
 }
 
-require_message() {
-  local topic=$1 reliability=${2:-auto} deadline
-  local qos_args=()
-  if [[ "$reliability" == "best_effort" ]]; then
-    qos_args=(--qos-reliability best_effort)
-  fi
-  deadline=$((SECONDS + 15))
-  while (( SECONDS < deadline )); do
-    if timeout 4 ros2 topic echo "$topic" --once "${qos_args[@]}" \
-        >/dev/null 2>&1; then
-      pass "$topic is live"
-      return 0
-    fi
-    sleep 0.2
-  done
-  fail "$topic produced no message"
-}
-
 reject_ground_truth_tf() {
   local graph duplicate_nodes
   graph=$(topic_info /tf)
@@ -131,11 +113,8 @@ require_topic_type /livox/lidar sensor_msgs/msg/PointCloud2
 require_topic_type /imu/data_raw sensor_msgs/msg/Imu
 
 if [[ "$PHASE" == "sensors" ]]; then
-  require_message /livox/lidar best_effort
-  require_message /imu/data_raw best_effort
   require_topic_type /odom/mujoco_odom nav_msgs/msg/Odometry
-  require_message /odom/mujoco_odom best_effort
-  pass 'sensor preflight complete; ground truth is available for recording only'
+  pass 'sensor ownership preflight complete; native probe verified liveness'
   exit 0
 fi
 

@@ -18,7 +18,7 @@ from geometry_msgs.msg import PoseStamped, Twist
 from lifecycle_msgs.msg import State
 from lifecycle_msgs.srv import GetState
 from nav2_msgs.action import NavigateToPose
-from nav_msgs.msg import Odometry
+from nav_msgs.msg import Odometry, Path as NavPath
 from rclpy.action import ActionClient
 from rclpy.duration import Duration
 from rclpy.node import Node
@@ -30,7 +30,7 @@ from rclpy.qos import (
 )
 from rclpy.time import Time
 from sensor_msgs.msg import LaserScan
-from std_msgs.msg import UInt8
+from std_msgs.msg import String, UInt8
 from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformException, TransformListener
 
@@ -61,6 +61,14 @@ def quaternion_from_yaw(yaw):
 @dataclass
 class PoseSample:
     receive_time: float
+    x: float
+    y: float
+    yaw: float
+
+
+@dataclass
+class RouteWaypoint:
+    name: str
     x: float
     y: float
     yaw: float
@@ -148,6 +156,16 @@ class MatrixClosedLoopE2E(Node):
                 reliability=ReliabilityPolicy.RELIABLE,
                 durability=DurabilityPolicy.TRANSIENT_LOCAL,
             ))
+        self.route_publisher = self.create_publisher(
+            NavPath,
+            '/matrix_closed_loop/route',
+            QoSProfile(
+                depth=1,
+                reliability=ReliabilityPolicy.RELIABLE,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            ))
+        self.route_status_publisher = self.create_publisher(
+            String, '/matrix_closed_loop/route_status', 10)
         self.standup_client = (
             self.create_client(Trigger, args.standup_service)
             if args.standup_service else None
@@ -178,6 +196,9 @@ class MatrixClosedLoopE2E(Node):
             '/cmd_vel': None,
             '/cmd_vel_safe': None,
         }
+        self.route_name = 'single_goal'
+        self.route_results = []
+        self.requested_route_length = 0.0
 
         self.create_subscription(
             UInt8, '/lightning/loc_status', self._loc_status_callback, 10)
@@ -376,29 +397,107 @@ class MatrixClosedLoopE2E(Node):
             f'{response.message}; settling for {self.args.standup_settle:.1f}s')
         self._spin_until(lambda: False, self.args.standup_settle)
 
-    def build_goal(self):
+    def _current_map_pose(self):
         transform = self._lookup_map_to_base()
         if transform is None:
             raise RuntimeError('map->base_link TF disappeared before goal creation')
         origin = transform.transform.translation
         current_yaw = yaw_from_quaternion(transform.transform.rotation)
-        cosine = math.cos(current_yaw)
-        sine = math.sin(current_yaw)
-        goal_x = origin.x + cosine * self.args.relative_x - sine * self.args.relative_y
-        goal_y = origin.y + sine * self.args.relative_x + cosine * self.args.relative_y
-        goal_yaw = normalize_angle(current_yaw + self.args.relative_yaw)
+        return {'x': origin.x, 'y': origin.y, 'yaw': current_yaw}
 
+    def _pose_stamped(self, pose):
+        message = PoseStamped()
+        message.header.frame_id = 'map'
+        message.header.stamp = self.get_clock().now().to_msg()
+        message.pose.position.x = pose['x']
+        message.pose.position.y = pose['y']
+        qx, qy, qz, qw = quaternion_from_yaw(pose['yaw'])
+        message.pose.orientation.x = qx
+        message.pose.orientation.y = qy
+        message.pose.orientation.z = qz
+        message.pose.orientation.w = qw
+        return message
+
+    def _goal_message(self, pose):
         goal = NavigateToPose.Goal()
-        goal.pose.header.frame_id = 'map'
-        goal.pose.header.stamp = self.get_clock().now().to_msg()
-        goal.pose.pose.position.x = goal_x
-        goal.pose.pose.position.y = goal_y
-        qx, qy, qz, qw = quaternion_from_yaw(goal_yaw)
-        goal.pose.pose.orientation.x = qx
-        goal.pose.pose.orientation.y = qy
-        goal.pose.pose.orientation.z = qz
-        goal.pose.pose.orientation.w = qw
-        return goal, {'x': goal_x, 'y': goal_y, 'yaw': goal_yaw}
+        goal.pose = self._pose_stamped(pose)
+        return goal
+
+    def build_goals(self):
+        start_pose = self._current_map_pose()
+        if not self.args.route:
+            current_yaw = start_pose['yaw']
+            cosine = math.cos(current_yaw)
+            sine = math.sin(current_yaw)
+            goal_pose = {
+                'x': start_pose['x'] + cosine * self.args.relative_x -
+                     sine * self.args.relative_y,
+                'y': start_pose['y'] + sine * self.args.relative_x +
+                     cosine * self.args.relative_y,
+                'yaw': normalize_angle(current_yaw + self.args.relative_yaw),
+            }
+            waypoints = [RouteWaypoint('single_goal', **goal_pose)]
+        else:
+            route_path = Path(self.args.route).expanduser().resolve()
+            route_data = json.loads(route_path.read_text(encoding='utf-8'))
+            if route_data.get('frame_id', 'map') != 'map':
+                raise ValueError('Matrix route frame_id must be map')
+            self.route_name = route_data.get('name', route_path.stem)
+            raw_waypoints = route_data.get('waypoints', [])
+            if not raw_waypoints:
+                raise ValueError('Matrix route has no waypoints')
+            waypoints = []
+            for index, item in enumerate(raw_waypoints):
+                pose_values = (float(item['x']), float(item['y']), float(item['yaw']))
+                if not all(math.isfinite(value) for value in pose_values):
+                    raise ValueError(f'route waypoint {index} contains a non-finite pose')
+                waypoints.append(RouteWaypoint(
+                    str(item.get('name', f'waypoint_{index + 1}')),
+                    pose_values[0], pose_values[1], normalize_angle(pose_values[2])))
+            if route_data.get('return_to_start', False):
+                waypoints.append(RouteWaypoint('return_to_start', **start_pose))
+
+        goals = []
+        route_points = [start_pose]
+        for waypoint in waypoints:
+            pose = {'x': waypoint.x, 'y': waypoint.y, 'yaw': waypoint.yaw}
+            goals.append((waypoint.name, self._goal_message(pose), pose))
+            route_points.append(pose)
+        self.requested_route_length = sum(
+            math.hypot(current['x'] - previous['x'], current['y'] - previous['y'])
+            for previous, current in zip(route_points[:-1], route_points[1:]))
+        return goals, start_pose, route_points
+
+    def publish_route(self, route_points):
+        route = NavPath()
+        route.header.frame_id = 'map'
+        route.header.stamp = self.get_clock().now().to_msg()
+        route.poses = [self._pose_stamped(pose) for pose in route_points]
+        self.route_publisher.publish(route)
+
+    def publish_route_status(self, index, total, name, state, action_status=None):
+        payload = {
+            'route': self.route_name,
+            'waypoint_index': index,
+            'waypoint_count': total,
+            'waypoint_name': name,
+            'state': state,
+            'action_status': action_status,
+            'time_monotonic_sec': self._now_monotonic(),
+        }
+        self.route_status_publisher.publish(String(data=json.dumps(payload)))
+
+    def goal_error(self, goal_pose):
+        transform = self._lookup_map_to_base()
+        if transform is None:
+            return {'position_m': None, 'yaw_rad': None}
+        translation = transform.transform.translation
+        yaw = yaw_from_quaternion(transform.transform.rotation)
+        return {
+            'position_m': math.hypot(
+                translation.x - goal_pose['x'], translation.y - goal_pose['y']),
+            'yaw_rad': abs(normalize_angle(yaw - goal_pose['yaw'])),
+        }
 
     def execute_goal(self, goal):
         send_future = self.action_client.send_goal_async(goal)
@@ -426,6 +525,63 @@ class MatrixClosedLoopE2E(Node):
             'accepted': True,
             'status': status,
             'status_code': wrapped_result.status,
+        }
+
+    def execute_route(self, goals):
+        total = len(goals)
+        self.route_results = []
+        for index, (name, goal, pose) in enumerate(goals, start=1):
+            self.get_logger().info(
+                f'Route {index}/{total} {name}: '
+                f'x={pose["x"]:.3f}, y={pose["y"]:.3f}, yaw={pose["yaw"]:.3f}')
+            self.goal_pose_publisher.publish(goal.pose)
+            self.publish_route_status(index, total, name, 'STARTED')
+            started = self._now_monotonic()
+            result = self.execute_goal(goal)
+            elapsed = self._now_monotonic() - started
+            error = self.goal_error(pose)
+            waypoint_result = {
+                'index': index,
+                'name': name,
+                'goal_map': pose,
+                'action': result,
+                'duration_sec': elapsed,
+                'final_error': error,
+            }
+            within_tolerance = (
+                error['position_m'] is not None and
+                error['position_m'] <= self.args.goal_tolerance and
+                error['yaw_rad'] is not None and
+                error['yaw_rad'] <= self.args.goal_yaw_tolerance)
+            waypoint_result['within_tolerance'] = within_tolerance
+            self.route_results.append(waypoint_result)
+            self.publish_route_status(
+                index, total, name, 'COMPLETED', result.get('status'))
+            if result.get('status') != 'SUCCEEDED':
+                self.get_logger().error(
+                    f'Route stopped at {name}: {result.get("status")}')
+                return {
+                    'accepted': result.get('accepted', False),
+                    'status': f'ROUTE_FAILED_AT_{index}_{result.get("status")}',
+                    'completed_waypoints': index - 1,
+                    'total_waypoints': total,
+                }
+            if not within_tolerance:
+                self.get_logger().error(
+                    f'Route stopped at {name}: action succeeded but final '
+                    f'error exceeded tolerance: {error}')
+                return {
+                    'accepted': True,
+                    'status': f'ROUTE_FAILED_AT_{index}_GOAL_ERROR',
+                    'completed_waypoints': index - 1,
+                    'total_waypoints': total,
+                }
+            self._spin_until(lambda: False, 0.25)
+        return {
+            'accepted': True,
+            'status': 'SUCCEEDED',
+            'completed_waypoints': total,
+            'total_waypoints': total,
         }
 
     @staticmethod
@@ -504,12 +660,20 @@ class MatrixClosedLoopE2E(Node):
         if len(self.gt_samples) >= 2:
             gt_start = self.gt_samples[0]
             gt_end = self.gt_samples[-1]
+            path_length = sum(
+                math.hypot(current.x - previous.x, current.y - previous.y)
+                for previous, current in zip(self.gt_samples[:-1], self.gt_samples[1:]))
             physical = {
                 'translation_m': math.hypot(gt_end.x - gt_start.x, gt_end.y - gt_start.y),
+                'path_length_m': path_length,
                 'yaw_change_rad': abs(normalize_angle(gt_end.yaw - gt_start.yaw)),
             }
         else:
-            physical = {'translation_m': None, 'yaw_change_rad': None}
+            physical = {
+                'translation_m': None,
+                'path_length_m': None,
+                'yaw_change_rad': None,
+            }
         return goal_error, physical
 
     def build_report(self, action_result, goal_pose, readiness_ok):
@@ -528,10 +692,16 @@ class MatrixClosedLoopE2E(Node):
             for topic in self.nonzero_command_count
         }
 
-        requested_translation = math.hypot(self.args.relative_x, self.args.relative_y)
-        requested_yaw = abs(self.args.relative_yaw)
         physical_motion_detected = False
-        if physical['translation_m'] is not None:
+        if self.args.route:
+            if physical['path_length_m'] is not None:
+                physical_motion_detected = (
+                    physical['path_length_m'] >=
+                    max(1.0, 0.5 * self.requested_route_length))
+        elif physical['translation_m'] is not None:
+            requested_translation = math.hypot(
+                self.args.relative_x, self.args.relative_y)
+            requested_yaw = abs(self.args.relative_yaw)
             translation_ok = (
                 requested_translation < 0.1 or
                 physical['translation_m'] >= max(0.05, 0.5 * requested_translation))
@@ -618,6 +788,7 @@ class MatrixClosedLoopE2E(Node):
                 'relative_x_m': self.args.relative_x,
                 'relative_y_m': self.args.relative_y,
                 'relative_yaw_rad': self.args.relative_yaw,
+                'route_file': self.args.route or None,
                 'timeout_sec': self.args.timeout,
                 'max_rmse': self.args.max_rmse,
                 'max_error': self.args.max_error,
@@ -631,11 +802,18 @@ class MatrixClosedLoopE2E(Node):
             },
             'goal_map': goal_pose,
             'action': action_result,
+            'route': {
+                'name': self.route_name,
+                'requested_length_m': self.requested_route_length,
+                'waypoint_results': self.route_results,
+            },
             'topic_stats': topic_stats,
             'command_delivery': command_delivery,
             'command_latency': command_latency,
             'relative_trajectory': {
                 **trajectory,
+                'metric_scope': 'relative drift after first-pose alignment; '
+                                'not absolute initialization accuracy',
                 'lightning_source': 'TF map->base_link',
                 'ground_truth_source': '/odom/mujoco_odom (evaluation only)',
             },
@@ -651,18 +829,26 @@ class MatrixClosedLoopE2E(Node):
             raise RuntimeError(
                 'readiness timeout: localization/TF/action/sensor prerequisites not met')
 
+        if self.args.readiness_only:
+            return {
+                'schema_version': 1,
+                'generated_at': datetime.now(timezone.utc).isoformat(),
+                'stage': 'readiness',
+                'pass': True,
+                'failures': [],
+            }
+
         self.request_standup()
-        goal, goal_pose = self.build_goal()
+        goals, start_pose, route_points = self.build_goals()
         self.reset_measurement_window()
         self.measurement_start = self._now_monotonic()
         self.get_logger().info(
-            f'Sending map goal x={goal_pose["x"]:.3f}, y={goal_pose["y"]:.3f}, '
-            f'yaw={goal_pose["yaw"]:.3f}')
-        # NavigateToPose transports its goal through a service request, not a
-        # normal topic. Publish the exact request pose for deterministic bag
-        # replay and post-run inspection.
-        self.goal_pose_publisher.publish(goal.pose)
-        action_result = self.execute_goal(goal)
+            f'Executing route {self.route_name} with {len(goals)} goals; '
+            f'requested length={self.requested_route_length:.3f}m; '
+            f'start=({start_pose["x"]:.3f}, {start_pose["y"]:.3f})')
+        self.publish_route(route_points)
+        action_result = self.execute_route(goals)
+        goal_pose = goals[-1][2]
         # CMD_TIMEOUT after a completed action is the required stopped state,
         # not a navigation-time gate failure.
         self.gate_monitoring_active = False
@@ -684,8 +870,15 @@ def parse_args(argv):
     parser.add_argument('--relative-x', type=float, default=1.0)
     parser.add_argument('--relative-y', type=float, default=0.0)
     parser.add_argument('--relative-yaw', type=float, default=0.0)
+    parser.add_argument(
+        '--route', default='',
+        help='JSON route containing map-frame waypoints; overrides relative goal')
     parser.add_argument('--timeout', type=positive_float, default=90.0)
     parser.add_argument('--output', default='matrix_closed_loop_e2e.json')
+    parser.add_argument(
+        '--readiness-only', action='store_true',
+        help='Exit successfully after localization, TF, sensors, lifecycle '
+             'nodes, and the NavigateToPose action server are ready')
     parser.add_argument('--max-rmse', type=positive_float, default=0.20)
     parser.add_argument('--max-error', type=positive_float, default=0.40)
     parser.add_argument('--goal-tolerance', type=positive_float, default=0.25)

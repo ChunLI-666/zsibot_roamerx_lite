@@ -79,6 +79,7 @@ def generate_launch_description():
     map_yaml_file = LaunchConfiguration('map')
     params_file = LaunchConfiguration('params_file')
     autostart = LaunchConfiguration('autostart')
+    use_composition = LaunchConfiguration('use_composition')
     nav2_delay = LaunchConfiguration('nav2_delay')
     nav_cmd_timeout_ms = LaunchConfiguration('nav_cmd_timeout_ms')
 
@@ -110,6 +111,11 @@ def generate_launch_description():
         'autostart',
         default_value='true',
         description='Automatically startup the nav2 stack')
+
+    declare_use_composition_cmd = DeclareLaunchArgument(
+        'use_composition',
+        default_value='true',
+        description='Run Nav2 servers in a component container')
 
     declare_nav2_delay_cmd = DeclareLaunchArgument(
         'nav2_delay',
@@ -222,6 +228,7 @@ def generate_launch_description():
                     'map': map_yaml_file,
                     'params_file': params_file,
                     'autostart': autostart,
+                    'use_composition': use_composition,
                     'waypoint_follower_package': waypoint_follower_package,
                     'waypoint_follower_executable': waypoint_follower_executable,
                     'waypoint_follower_plugin': waypoint_follower_plugin,
@@ -242,6 +249,7 @@ def generate_launch_description():
     ld.add_action(declare_map_yaml_cmd)
     ld.add_action(declare_params_file_cmd)
     ld.add_action(declare_autostart_cmd)
+    ld.add_action(declare_use_composition_cmd)
     ld.add_action(declare_nav2_delay_cmd)
     ld.add_action(declare_nav_cmd_timeout_cmd)
     ld.add_action(declare_enable_livox_converter_cmd)

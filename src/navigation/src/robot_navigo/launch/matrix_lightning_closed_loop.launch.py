@@ -77,6 +77,10 @@ def generate_launch_description():
             'params_file': params_file,
             'nav2_delay': nav2_delay,
             'nav_cmd_timeout_ms': '300',
+            # Isolate lifecycle, costmap and controller callbacks. On the
+            # Matrix host, one delayed component previously starved bonds and
+            # shut the complete composed navigation stack down.
+            'use_composition': 'False',
             # The Matrix PointCloud2 projector above owns /laser_scan.
             'enable_laserscan': 'false',
             'enable_livox_converter': 'false',
@@ -116,6 +120,8 @@ def generate_launch_description():
             'vx_to_stick_scale': 2.0,
             'vy_to_stick_scale': 1.0 / 0.3,
             'wz_to_stick_scale': 1.0,
+            # Matrix gamepad +X is right strafe, opposite ROS base_link +Y.
+            'invert_lateral_axis': True,
             'enable_stance_service': True,
             'stand_button_hold_ms': 500,
         }],

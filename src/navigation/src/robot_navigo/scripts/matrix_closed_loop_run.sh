@@ -17,7 +17,10 @@ Options:
   --relative-x METERS      Test goal forward offset (default: 1.0)
   --relative-y METERS      Test goal lateral offset (default: 0.0)
   --relative-yaw RADIANS   Test goal yaw offset (default: 0.0)
-  --timeout SECONDS        Navigation timeout (default: 120)
+  --route FILE             Sequential map-frame JSON route; overrides relative goal
+  --initial-localization-only
+                           Use the global map for initialization, then follow LIO
+  --timeout SECONDS        Per-goal navigation timeout (default: 120)
   --result-dir DIR         Result directory
   --headless               Use UE off-screen rendering (default: visible window)
   --no-sim                 Reuse an already-running Matrix simulator
@@ -36,6 +39,8 @@ SCENE_ID=1
 RELATIVE_X=1.0
 RELATIVE_Y=0.0
 RELATIVE_YAW=0.0
+ROUTE_FILE=""
+INITIAL_LOCALIZATION_ONLY=0
 NAV_TIMEOUT=120
 RESULT_DIR=""
 START_SIM=1
@@ -55,6 +60,8 @@ while [[ $# -gt 0 ]]; do
     --relative-x) RELATIVE_X=$2; shift 2 ;;
     --relative-y) RELATIVE_Y=$2; shift 2 ;;
     --relative-yaw) RELATIVE_YAW=$2; shift 2 ;;
+    --route) ROUTE_FILE=$2; shift 2 ;;
+    --initial-localization-only) INITIAL_LOCALIZATION_ONLY=1; shift ;;
     --timeout) NAV_TIMEOUT=$2; shift 2 ;;
     --result-dir) RESULT_DIR=$2; shift 2 ;;
     --headless) RENDER_MODE=offscreen; shift ;;
@@ -109,6 +116,21 @@ MATRIX_ROOT=$(realpath "$MATRIX_ROOT")
 [[ -f "$MATRIX_ROOT/scripts/run_sim.sh" ]] || {
   printf '[FAIL] missing safe Matrix entry: %s/scripts/run_sim.sh\n' "$MATRIX_ROOT" >&2; exit 2;
 }
+grep -q 'MATRIX_UE_ROS_DOMAIN_ID' "$MATRIX_ROOT/scripts/run_sim.sh" || {
+  printf '[FAIL] Matrix run_sim.sh lacks UE ROS domain isolation support\n' >&2
+  exit 2
+}
+MATRIX_SENSOR_CONFIG="$MATRIX_ROOT/config/config.json"
+[[ -f "$MATRIX_SENSOR_CONFIG" ]] || {
+  printf '[FAIL] Matrix sensor config is missing: %s\n' "$MATRIX_SENSOR_CONFIG" >&2
+  exit 2
+}
+if ! jq -e '.robot.sensors.lidar.draw_points == false' \
+    "$MATRIX_SENSOR_CONFIG" >/dev/null; then
+  printf '[FAIL] Matrix LiDAR draw_points must be false for long closed-loop runs.\n' >&2
+  printf 'Rendering every LiDAR point can exhaust UE memory and corrupt PointCloud2.\n' >&2
+  exit 2
+fi
 [[ -n "$MAP_FILE" && -f "$MAP_FILE" ]] || {
   printf '[FAIL] --map must name map.yaml\n' >&2; exit 2;
 }
@@ -162,6 +184,7 @@ if [[ -z "$PARAMS_FILE" ]]; then
   PACKAGE_PREFIX=$(ros2 pkg prefix robot_navigo)
   PARAMS_FILE="$PACKAGE_PREFIX/share/robot_navigo/params/navigo_params.yaml"
 fi
+PACKAGE_PREFIX=${PACKAGE_PREFIX:-$(ros2 pkg prefix robot_navigo)}
 [[ -f "$PARAMS_FILE" ]] || {
   printf '[FAIL] Navigo params not found: %s\n' "$PARAMS_FILE" >&2; exit 2;
 }
@@ -171,11 +194,55 @@ if [[ -z "$RESULT_DIR" ]]; then
 fi
 mkdir -p "$RESULT_DIR"
 RESULT_DIR=$(realpath "$RESULT_DIR")
+if [[ -n "$ROUTE_FILE" ]]; then
+  [[ -f "$ROUTE_FILE" ]] || {
+    printf '[FAIL] route file not found: %s\n' "$ROUTE_FILE" >&2; exit 2;
+  }
+  ROUTE_FILE=$(realpath "$ROUTE_FILE")
+  cp "$ROUTE_FILE" "$RESULT_DIR/route.json"
+  ROUTE_FILE="$RESULT_DIR/route.json"
+fi
 RUNTIME_CONFIG="$RESULT_DIR/sim_matrix.runtime.yaml"
 RUNTIME_MAP="$RESULT_DIR/map.runtime.yaml"
 RUNTIME_NAV_PARAMS="$RESULT_DIR/matrix_navigo.runtime.yaml"
+MATRIX_NAV_BT="$(ros2 pkg prefix navigo_bt_navigator)/share/navigo_bt_navigator/behavior_trees/nav_to_pose_with_consistent_replanning_and_if_path_becomes_invalid.xml"
+[[ -f "$MATRIX_NAV_BT" ]] || {
+  printf '[FAIL] Matrix navigation behavior tree not found: %s\n' "$MATRIX_NAV_BT" >&2
+  exit 2
+}
 sed -E "s|^([[:space:]]*map_path:).*|\1 $MAP_DIR/|" \
   "$LIGHTNING_CONFIG" > "$RUNTIME_CONFIG"
+if [[ "$INITIAL_LOCALIZATION_ONLY" == "1" ]]; then
+  python3 - "$RUNTIME_CONFIG" <<'PY'
+import sys
+import yaml
+
+path = sys.argv[1]
+with open(path, encoding='utf-8') as source:
+    config = yaml.safe_load(source)
+# Initialization bypasses the skip counter. Once initialized, this effectively
+# disables periodic NDT/PGO corrections while retaining Lightning LIO output.
+config['system']['enable_lidar_loc_skip'] = True
+config['system']['lidar_loc_skip_num'] = 100000
+# This ablation intentionally has no periodic global matches after startup.
+# Keep the initialization anchor valid for the complete run so a short LIO
+# health dip can recover instead of requiring an impossible global match.
+config.setdefault('loc_state', {})['global_match_holdover_sec'] = 3600.0
+config['loc_state']['global_match_lost_timeout_sec'] = 3600.0
+# Matrix and visible UE share a six-core host. The full real-robot LIO settings
+# over-subscribe it and starve Nav2 callbacks even while sensor topics remain
+# healthy. This keeps 10 Hz input but halves point/iteration work for the
+# simulator-only regression profile.
+config['fasterlio']['point_filter_num'] = 2
+config['fasterlio']['max_iteration'] = 4
+with open(path, 'w', encoding='utf-8') as output:
+    yaml.safe_dump(config, output, sort_keys=False)
+PY
+  printf 'initial_localization_only\n' > "$RESULT_DIR/localization_mode.txt"
+  printf '[RUN] localization mode: global initialization followed by LIO tracking\n'
+else
+  printf 'continuous_global_localization\n' > "$RESULT_DIR/localization_mode.txt"
+fi
 
 MAP_IMAGE=$(awk '$1 == "image:" { print $2; exit }' "$MAP_FILE")
 [[ -n "$MAP_IMAGE" ]] || { printf '[FAIL] map image is missing\n' >&2; exit 2; }
@@ -185,26 +252,54 @@ fi
 MAP_IMAGE=$(realpath "$MAP_IMAGE")
 sed -E \
   -e "s|^image:.*|image: $MAP_IMAGE|" \
-  -e 's|^free_thresh:.*|free_thresh: 0.25|' \
+  -e 's|^free_thresh:.*|free_thresh: 0.196|' \
   "$MAP_FILE" > "$RUNTIME_MAP"
 
-# Matrix TF is sensor-time correct but arrives roughly 0.2s after the scan
-# (measured P95 0.265s). Preserve the 0.3s TF lookup budget, while making the
-# simulator-only freshness thresholds cover the observed tail latency. Real
-# robot parameters remain unchanged.
-python3 - "$PARAMS_FILE" "$RUNTIME_NAV_PARAMS" <<'PY'
+# Matrix TF preserves sensor time but is published after LIO has accumulated
+# enough IMU coverage. A recorded closed-loop run measured 0.410s P95 from
+# LaserScan receipt until TF can satisfy scan_stamp + 50ms. Give the message
+# filter 0.5s to wait; obstacle freshness and controller stale limits remain
+# independent and unchanged. Real-robot parameters remain unchanged.
+python3 - "$PARAMS_FILE" "$RUNTIME_NAV_PARAMS" "$MATRIX_NAV_BT" <<'PY'
 import sys
 import yaml
 
-source_path, output_path = sys.argv[1:]
+source_path, output_path, behavior_tree_path = sys.argv[1:]
 with open(source_path, encoding='utf-8') as source:
     params = yaml.safe_load(source)
 for costmap_name in ('local_costmap', 'global_costmap'):
     costmap = params[costmap_name][costmap_name]['ros__parameters']
-    costmap['transform_tolerance'] = 0.3
+    costmap['transform_tolerance'] = 0.5
     costmap['obstacle_layer']['scan']['expected_update_rate'] = 0.5
 params['controller_server']['ros__parameters']['costmap_update_timeout'] = 0.6
-params['controller_server']['ros__parameters']['FollowPath']['transform_tolerance'] = 0.5
+controller = params['controller_server']['ros__parameters']
+controller['progress_checker']['required_movement_angle'] = 0.1
+controller['progress_checker']['movement_time_allowance'] = 15.0
+follow_path = controller['FollowPath']
+follow_path['transform_tolerance'] = 0.5
+# For an Omni base, PathAngleCritic can rotate the body while vx/vy already
+# follow the path. The physical dog then wastes most of a straight traversal
+# undoing yaw near the goal. Hold yaw during translation and let GoalAngleCritic
+# handle the requested final orientation inside its near-goal window.
+follow_path['critics'] = [
+    critic for critic in follow_path['critics']
+    if critic != 'PathAngleCritic'
+]
+if 'TwirlingCritic' not in follow_path['critics']:
+    follow_path['critics'].append('TwirlingCritic')
+follow_path['TwirlingCritic'] = {
+    'enabled': True,
+    'cost_power': 1,
+    'cost_weight': 10.0,
+}
+follow_path['GoalAngleCritic']['cost_weight'] = 10.0
+# The warehouse regression route traverses a narrow northern passage. The
+# default tree treats optional SimpleSmoother collision rejection as a planning
+# failure and starts recovery even when the raw A* path remains valid. Reuse the
+# package's path-validity/replanning tree for this Matrix-only regression.
+params['bt_navigator']['ros__parameters']['default_nav_to_pose_bt_xml'] = (
+    behavior_tree_path
+)
 with open(output_path, 'w', encoding='utf-8') as output:
     yaml.safe_dump(params, output, sort_keys=False)
 PY
@@ -218,6 +313,14 @@ SIM_PID=""
 NAV_PID=""
 LOCALIZATION_PID=""
 BAG_PID=""
+MATRIX_UE_ROS_DOMAIN_ID=42
+export MATRIX_UE_ROS_DOMAIN_ID
+# Keep the complete simulation stack on one isolated ROS domain. Relaying the
+# high-bandwidth PointCloud2 through domain_bridge eventually corrupts CDR
+# samples ("sequence size exceeds remaining buffer") and starves LIO. Matrix
+# control uses LCM, so moving ROS localization/navigation to domain 42 does not
+# alter the actuator path.
+export ROS_DOMAIN_ID="$MATRIX_UE_ROS_DOMAIN_ID"
 MATRIX_MC_CONFIG="$MATRIX_ROOT/src/robot_mc/build/export/config/robot-defaults.yaml"
 MATRIX_MC_CONFIG_BACKUP=""
 
@@ -320,20 +423,6 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-wait_for_topic() {
-  local topic=$1 timeout_sec=$2 deadline
-  deadline=$((SECONDS + timeout_sec))
-  while (( SECONDS < deadline )); do
-    # Matrix sensor publishers use BEST_EFFORT. A RELIABLE probe discovers the
-    # topic but never receives a sample, which looks like a startup failure.
-    if timeout 3 ros2 topic echo "$topic" --once \
-        --qos-reliability best_effort >/dev/null 2>&1; then
-      return 0
-    fi
-  done
-  return 1
-}
-
 start_matrix() {
   local log_file=$1
   local ros_underlay="/opt/ros/$ROS_DISTRO/setup.bash"
@@ -385,7 +474,8 @@ verify_recording() {
   local -a required_topics=(
     /livox/lidar /imu/data_raw /odom/current_pose /lightning/debug
     /lightning/loc_status /tf /tf_static /map
-    /matrix_closed_loop/goal_pose /plan /transformed_global_plan /trajectories
+    /matrix_closed_loop/goal_pose /matrix_closed_loop/route
+    /matrix_closed_loop/route_status /plan /transformed_global_plan /trajectories
     /local_costmap/costmap /global_costmap/costmap /controller_server/debug
     /laser_scan /lightning_bridge/debug /cmd_vel_nav /cmd_vel /cmd_vel_safe
     /nav_safety_gate/gate_status)
@@ -399,16 +489,20 @@ verify_recording() {
 }
 
 sensor_ready=0
+printf '[RUN] running the complete Matrix/Lightning/Nav stack on ROS domain %s\n' \
+  "$ROS_DOMAIN_ID"
 if [[ "$START_SIM" == "1" ]]; then
   prepare_matrix_autonomy_input
   cleanup_owned_matrix
-  for attempt in 1 2; do
-    matrix_log="$RESULT_DIR/matrix.log"
-    [[ "$attempt" == "1" ]] || matrix_log="$RESULT_DIR/matrix.retry.log"
+  for attempt in 1 2 3 4 5; do
+    matrix_log="$RESULT_DIR/matrix.attempt${attempt}.log"
     start_matrix "$matrix_log"
-    if wait_for_topic /livox/lidar 60 &&
-        wait_for_topic /imu/data_raw 20 &&
-        wait_for_topic /odom/mujoco_odom 20 &&
+    # The packaged UE writer must finish typesupport and scene initialization
+    # before localization and navigation endpoints enter its ROS domain.
+    sleep 30
+    if ros2 run robot_navigo matrix_sensor_probe.py \
+          --timeout 90 --minimum-samples 300 \
+          >"$RESULT_DIR/sensor_probe.attempt${attempt}.log" 2>&1 &&
         ros2 run robot_navigo matrix_closed_loop_preflight.sh sensors \
           >"$RESULT_DIR/preflight_sensors.attempt${attempt}.log" 2>&1; then
       sensor_ready=1
@@ -417,15 +511,16 @@ if [[ "$START_SIM" == "1" ]]; then
     stop_group "$SIM_PID"
     cleanup_owned_matrix
     SIM_PID=""
-    if [[ "$attempt" == "1" ]]; then
-      printf '[WARN] Matrix sensors did not become ready; retrying once\n' >&2
+    if [[ "$attempt" != "5" ]]; then
+      printf '[WARN] Matrix sensors unstable on attempt %s; cold-starting again\n' \
+        "$attempt" >&2
       sleep 5
     fi
   done
 else
-  if wait_for_topic /livox/lidar 60 &&
-      wait_for_topic /imu/data_raw 20 &&
-      wait_for_topic /odom/mujoco_odom 20 &&
+  if ros2 run robot_navigo matrix_sensor_probe.py \
+        --timeout 90 --minimum-samples 300 \
+        >"$RESULT_DIR/sensor_probe.log" 2>&1 &&
       ros2 run robot_navigo matrix_closed_loop_preflight.sh sensors \
         >"$RESULT_DIR/preflight_sensors.log" 2>&1; then
     sensor_ready=1
@@ -455,6 +550,7 @@ setsid ros2 launch robot_navigo matrix_lightning_closed_loop.launch.py \
   map:="$RUNTIME_MAP" \
   params_file:="$RUNTIME_NAV_PARAMS" \
   start_lightning:=false \
+  nav2_delay:=55.0 \
   >"$RESULT_DIR/navigation.log" 2>&1 &
 NAV_PID=$!
 
@@ -477,7 +573,8 @@ fi
 sleep 4
 
 printf '[RUN] starting Lightning after stand-up settling\n'
-setsid bash -c 'cd "$1" && exec ros2 run lightning run_loc_online \
+setsid env OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+  bash -c 'cd "$1" && exec ros2 run lightning run_loc_online \
   --config "$2" --ros-args -p use_sim_time:=false' \
   _ "$LIGHTNING_CWD" "$RUNTIME_CONFIG" \
   >"$RESULT_DIR/localization.log" 2>&1 &
@@ -494,11 +591,22 @@ if ! timeout 180 ros2 run robot_navigo matrix_closed_loop_preflight.sh closed-lo
 fi
 cat "$RESULT_DIR/preflight_closed_loop.log"
 
-if ! wait_for_topic /odom/current_pose 180; then
-  printf '[FAIL] Lightning produced no navigation odometry within 180s\n' >&2
-  grep -E '\[INIT\]|初始化|NDT|FP候选' "$RESULT_DIR/localization.log" | tail -40 >&2 || true
+# Loading the multi-megabyte static map and activating all Nav2 lifecycle
+# nodes creates the largest startup CPU/DDS burst. Recording raw PointCloud2
+# during that burst has caused lifecycle bond timeouts and malformed-message
+# deserialization errors on the simulation host. Gate readiness first, then
+# start the performance recording immediately before goals are submitted.
+printf '[RUN] waiting for stable localization and active Nav2 lifecycle nodes\n'
+if ! ros2 run robot_navigo matrix_closed_loop_e2e.py \
+    --readiness-only \
+    --timeout 240 \
+    --output "$RESULT_DIR/readiness.json" \
+    >"$RESULT_DIR/readiness.log" 2>&1; then
+  printf '[FAIL] localization/Nav2 readiness gate failed\n' >&2
+  cat "$RESULT_DIR/readiness.log" >&2
   exit 1
 fi
+cat "$RESULT_DIR/readiness.log"
 
 if [[ "$RECORD" == "1" ]]; then
   STORAGE_ARGS=()
@@ -513,20 +621,26 @@ if [[ "$RECORD" == "1" ]]; then
     /local_costmap/costmap /global_costmap/costmap \
     /controller_server/debug /laser_scan /lightning_bridge/debug \
     /cmd_vel_nav /cmd_vel /cmd_vel_safe /nav_safety_gate/gate_status \
-    /matrix_closed_loop/goal_pose /navigate_to_pose/_action/status \
+    /matrix_closed_loop/goal_pose /matrix_closed_loop/route \
+    /matrix_closed_loop/route_status /navigate_to_pose/_action/status \
     /navigate_to_pose/_action/feedback \
     >"$RESULT_DIR/rosbag.log" 2>&1 &
   BAG_PID=$!
   sleep 2
 fi
 
+E2E_ARGS=(
+  --relative-x "$RELATIVE_X"
+  --relative-y "$RELATIVE_Y"
+  --relative-yaw "$RELATIVE_YAW"
+  --timeout "$NAV_TIMEOUT"
+  --output "$RESULT_DIR/result.json")
+if [[ -n "$ROUTE_FILE" ]]; then
+  E2E_ARGS+=(--route "$ROUTE_FILE")
+fi
+
 set +e
-ros2 run robot_navigo matrix_closed_loop_e2e.py \
-  --relative-x "$RELATIVE_X" \
-  --relative-y "$RELATIVE_Y" \
-  --relative-yaw "$RELATIVE_YAW" \
-  --timeout "$NAV_TIMEOUT" \
-  --output "$RESULT_DIR/result.json" \
+ros2 run robot_navigo matrix_closed_loop_e2e.py "${E2E_ARGS[@]}" \
   2>&1 | tee "$RESULT_DIR/e2e.log"
 TEST_STATUS=${PIPESTATUS[0]}
 set -e

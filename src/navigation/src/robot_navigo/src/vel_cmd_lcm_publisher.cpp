@@ -37,6 +37,8 @@ public:
         vx_to_stick_scale_ = PositiveScale("vx_to_stick_scale");
         vy_to_stick_scale_ = PositiveScale("vy_to_stick_scale");
         wz_to_stick_scale_ = PositiveScale("wz_to_stick_scale");
+        invert_lateral_axis_ =
+            this->declare_parameter<bool>("invert_lateral_axis", false);
         const auto enable_stance_service =
             this->declare_parameter<bool>("enable_stance_service", false);
         stand_button_hold_ = std::chrono::milliseconds(std::max<int64_t>(
@@ -57,13 +59,14 @@ public:
                           std::placeholders::_1, std::placeholders::_2));
         }
         RCLCPP_INFO(this->get_logger(),
-                    "vel_cmd_lcm_publisher started: topic=%s, channel=%s, rate=%.1fHz, timeout=%ldms, hash_override=0x%016lx, matrix_legacy_schema=%s, stick_scale=[%.3f %.3f %.3f]",
+                    "vel_cmd_lcm_publisher started: topic=%s, channel=%s, rate=%.1fHz, timeout=%ldms, hash_override=0x%016lx, matrix_legacy_schema=%s, stick_scale=[%.3f %.3f %.3f], invert_lateral_axis=%s",
                     cmd_vel_topic.c_str(), lcm_channel_.c_str(),
                     publish_rate_hz,
                     static_cast<long>(cmd_timeout_ms),
                     static_cast<unsigned long>(lcm_type_hash_override_),
                     matrix_legacy_gamepad_schema_ ? "true" : "false",
-                    vx_to_stick_scale_, vy_to_stick_scale_, wz_to_stick_scale_);
+                    vx_to_stick_scale_, vy_to_stick_scale_, wz_to_stick_scale_,
+                    invert_lateral_axis_ ? "true" : "false");
     }
 
 private:
@@ -165,8 +168,10 @@ private:
         lcmt.navigation_mode = navigation_mode_;
         lcmt.leftStickAnalog[1] = std::fabs(vx) < min_abs_vx_
             ? 0.0 : std::clamp(vx * vx_to_stick_scale_, -1.0, 1.0);
+        const double lateral_direction = invert_lateral_axis_ ? -1.0 : 1.0;
         lcmt.leftStickAnalog[0] = std::fabs(vy) < min_abs_vy_
-            ? 0.0 : std::clamp(vy * vy_to_stick_scale_, -1.0, 1.0);
+            ? 0.0 : std::clamp(
+                lateral_direction * vy * vy_to_stick_scale_, -1.0, 1.0);
         lcmt.rightStickAnalog[0] = std::fabs(wz) < min_abs_wz_
             ? 0.0 : std::clamp(-wz * wz_to_stick_scale_, -1.0, 1.0);
 
@@ -195,6 +200,7 @@ private:
     std::string                                                lcm_channel_{"vel_cmd_lcm_data"};
     uint64_t                                                   lcm_type_hash_override_{0};
     bool                                                       matrix_legacy_gamepad_schema_{false};
+    bool                                                       invert_lateral_axis_{false};
     int                                                        navigation_mode_{0};
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr planner_vel_cmd_subscriber;
     rclcpp::TimerBase::SharedPtr                               command_timer_;

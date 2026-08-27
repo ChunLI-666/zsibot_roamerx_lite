@@ -237,6 +237,7 @@ install(PROGRAMS
         scripts/emergency_stop.py
         scripts/emergency_stop_keyboard.py
         scripts/matrix_closed_loop_preflight.sh
+        scripts/matrix_sensor_probe.py
         scripts/matrix_closed_loop_e2e.py
         scripts/matrix_closed_loop_run.sh
         DESTINATION lib/${PROJECT_NAME}
@@ -301,7 +302,7 @@ install(DIRECTORY include/
 # install(TARGETS detector_node
 #         DESTINATION lib/${PROJECT_NAME}
 # )
-install(DIRECTORY launch params map rviz doc
+install(DIRECTORY launch params map rviz doc routes
         DESTINATION share/${PROJECT_NAME}
         DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
         GROUP_READ GROUP_WRITE GROUP_EXECUTE
