@@ -14,7 +14,7 @@ from pathlib import Path
 
 import rclpy
 from action_msgs.msg import GoalStatus
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import PoseStamped, Twist
 from lifecycle_msgs.msg import State
 from lifecycle_msgs.srv import GetState
 from nav2_msgs.action import NavigateToPose
@@ -22,7 +22,12 @@ from nav_msgs.msg import Odometry
 from rclpy.action import ActionClient
 from rclpy.duration import Duration
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import (
+    DurabilityPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+    qos_profile_sensor_data,
+)
 from rclpy.time import Time
 from sensor_msgs.msg import LaserScan
 from std_msgs.msg import UInt8
@@ -135,6 +140,14 @@ class MatrixClosedLoopE2E(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.action_client = ActionClient(self, NavigateToPose, '/navigate_to_pose')
+        self.goal_pose_publisher = self.create_publisher(
+            PoseStamped,
+            '/matrix_closed_loop/goal_pose',
+            QoSProfile(
+                depth=1,
+                reliability=ReliabilityPolicy.RELIABLE,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            ))
         self.standup_client = (
             self.create_client(Trigger, args.standup_service)
             if args.standup_service else None
@@ -645,6 +658,10 @@ class MatrixClosedLoopE2E(Node):
         self.get_logger().info(
             f'Sending map goal x={goal_pose["x"]:.3f}, y={goal_pose["y"]:.3f}, '
             f'yaw={goal_pose["yaw"]:.3f}')
+        # NavigateToPose transports its goal through a service request, not a
+        # normal topic. Publish the exact request pose for deterministic bag
+        # replay and post-run inspection.
+        self.goal_pose_publisher.publish(goal.pose)
         action_result = self.execute_goal(goal)
         # CMD_TIMEOUT after a completed action is the required stopped state,
         # not a navigation-time gate failure.

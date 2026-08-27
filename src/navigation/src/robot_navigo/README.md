@@ -31,10 +31,10 @@ Matrix 仿真回归使用 `matrix_lightning_closed_loop.launch.py`。导航位�
 
 ```bash
 ros2 run robot_navigo matrix_closed_loop_run.sh \
-  --matrix-root /home/charles/project/matrix_closed_loop_ws/src/zsibot/matrix \
+  --matrix-root /home/charles/project/locnav_ws/src/zsibot/matrix \
   --workspace /home/charles/project/matrix_closed_loop_ws \
   --map /home/charles/project/locnav_ws/data/matrix/scene_terrain_wh/20260315_lightning/map.yaml \
   --relative-x 1.0 --relative-y 0.0 --relative-yaw 0.0
 ```
 
-脚本依次检查传感器、定位发布权、TF、LaserScan、Nav2 lifecycle 和控制链，并输出 bag、日志和机器可读 `result.json`。不要使用 Matrix 的 `run_sim_with_nav.sh`、`pub_tf` 或旧 `sim_tf_bridge.py`，这些入口会把真值位姿注入导航闭环。
+脚本默认在本机 X11 桌面显示 Matrix UE 窗口；CI 才使用 `--headless`。它依次检查窗口、传感器、定位发布权、TF、LaserScan、Nav2 lifecycle 和控制链，并输出 bag、日志和机器可读 `result.json`。不要使用 Matrix 的 `run_sim_with_nav.sh`、`pub_tf` 或旧 `sim_tf_bridge.py`，这些入口会把真值位姿注入导航闭环。

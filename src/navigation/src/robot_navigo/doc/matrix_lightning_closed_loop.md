@@ -8,15 +8,25 @@
 
 ## 实际数据流
 
-```text
-Matrix /livox/lidar + /imu/data_raw
-  -> Lightning run_loc_online
-  -> /odom/current_pose + map->odom->base_link + /lightning/loc_status
-  -> Navigo planner/controller
-  -> /cmd_vel_nav -> velocity smoother -> /cmd_vel
-  -> nav_safety_gate -> /cmd_vel_safe
-  -> vel_cmd_lcm_pub -> LCM interface -> Matrix mc_ctrl
-  -> Matrix 机器人运动 -> 新一帧 LiDAR/IMU
+```mermaid
+flowchart LR
+    SIM[Matrix warehouse\n物理与传感器] -->|/livox/lidar\n/imu/data_raw| LOC[Lightning\nrun_loc_online]
+    MAP[Lightning 归档地图\n0.pcd + map.pgm] --> LOC
+    LOC -->|/odom/current_pose\nmap→odom→base_link\n/lightning/debug| NAV[Navigo / Nav2]
+    MAP -->|map.yaml| NAV
+    SIM -->|/livox/lidar| SCAN[C++ 点云投影]
+    SCAN -->|/laser_scan| COST[local/global costmap]
+    COST --> NAV
+    NAV -->|/plan| PLAN[全局路径]
+    NAV -->|/trajectories\n/cmd_vel_nav| SMOOTH[velocity_smoother]
+    SMOOTH -->|/cmd_vel| GATE[nav_safety_gate]
+    LOC -->|loc_status / pose_valid| GATE
+    GATE -->|/cmd_vel_safe| LCM[ROS→LCM adapter]
+    LCM -->|LCM interface| MC[Matrix mc_ctrl]
+    MC -->|关节/步态控制| SIM
+    SIM -.->|/odom/mujoco_odom\n仅评分| EVAL[E2E evaluator + rosbag]
+    LOC -.-> EVAL
+    NAV -.-> EVAL
 ```
 
 障碍物链路为 `/livox/lidar` -> C++ `livox_scan_projector` -> `/laser_scan` -> local/global costmap。Matrix 直接订阅 `PointCloud2`，不经过 Python 逐点转换。
@@ -46,7 +56,7 @@ ros2 run robot_navigo matrix_closed_loop_run.sh \
   --timeout 180
 ```
 
-脚本会临时把 Matrix `use_gamepad` 改为 `0`，只在 `mc_ctrl` 启动期间生效，随后立即恢复原文件。退出时会关闭本轮进程；`--keep-running` 除外。
+默认在本机 X11 桌面启动可见的 Matrix UE 窗口，并使用 `xdotool` 验证窗口已映射；只有无人值守回归才加 `--headless`。脚本会临时把 Matrix `use_gamepad` 改为 `0`，只在 `mc_ctrl` 启动期间生效，随后立即恢复原文件。退出时会关闭本轮进程；`--keep-running` 除外。
 
 ## 验收机制
 
@@ -68,28 +78,29 @@ ros2 run robot_navigo matrix_closed_loop_run.sh \
 5. Lightning 相对真值轨迹的位置 RMSE、最大误差和航向误差必须达标。
 6. `/lightning/loc_status` 在测试窗口中必须一直为 NORMAL。
 7. 定位状态心跳不能断流，`/nav_safety_gate/gate_status` 必须持续为 NORMAL。
+8. rosbag 必须包含原始 LiDAR/IMU、定位与 debug、目标 pose、TF、地图、全局/局部路径、两级 costmap、控制器轨迹和完整速度链；缺少任一必需 topic 时本轮直接失败。
 
 ## 已验证结果
 
 2026-08-27 的 1 m 前进测试结果目录：
 
-`/home/charles/project/matrix_closed_loop_ws/log/matrix_closed_loop_verified_1p0_20260827`
+`/home/charles/project/matrix_closed_loop_ws/log/matrix_closed_loop_visible_warehouse_20260827`
 
 | 指标 | 结果 |
 | --- | ---: |
 | NavigateToPose | SUCCEEDED |
-| MuJoCo 实际位移 | 0.856 m |
-| 最终目标位置误差 | 0.223 m |
-| 最终目标航向误差 | 0.083 rad |
-| Lightning 相对真值位置 RMSE / 最大误差 | 0.062 / 0.104 m |
-| Lightning 相对真值航向 RMSE / 最大误差 | 0.008 / 0.019 rad |
-| `/cmd_vel_nav` | 10.17 Hz，最大间隔 0.105 s |
-| `/cmd_vel` | 19.99 Hz，最大间隔 0.055 s |
-| `/cmd_vel_safe` | 20.10 Hz，最大间隔 0.058 s |
-| `/laser_scan` | 9.90 Hz，源最大间隔 0.187 s |
-| `/odom/current_pose` | 源频率 9.71 Hz，源最大间隔 0.217 s；接收最大间隔 0.253 s |
+| MuJoCo 实际位移 | 0.840 m |
+| 最终目标位置误差 | 0.236 m |
+| 最终目标航向误差 | 0.049 rad |
+| Lightning 相对真值位置 RMSE / 最大误差 | 0.063 / 0.089 m |
+| Lightning 相对真值航向 RMSE / 最大误差 | 0.007 / 0.014 rad |
+| `/cmd_vel_nav` | 10.17 Hz，最大间隔 0.104 s |
+| `/cmd_vel` | 20.00 Hz，最大间隔 0.055 s |
+| `/cmd_vel_safe` | 20.12 Hz，最大间隔 0.055 s |
+| `/laser_scan` | 10.05 Hz，源最大间隔 0.181 s |
+| `/odom/current_pose` | 源频率 9.88 Hz，源最大间隔 0.207 s；接收最大间隔 0.213 s |
 
-本轮所有自动验收项通过，定位状态从 `INITIALIZING` 进入 `ACTIVE` 后没有降级或丢失。速度平滑器首次非零输出延迟为 0.304 秒，安全门传播延迟为 0.00040 秒。初始化使用连续三帧候选确认，三帧最大平移差为 0.033 m、最大航向差为 0.09 度，避免单帧 NDT 局部极值直接建立全局锚点。
+本轮所有自动验收项通过，定位状态从 `INITIALIZING` 进入 `ACTIVE` 后没有降级或丢失。runner 在 `DISPLAY=:1` 验证并激活了 `zsibot_mujoco_ue` 可见窗口。初始化使用连续三帧候选确认，避免单帧 NDT 局部极值直接建立全局锚点。
 
 ## 已知限制
 
@@ -102,4 +113,4 @@ ros2 run robot_navigo matrix_closed_loop_run.sh \
 
 ## 回归产物
 
-每轮结果目录至少应保留：`result.json`、运行时 Lightning/Nav 参数、定位和导航日志、preflight 日志以及闭环 rosbag。`result.json` 是自动判定依据，rosbag 用于定位、TF、costmap 和控制异常的二次分析。
+每轮结果目录至少应保留：`result.json`、`bag_info.txt`、`window_info.txt`、运行时 Lightning/Nav 参数、定位和导航日志、preflight 日志以及闭环 rosbag。`result.json` 是自动判定依据，rosbag 用于定位、TF、costmap 和控制异常的二次分析。NavigateToPose 的请求本身经 action service 发送，测试器会将完全相同的 PoseStamped 镜像到 `/matrix_closed_loop/goal_pose` 供回放分析。

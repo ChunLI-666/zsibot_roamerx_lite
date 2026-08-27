@@ -19,6 +19,7 @@ Options:
   --relative-yaw RADIANS   Test goal yaw offset (default: 0.0)
   --timeout SECONDS        Navigation timeout (default: 120)
   --result-dir DIR         Result directory
+  --headless               Use UE off-screen rendering (default: visible window)
   --no-sim                 Reuse an already-running Matrix simulator
   --no-record              Do not record a rosbag
   --keep-running           Leave simulation/navigation running after the test
@@ -40,6 +41,7 @@ RESULT_DIR=""
 START_SIM=1
 RECORD=1
 KEEP_RUNNING=0
+RENDER_MODE=visible
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -55,6 +57,7 @@ while [[ $# -gt 0 ]]; do
     --relative-yaw) RELATIVE_YAW=$2; shift 2 ;;
     --timeout) NAV_TIMEOUT=$2; shift 2 ;;
     --result-dir) RESULT_DIR=$2; shift 2 ;;
+    --headless) RENDER_MODE=offscreen; shift ;;
     --no-sim) START_SIM=0; shift ;;
     --no-record) RECORD=0; shift ;;
     --keep-running) KEEP_RUNNING=1; shift ;;
@@ -94,6 +97,10 @@ done
   exit 2
 }
 export DISPLAY=$USABLE_DISPLAY
+if [[ "$RENDER_MODE" == "visible" ]] && ! command -v xdotool >/dev/null 2>&1; then
+  printf '[FAIL] xdotool is required to verify the visible Matrix window\n' >&2
+  exit 2
+fi
 
 [[ -n "$MATRIX_ROOT" && -d "$MATRIX_ROOT" ]] || {
   printf '[FAIL] --matrix-root must name the Matrix repository\n' >&2; exit 2;
@@ -330,6 +337,11 @@ wait_for_topic() {
 start_matrix() {
   local log_file=$1
   local ros_underlay="/opt/ros/$ROS_DISTRO/setup.bash"
+  local -a matrix_args=(
+    bash "$MATRIX_ROOT/scripts/run_sim.sh" "$ROBOT_ID" "$SCENE_ID")
+  if [[ "$RENDER_MODE" == "offscreen" ]]; then
+    matrix_args+=(offrender)
+  fi
   printf '[RUN] starting Matrix with pure ROS %s underlay\n' "$ROS_DISTRO"
   # Matrix bundles ROS libraries in its UE executable and its helper nodes are
   # built against the system ROS installation. Overlay libraries from
@@ -340,10 +352,50 @@ start_matrix() {
     source "$1"
     shift
     exec "$@"
-  ' _ "$ros_underlay" \
-    bash "$MATRIX_ROOT/scripts/run_sim.sh" "$ROBOT_ID" "$SCENE_ID" offrender \
+  ' _ "$ros_underlay" "${matrix_args[@]}" \
     >"$log_file" 2>&1 &
   SIM_PID=$!
+}
+
+wait_for_visible_matrix_window() {
+  [[ "$RENDER_MODE" == "visible" ]] || return 0
+  local deadline=$((SECONDS + 60)) pid window_id window_name
+  while (( SECONDS < deadline )); do
+    for pid in $(pgrep -f '^.*/zsibot_mujoco_ue-Linux-Shipping' 2>/dev/null || true); do
+      window_id=$(xdotool search --onlyvisible --pid "$pid" 2>/dev/null | head -1 || true)
+      if [[ -n "$window_id" ]]; then
+        window_name=$(xdotool getwindowname "$window_id" 2>/dev/null || true)
+        xdotool windowactivate --sync "$window_id" 2>/dev/null || true
+        printf '[PASS] Matrix window visible on DISPLAY=%s: id=%s title=%s\n' \
+          "$DISPLAY" "$window_id" "${window_name:-unknown}" | \
+          tee "$RESULT_DIR/window_info.txt"
+        return 0
+      fi
+    done
+    sleep 1
+  done
+  printf '[FAIL] Matrix UE process has no visible X11 window on DISPLAY=%s\n' \
+    "$DISPLAY" | tee "$RESULT_DIR/window_info.txt" >&2
+  return 1
+}
+
+verify_recording() {
+  local bag_dir=$1 info_file="$RESULT_DIR/bag_info.txt" topic
+  ros2 bag info "$bag_dir" >"$info_file"
+  local -a required_topics=(
+    /livox/lidar /imu/data_raw /odom/current_pose /lightning/debug
+    /lightning/loc_status /tf /tf_static /map
+    /matrix_closed_loop/goal_pose /plan /transformed_global_plan /trajectories
+    /local_costmap/costmap /global_costmap/costmap /controller_server/debug
+    /laser_scan /lightning_bridge/debug /cmd_vel_nav /cmd_vel /cmd_vel_safe
+    /nav_safety_gate/gate_status)
+  for topic in "${required_topics[@]}"; do
+    if ! grep -Fq "Topic: $topic |" "$info_file"; then
+      printf '[FAIL] recorded bag is missing required topic: %s\n' "$topic" >&2
+      return 1
+    fi
+  done
+  printf '[PASS] recorded bag contains all required localization/navigation topics\n'
 }
 
 sensor_ready=0
@@ -389,6 +441,9 @@ if [[ "$START_SIM" == "1" ]]; then
     "$RESULT_DIR/preflight_sensors.log"
 fi
 cat "$RESULT_DIR/preflight_sensors.log"
+if ! wait_for_visible_matrix_window; then
+  exit 1
+fi
 # mc_ctrl reads this setting only during startup. Restore the user's manual
 # simulator configuration as soon as autonomous input ownership is established.
 restore_matrix_input_config
@@ -450,7 +505,7 @@ if [[ "$RECORD" == "1" ]]; then
   if ros2 pkg prefix rosbag2_storage_mcap >/dev/null 2>&1; then
     STORAGE_ARGS=(-s mcap)
   fi
-  setsid ros2 bag record "${STORAGE_ARGS[@]}" \
+  setsid ros2 bag record --include-hidden-topics "${STORAGE_ARGS[@]}" \
     -o "$RESULT_DIR/closed_loop_bag" \
     /livox/lidar /imu/data_raw /odom/current_pose /odom/mujoco_odom \
     /lightning/loc_status /lightning/pose_valid /lightning/debug \
@@ -458,8 +513,8 @@ if [[ "$RECORD" == "1" ]]; then
     /local_costmap/costmap /global_costmap/costmap \
     /controller_server/debug /laser_scan /lightning_bridge/debug \
     /cmd_vel_nav /cmd_vel /cmd_vel_safe /nav_safety_gate/gate_status \
-    /navigate_to_pose/_action/goal /navigate_to_pose/_action/status \
-    /navigate_to_pose/_action/feedback /navigate_to_pose/_action/result \
+    /matrix_closed_loop/goal_pose /navigate_to_pose/_action/status \
+    /navigate_to_pose/_action/feedback \
     >"$RESULT_DIR/rosbag.log" 2>&1 &
   BAG_PID=$!
   sleep 2
@@ -478,5 +533,8 @@ set -e
 
 stop_bag "$BAG_PID"
 BAG_PID=""
+if [[ "$RECORD" == "1" ]] && ! verify_recording "$RESULT_DIR/closed_loop_bag"; then
+  TEST_STATUS=1
+fi
 printf '[RESULT] artifacts: %s\n' "$RESULT_DIR"
 exit "$TEST_STATUS"

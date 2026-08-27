@@ -142,9 +142,11 @@ def main():
             'Matrix E2E test does not record evaluation ground truth')
     require("lookup_transform(\n                'map', 'base_link'" in matrix_e2e,
             'Matrix E2E test does not score the global Lightning pose')
-    require('create_publisher(' not in matrix_e2e and
+    require(matrix_e2e.count('self.create_publisher(') == 1 and
+            'PoseStamped,' in matrix_e2e and
+            "'/matrix_closed_loop/goal_pose'" in matrix_e2e and
             'TransformBroadcaster' not in matrix_e2e,
-            'Matrix E2E evaluator must not inject odom, TF, or control topics')
+            'Matrix E2E evaluator publishes more than the action-goal mirror')
 
     matrix_runner = (package_dir / 'scripts' / 'matrix_closed_loop_run.sh').read_text()
     require('"$MATRIX_ROOT/scripts/run_sim.sh"' in matrix_runner,
@@ -193,6 +195,19 @@ def main():
             'kill -INT -- "-$pid"' in matrix_runner and
             'stop_bag "$BAG_PID"' in matrix_runner,
             'Matrix runner does not let rosbag finalize metadata on shutdown')
+    require('RENDER_MODE=visible' in matrix_runner and
+            '--headless) RENDER_MODE=offscreen' in matrix_runner and
+            'wait_for_visible_matrix_window' in matrix_runner and
+            'xdotool search --onlyvisible --pid' in matrix_runner and
+            'window_info.txt' in matrix_runner,
+            'Matrix runner does not default to or verify visible rendering')
+    require('verify_recording()' in matrix_runner and
+            '/matrix_closed_loop/goal_pose' in matrix_runner and
+            '--include-hidden-topics' in matrix_runner,
+            'Matrix runner does not enforce a complete regression recording')
+    require("'/matrix_closed_loop/goal_pose'" in matrix_e2e and
+            'self.goal_pose_publisher.publish(goal.pose)' in matrix_e2e,
+            'Matrix action goal is not mirrored into the regression bag')
 
     controller_server = (package_dir.parent / 'navigo_path_controller' / 'src' /
                          'controller_server.cpp').read_text()
