@@ -125,4 +125,14 @@ ament_export_include_directories(include)
 pluginlib_export_plugin_description_file(navigo_core mppic.xml)
 pluginlib_export_plugin_description_file(navigo_mppi_controller critics.xml)
 
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_velocity_deadband_critic
+    test/test_velocity_deadband_critic.cpp)
+  target_include_directories(test_velocity_deadband_critic PUBLIC ${xsimd_INCLUDE_DIRS})
+  target_link_libraries(test_velocity_deadband_critic
+    xtensor xtensor::optimize xtensor::use_xsimd)
+  ament_target_dependencies(test_velocity_deadband_critic ${dependencies_pkgs})
+endif()
+
 ament_package()

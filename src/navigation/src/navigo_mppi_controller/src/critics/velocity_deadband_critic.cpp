@@ -55,9 +55,9 @@ void VelocityDeadbandCritic::score(CriticData & data)
       data.costs += xt::pow(
         xt::sum(
           std::move(
-            xt::maximum(fabs(deadband_velocities_.at(0)) - xt::fabs(vx), 0) +
-            xt::maximum(fabs(deadband_velocities_.at(1)) - xt::fabs(vy), 0) +
-            xt::maximum(fabs(deadband_velocities_.at(2)) - xt::fabs(wz), 0)) *
+            executableDeadbandCost(vx, deadband_velocities_.at(0)) +
+            executableDeadbandCost(vy, deadband_velocities_.at(1)) +
+            executableDeadbandCost(wz, deadband_velocities_.at(2))) *
           data.model_dt,
           {1}, immediate) *
         weight_,
@@ -65,9 +65,9 @@ void VelocityDeadbandCritic::score(CriticData & data)
     } else {
       data.costs += xt::sum(
         (std::move(
-          xt::maximum(fabs(deadband_velocities_.at(0)) - xt::fabs(vx), 0) +
-          xt::maximum(fabs(deadband_velocities_.at(1)) - xt::fabs(vy), 0) +
-          xt::maximum(fabs(deadband_velocities_.at(2)) - xt::fabs(wz), 0))) *
+          executableDeadbandCost(vx, deadband_velocities_.at(0)) +
+          executableDeadbandCost(vy, deadband_velocities_.at(1)) +
+          executableDeadbandCost(wz, deadband_velocities_.at(2)))) *
         data.model_dt,
         {1}, immediate) *
         weight_;
@@ -79,8 +79,8 @@ void VelocityDeadbandCritic::score(CriticData & data)
     data.costs += xt::pow(
       xt::sum(
         std::move(
-          xt::maximum(fabs(deadband_velocities_.at(0)) - xt::fabs(vx), 0) +
-          xt::maximum(fabs(deadband_velocities_.at(2)) - xt::fabs(wz), 0)) *
+          executableDeadbandCost(vx, deadband_velocities_.at(0)) +
+          executableDeadbandCost(wz, deadband_velocities_.at(2))) *
         data.model_dt,
         {1}, immediate) *
       weight_,
@@ -88,8 +88,8 @@ void VelocityDeadbandCritic::score(CriticData & data)
   } else {
     data.costs += xt::sum(
       (std::move(
-        xt::maximum(fabs(deadband_velocities_.at(0)) - xt::fabs(vx), 0) +
-        xt::maximum(fabs(deadband_velocities_.at(2)) - xt::fabs(wz), 0))) *
+        executableDeadbandCost(vx, deadband_velocities_.at(0)) +
+        executableDeadbandCost(wz, deadband_velocities_.at(2)))) *
       data.model_dt,
       {1}, immediate) *
       weight_;
