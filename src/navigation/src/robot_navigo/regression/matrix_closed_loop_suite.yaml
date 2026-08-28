@@ -1,0 +1,106 @@
+schema: robot_navigo.matrix_closed_loop_suite
+schema_version: 1
+name: matrix_closed_loop_regression
+output_root: /mnt/data/regression/matrix_closed_loop
+lock_file: /mnt/data/regression/matrix_closed_loop/.matrix_closed_loop.lock
+
+# This suite is intended for the dedicated Matrix host. It does not change
+# real-robot navigation parameters or run any production controller code.
+variables:
+  workspace: /home/charles/project/matrix_closed_loop_ws
+  matrix_root: /home/charles/project/locnav_ws/src/zsibot/matrix
+  map: /home/charles/project/locnav_ws/data/matrix/scene_terrain_wh/20260315_lightning/map.yaml
+  lightning_config: "{workspace}/src/lightning-lm/config/sim_matrix.yaml"
+  gt_alignment: /mnt/data/regression/matrix_localization/matrix_lightning_localization/warehouse_20260827_154300/warehouse/map/map_ground_truth_alignment.json
+  params_file: "{workspace}/install/robot_navigo/share/robot_navigo/params/navigo_params.yaml"
+  route: routes/matrix_warehouse_loop.json
+  runner: "{package_root}/scripts/matrix_closed_loop_run.sh"
+
+defaults:
+  timeout_sec: 2400
+
+scenes:
+  - name: warehouse
+    scene_id: 1
+    available: true
+    enabled: true
+    cases:
+      - name: central_loop_smoke
+        # This legacy route exercises the chain but does not cover the full
+        # reachable map. A full_map_loop case must be generated from a map
+        # artifact and carry map_coverage metadata.
+        coverage: central_smoke
+        min_waypoints: 8
+        route: "{route}"
+        modes:
+          # GT is a planner/controller baseline only. It must never be used as
+          # a fallback when the Lightning formal case fails.
+          - name: gt_baseline
+            timeout_sec: 2400
+            command:
+              - "{runner}"
+              - --mode
+              - gt_baseline
+              - --gt-alignment
+              - "{gt_alignment}"
+              - --matrix-root
+              - "{matrix_root}"
+              - --workspace
+              - "{workspace}"
+              - --lightning-config
+              - "{lightning_config}"
+              - --params-file
+              - "{params_file}"
+              - --map
+              - "{map}"
+              - --scene
+              - "{scene_id}"
+              - --route
+              - "{route}"
+              - --headless
+              - --result-dir
+              - "{case_output}"
+          - name: lightning_formal
+            timeout_sec: 2400
+            command:
+              - "{runner}"
+              - --mode
+              - lightning_formal
+              - --matrix-root
+              - "{matrix_root}"
+              - --workspace
+              - "{workspace}"
+              - --lightning-config
+              - "{lightning_config}"
+              - --params-file
+              - "{params_file}"
+              - --map
+              - "{map}"
+              - --scene
+              - "{scene_id}"
+              - --route
+              - "{route}"
+              - --headless
+              - --result-dir
+              - "{case_output}"
+
+  - name: house
+    scene_id: 6
+    available: false
+    enabled: false
+    reason: HouseWorld has no versioned Lightning map and full-coverage route.
+  - name: office
+    scene_id: 13
+    available: false
+    enabled: false
+    reason: OfficeWorld has no reproducible mapping bag, map, and full-coverage route.
+  - name: iros_flat
+    scene_id: 9
+    available: false
+    enabled: false
+    reason: IROSFlatWorld has no validated Lightning map and full-coverage route.
+  - name: yard
+    scene_id: 3
+    available: false
+    enabled: false
+    reason: YardWorld has no validated Lightning map and full-coverage route.

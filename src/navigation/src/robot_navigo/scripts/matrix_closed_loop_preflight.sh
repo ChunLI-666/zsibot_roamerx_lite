@@ -3,16 +3,18 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: matrix_closed_loop_preflight.sh sensors|closed-loop
+Usage: matrix_closed_loop_preflight.sh sensors|closed-loop|gt-baseline
 
   sensors      Check Matrix sensor topics before starting Lightning/Nav.
   closed-loop  Check Lightning ownership, TF, obstacle scan and command chain.
+  gt-baseline  Check the test-only ground-truth baseline ownership and chain.
 EOF
 }
 
 [[ $# -eq 1 ]] || { usage >&2; exit 2; }
 PHASE=$1
-[[ "$PHASE" == "sensors" || "$PHASE" == "closed-loop" ]] || {
+[[ "$PHASE" == "sensors" || "$PHASE" == "closed-loop" ||
+   "$PHASE" == "gt-baseline" ]] || {
   usage >&2
   exit 2
 }
@@ -107,6 +109,24 @@ reject_ground_truth_consumers() {
   [[ -z "$bad" ]] || fail "ground truth is consumed by non-evaluation nodes: $bad"
   pass 'MuJoCo ground truth is evaluation-only'
 }
+
+require_gt_baseline() {
+  require_topic_type /odom/mujoco_odom nav_msgs/msg/Odometry
+  require_topic_type /odom/current_pose nav_msgs/msg/Odometry
+  require_topic_type /lightning/loc_status std_msgs/msg/UInt8
+  require_topic_type /lightning/pose_valid std_msgs/msg/Bool
+  require_topic_type /laser_scan sensor_msgs/msg/LaserScan
+  require_topic_type /cmd_vel_safe geometry_msgs/msg/Twist
+  require_single_publisher /odom/current_pose matrix_ground_truth_baseline
+  require_subscriber /cmd_vel_safe matrix_vel_cmd_lcm_publisher
+  pgrep -x mc_ctrl >/dev/null || fail 'mc_ctrl is not running; ROS-to-LCM is not a physical loop'
+  pass 'GT baseline ownership and actuator chain complete'
+}
+
+if [[ "$PHASE" == "gt-baseline" ]]; then
+  require_gt_baseline
+  exit 0
+fi
 
 reject_ground_truth_tf
 require_topic_type /livox/lidar sensor_msgs/msg/PointCloud2

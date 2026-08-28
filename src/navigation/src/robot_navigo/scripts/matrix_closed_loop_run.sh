@@ -5,11 +5,14 @@ usage() {
   cat <<'EOF'
 Usage: matrix_closed_loop_run.sh --matrix-root DIR --map FILE [options]
 
-Runs Matrix sensors and physics, Lightning localization, Navigo, recording,
-and a scored A-to-B test. MuJoCo ground truth is recorded/evaluated only.
+ Runs Matrix sensors and physics, Navigo, recording, and a scored route test.
+ `lightning_formal` uses Lightning localization; `gt_baseline` uses the
+ test-only Matrix ground-truth adapter.
 
 Options:
   --workspace DIR          Colcon workspace (default: inferred from Matrix root)
+  --mode MODE              lightning_formal or gt_baseline (default: lightning_formal)
+  --gt-alignment FILE      Fixed map_T_ground_truth JSON required by gt_baseline
   --lightning-config FILE  Matrix Lightning config
   --params-file FILE       Navigo parameters (default: package config)
   --robot ID               Matrix robot ID (default: 1 / xgb)
@@ -32,6 +35,8 @@ EOF
 MATRIX_ROOT=""
 MAP_FILE=""
 WORKSPACE=""
+MODE="lightning_formal"
+GT_ALIGNMENT=""
 LIGHTNING_CONFIG=""
 PARAMS_FILE=""
 ROBOT_ID=1
@@ -53,6 +58,8 @@ while [[ $# -gt 0 ]]; do
     --matrix-root) MATRIX_ROOT=$2; shift 2 ;;
     --map) MAP_FILE=$2; shift 2 ;;
     --workspace) WORKSPACE=$2; shift 2 ;;
+    --mode) MODE=$2; shift 2 ;;
+    --gt-alignment) GT_ALIGNMENT=$2; shift 2 ;;
     --lightning-config) LIGHTNING_CONFIG=$2; shift 2 ;;
     --params-file) PARAMS_FILE=$2; shift 2 ;;
     --robot) ROBOT_ID=$2; shift 2 ;;
@@ -72,6 +79,18 @@ while [[ $# -gt 0 ]]; do
     *) printf '[FAIL] unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+case "$MODE" in
+  lightning_formal|gt_baseline) ;;
+  *) printf '[FAIL] --mode must be lightning_formal or gt_baseline\n' >&2; exit 2 ;;
+esac
+if [[ "$MODE" == "gt_baseline" ]]; then
+  [[ -n "$GT_ALIGNMENT" && -f "$GT_ALIGNMENT" ]] || {
+    printf '[FAIL] gt_baseline requires --gt-alignment FILE\n' >&2
+    exit 2
+  }
+  GT_ALIGNMENT=$(realpath "$GT_ALIGNMENT")
+fi
 
 MATRIX_IFACE=$(ip -o -4 address show | awk '$4 == "192.168.234.1/32" { print $2; exit }')
 if [[ -z "$MATRIX_IFACE" ]]; then
@@ -194,6 +213,7 @@ if [[ -z "$RESULT_DIR" ]]; then
 fi
 mkdir -p "$RESULT_DIR"
 RESULT_DIR=$(realpath "$RESULT_DIR")
+printf '%s\n' "$MODE" > "$RESULT_DIR/mode.txt"
 if [[ -n "$ROUTE_FILE" ]]; then
   [[ -f "$ROUTE_FILE" ]] || {
     printf '[FAIL] route file not found: %s\n' "$ROUTE_FILE" >&2; exit 2;
@@ -312,6 +332,7 @@ LIGHTNING_CWD="$MAP_DIR"
 SIM_PID=""
 NAV_PID=""
 LOCALIZATION_PID=""
+GT_PID=""
 BAG_PID=""
 MATRIX_UE_ROS_DOMAIN_ID=42
 export MATRIX_UE_ROS_DOMAIN_ID
@@ -386,6 +407,16 @@ cleanup_owned_matrix() {
   stop_matrix_processes KILL
 }
 
+require_matrix_idle() {
+  local pids
+  pids=$(matrix_process_pids)
+  [[ -z "$pids" ]] || {
+    printf '[FAIL] Matrix is already running (PID(s): %s); refusing to stop an unowned session\n' \
+      "$(tr '\n' ' ' <<<"$pids")" >&2
+    return 1
+  }
+}
+
 prepare_matrix_autonomy_input() {
   [[ "$START_SIM" == "1" ]] || return 0
   [[ -f "$MATRIX_MC_CONFIG" ]] || {
@@ -414,6 +445,7 @@ cleanup() {
   if [[ "$KEEP_RUNNING" == "0" ]]; then
     stop_bag "$BAG_PID"
     stop_group "$LOCALIZATION_PID"
+    stop_group "$GT_PID"
     stop_group "$NAV_PID"
     stop_group "$SIM_PID"
     cleanup_owned_matrix
@@ -472,13 +504,16 @@ verify_recording() {
   local bag_dir=$1 info_file="$RESULT_DIR/bag_info.txt" topic
   ros2 bag info "$bag_dir" >"$info_file"
   local -a required_topics=(
-    /livox/lidar /imu/data_raw /odom/current_pose /lightning/debug
-    /lightning/loc_status /tf /tf_static /map
+    /livox/lidar /imu/data_raw /odom/current_pose
+    /tf /tf_static /map
     /matrix_closed_loop/goal_pose /matrix_closed_loop/route
     /matrix_closed_loop/route_status /plan /transformed_global_plan /trajectories
     /local_costmap/costmap /global_costmap/costmap /controller_server/debug
     /laser_scan /lightning_bridge/debug /cmd_vel_nav /cmd_vel /cmd_vel_safe
     /nav_safety_gate/gate_status)
+  if [[ "$MODE" == "lightning_formal" ]]; then
+    required_topics+=(/lightning/debug /lightning/loc_status)
+  fi
   for topic in "${required_topics[@]}"; do
     if ! grep -Fq "Topic: $topic |" "$info_file"; then
       printf '[FAIL] recorded bag is missing required topic: %s\n' "$topic" >&2
@@ -493,7 +528,7 @@ printf '[RUN] running the complete Matrix/Lightning/Nav stack on ROS domain %s\n
   "$ROS_DOMAIN_ID"
 if [[ "$START_SIM" == "1" ]]; then
   prepare_matrix_autonomy_input
-  cleanup_owned_matrix
+  require_matrix_idle
   for attempt in 1 2 3 4 5; do
     matrix_log="$RESULT_DIR/matrix.attempt${attempt}.log"
     start_matrix "$matrix_log"
@@ -543,7 +578,16 @@ fi
 # simulator configuration as soon as autonomous input ownership is established.
 restore_matrix_input_config
 
-printf '[RUN] starting Lightning + Navigo closed loop\n'
+if [[ "$MODE" == "gt_baseline" ]]; then
+  printf '[RUN] starting GT baseline adapter + Navigo closed loop\n'
+  setsid ros2 run robot_navigo matrix_ground_truth_baseline.py \
+    --ros-args -p use_sim_time:=false \
+    -p alignment_file:="$GT_ALIGNMENT" \
+    >"$RESULT_DIR/ground_truth_baseline.log" 2>&1 &
+  GT_PID=$!
+else
+  printf '[RUN] starting Lightning + Navigo closed loop\n'
+fi
 setsid ros2 launch robot_navigo matrix_lightning_closed_loop.launch.py \
   lightning_config:="$RUNTIME_CONFIG" \
   lightning_cwd:="$LIGHTNING_CWD" \
@@ -572,18 +616,25 @@ if [[ "$stand_ok" != "1" ]]; then
 fi
 sleep 4
 
-printf '[RUN] starting Lightning after stand-up settling\n'
-setsid env OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
-  bash -c 'cd "$1" && exec ros2 run lightning run_loc_online \
-  --config "$2" --ros-args -p use_sim_time:=false' \
-  _ "$LIGHTNING_CWD" "$RUNTIME_CONFIG" \
-  >"$RESULT_DIR/localization.log" 2>&1 &
-LOCALIZATION_PID=$!
+if [[ "$MODE" == "lightning_formal" ]]; then
+  printf '[RUN] starting Lightning after stand-up settling\n'
+  setsid env OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+    bash -c 'cd "$1" && exec ros2 run lightning run_loc_online \
+    --config "$2" --ros-args -p use_sim_time:=false' \
+    _ "$LIGHTNING_CWD" "$RUNTIME_CONFIG" \
+    >"$RESULT_DIR/localization.log" 2>&1 &
+  LOCALIZATION_PID=$!
+fi
 
 # Endpoint ownership does not require a valid pose. Run it while FP/NDT is
 # initializing so the bounded ACTIVE-state global-match holdover is reserved
 # for the navigation test instead of CLI discovery.
-if ! timeout 180 ros2 run robot_navigo matrix_closed_loop_preflight.sh closed-loop \
+PREFLIGHT_PHASE=closed-loop
+if [[ "$MODE" == "gt_baseline" ]]; then
+  PREFLIGHT_PHASE=gt-baseline
+fi
+# Formal mode keeps the explicit preflight contract: matrix_closed_loop_preflight.sh closed-loop
+if ! timeout 180 ros2 run robot_navigo matrix_closed_loop_preflight.sh "$PREFLIGHT_PHASE" \
     >"$RESULT_DIR/preflight_closed_loop.log" 2>&1; then
   printf '[FAIL] closed-loop preflight failed\n' >&2
   cat "$RESULT_DIR/preflight_closed_loop.log" >&2
