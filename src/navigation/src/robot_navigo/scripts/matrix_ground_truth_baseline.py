@@ -41,6 +41,12 @@ def compose_planar(transform, pose):
     )
 
 
+def world_velocity_to_body(vx, vy, body_yaw):
+    """Rotate Matrix world-frame linear velocity into the robot body frame."""
+    cosine, sine = math.cos(body_yaw), math.sin(body_yaw)
+    return cosine * vx + sine * vy, -sine * vx + cosine * vy
+
+
 def publish_due(last_stamp_ns, stamp_ns, minimum_period_ns):
     if last_stamp_ns is None or stamp_ns <= last_stamp_ns:
         return True
@@ -115,6 +121,13 @@ class MatrixGroundTruthBaseline(Node):
         pose.pose.pose.orientation.w = math.cos(0.5 * map_yaw)
         pose.pose.covariance = message.pose.covariance
         pose.twist = message.twist
+        body_vx, body_vy = world_velocity_to_body(
+            message.twist.twist.linear.x,
+            message.twist.twist.linear.y,
+            source_yaw,
+        )
+        pose.twist.twist.linear.x = body_vx
+        pose.twist.twist.linear.y = body_vy
         self.pose_publisher.publish(pose)
 
         status = UInt8()

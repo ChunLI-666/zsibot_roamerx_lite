@@ -121,6 +121,17 @@ def main():
             "'navigation_mode': 1" in matrix_launch and
             "'publish_rate_hz': 50.0" in matrix_launch,
             'Matrix command adapter does not match the packaged mc_ctrl wire contract')
+    for axis, default_value in (('vx', '0.05'), ('vy', '0.10'), ('wz', '0.02')):
+        argument = f"'matrix_min_abs_{axis}', default_value='{default_value}'"
+        parameter = (
+            f"'min_abs_{axis}': ParameterValue(matrix_min_abs_{axis}, value_type=float)"
+        )
+        require(argument in matrix_launch,
+                f'Matrix {axis} deadband launch argument or default is inconsistent')
+        require(parameter in matrix_launch,
+                f'Matrix {axis} deadband is not explicitly converted to a double')
+    require("from launch_ros.parameter_descriptions import ParameterValue" in matrix_launch,
+            'Matrix deadband launch values do not use typed ROS parameters')
 
     matrix_adapter = (package_dir / 'src' / 'vel_cmd_lcm_publisher.cpp').read_text()
     require('encoded.begin() + kLegacyFieldOffset' in matrix_adapter and

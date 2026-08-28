@@ -13,6 +13,7 @@ from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -25,6 +26,9 @@ def generate_launch_description():
     start_lightning = LaunchConfiguration('start_lightning')
     nav2_delay = LaunchConfiguration('nav2_delay')
     lightning_cwd = LaunchConfiguration('lightning_cwd')
+    matrix_min_abs_vx = LaunchConfiguration('matrix_min_abs_vx')
+    matrix_min_abs_vy = LaunchConfiguration('matrix_min_abs_vy')
+    matrix_min_abs_wz = LaunchConfiguration('matrix_min_abs_wz')
 
     lightning = ExecuteProcess(
         condition=IfCondition(start_lightning),
@@ -112,9 +116,9 @@ def generate_launch_description():
             'navigation_mode': 1,
             'publish_rate_hz': 50.0,
             'cmd_timeout_ms': 300,
-            'min_abs_vx': 0.05,
-            'min_abs_vy': 0.10,
-            'min_abs_wz': 0.02,
+            'min_abs_vx': ParameterValue(matrix_min_abs_vx, value_type=float),
+            'min_abs_vy': ParameterValue(matrix_min_abs_vy, value_type=float),
+            'min_abs_wz': ParameterValue(matrix_min_abs_wz, value_type=float),
             # ROS commands are physical SI units; Matrix gamepad analog axes
             # are normalized by the configured gait limits (0.5/0.3/1.0).
             'vx_to_stick_scale': 2.0,
@@ -146,6 +150,15 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'nav2_delay', default_value='15.0',
             description='Nav startup delay; safety gate still blocks until localization is NORMAL'),
+        DeclareLaunchArgument(
+            'matrix_min_abs_vx', default_value='0.05',
+            description='Matrix adapter minimum executable absolute X velocity; set 0 for ablation'),
+        DeclareLaunchArgument(
+            'matrix_min_abs_vy', default_value='0.10',
+            description='Matrix adapter minimum executable absolute Y velocity; set 0 for ablation'),
+        DeclareLaunchArgument(
+            'matrix_min_abs_wz', default_value='0.02',
+            description='Matrix adapter minimum executable absolute yaw rate; set 0 for ablation'),
         lightning,
         scan_projector,
         navigation,

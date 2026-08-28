@@ -36,6 +36,15 @@ class MatrixGroundTruthBaselineTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "map_T_ground_truth"):
                 MODULE.load_map_to_ground_truth(path)
 
+    def test_matrix_world_velocity_is_rotated_to_body_frame(self):
+        vx, vy = MODULE.world_velocity_to_body(1.0, 0.0, math.pi / 2.0)
+        self.assertAlmostEqual(vx, 0.0, places=12)
+        self.assertAlmostEqual(vy, -1.0, places=12)
+
+        vx, vy = MODULE.world_velocity_to_body(0.3, -0.2, 0.0)
+        self.assertAlmostEqual(vx, 0.3)
+        self.assertAlmostEqual(vy, -0.2)
+
     def test_publish_rate_gate_handles_first_reset_and_period(self):
         self.assertTrue(MODULE.publish_due(None, 100, 20))
         self.assertFalse(MODULE.publish_due(100, 119, 20))
