@@ -36,6 +36,12 @@ class MatrixGroundTruthBaselineTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "map_T_ground_truth"):
                 MODULE.load_map_to_ground_truth(path)
 
+    def test_publish_rate_gate_handles_first_reset_and_period(self):
+        self.assertTrue(MODULE.publish_due(None, 100, 20))
+        self.assertFalse(MODULE.publish_due(100, 119, 20))
+        self.assertTrue(MODULE.publish_due(100, 120, 20))
+        self.assertTrue(MODULE.publish_due(100, 90, 20))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -41,6 +41,12 @@ def compose_planar(transform, pose):
     )
 
 
+def publish_due(last_stamp_ns, stamp_ns, minimum_period_ns):
+    if last_stamp_ns is None or stamp_ns <= last_stamp_ns:
+        return True
+    return stamp_ns - last_stamp_ns >= minimum_period_ns
+
+
 class MatrixGroundTruthBaseline(Node):
     def __init__(self):
         super().__init__('matrix_ground_truth_baseline')
@@ -59,6 +65,12 @@ class MatrixGroundTruthBaseline(Node):
         if not alignment_file:
             raise RuntimeError('GT baseline requires an explicit alignment_file')
         self.map_to_ground_truth = load_map_to_ground_truth(alignment_file)
+        max_publish_rate_hz = float(self.declare_parameter(
+            'max_publish_rate_hz', 50.0).value)
+        if not math.isfinite(max_publish_rate_hz) or max_publish_rate_hz <= 0.0:
+            raise RuntimeError('max_publish_rate_hz must be finite and positive')
+        self.minimum_publish_period_ns = int(1.0e9 / max_publish_rate_hz)
+        self.last_published_stamp_ns = None
 
         self.pose_publisher = self.create_publisher(Odometry, pose_topic, 10)
         self.status_publisher = self.create_publisher(UInt8, status_topic, 10)
@@ -70,9 +82,17 @@ class MatrixGroundTruthBaseline(Node):
         self.get_logger().info(
             f'GT baseline adapter: {ground_truth_topic} -> {pose_topic}, '
             f'{self.map_frame}->{self.odom_frame}->{self.base_frame}, '
-            f'map_T_ground_truth={self.map_to_ground_truth}')
+            f'map_T_ground_truth={self.map_to_ground_truth}, '
+            f'max_publish_rate_hz={max_publish_rate_hz}')
 
     def _ground_truth_callback(self, message):
+        stamp_ns = (int(message.header.stamp.sec) * 1_000_000_000
+                    + int(message.header.stamp.nanosec))
+        if not publish_due(
+                self.last_published_stamp_ns, stamp_ns, self.minimum_publish_period_ns):
+            return
+        self.last_published_stamp_ns = stamp_ns
+
         pose = Odometry()
         pose.header = message.header
         pose.header.frame_id = self.odom_frame
