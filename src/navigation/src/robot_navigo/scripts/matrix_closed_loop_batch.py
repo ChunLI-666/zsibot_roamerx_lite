@@ -41,6 +41,17 @@ class ManifestError(ValueError):
     pass
 
 
+def package_root_for_script(script: Path) -> Path:
+    resolved = script.resolve()
+    source_root = resolved.parents[1]
+    if (source_root / 'routes').is_dir() and (source_root / 'regression').is_dir():
+        return source_root
+    install_share = resolved.parents[2] / 'share' / 'robot_navigo'
+    if (install_share / 'routes').is_dir() and (install_share / 'regression').is_dir():
+        return install_share
+    return source_root
+
+
 def atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=f'.{path.name}.', dir=path.parent)
@@ -555,7 +566,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--timeout-sec', type=float)
-    parser.add_argument('--package-root', default=str(Path(__file__).resolve().parents[1]))
+    parser.add_argument('--package-root', default=str(package_root_for_script(Path(__file__))))
     return parser.parse_args(argv)
 
 

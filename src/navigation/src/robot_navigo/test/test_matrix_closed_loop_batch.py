@@ -165,6 +165,22 @@ class MatrixClosedLoopBatchTest(unittest.TestCase):
         self.assertIn('os.killpg', source)
         self.assertNotIn('pkill', source)
 
+    def test_package_root_supports_source_and_install_layouts(self):
+        source_script = self.root / 'source/robot_navigo/scripts/tool.py'
+        source_script.parent.mkdir(parents=True)
+        (source_script.parent.parent / 'routes').mkdir(parents=True)
+        (source_script.parent.parent / 'regression').mkdir()
+        source_script.touch()
+        self.assertEqual(source_script.parent.parent, BATCH.package_root_for_script(source_script))
+
+        installed = self.root / 'install/robot_navigo/lib/robot_navigo/tool.py'
+        installed.parent.mkdir(parents=True)
+        installed.touch()
+        share = self.root / 'install/robot_navigo/share/robot_navigo'
+        (share / 'routes').mkdir(parents=True)
+        (share / 'regression').mkdir()
+        self.assertEqual(share, BATCH.package_root_for_script(installed))
+
 
 if __name__ == '__main__':
     unittest.main()
