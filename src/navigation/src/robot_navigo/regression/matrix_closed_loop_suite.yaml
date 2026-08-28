@@ -15,6 +15,9 @@ variables:
   params_file: "{workspace}/install/robot_navigo/share/robot_navigo/params/navigo_params.yaml"
   route: routes/matrix_warehouse_loop.json
   runner: "{package_root}/scripts/matrix_closed_loop_run.sh"
+  # The longest current leg replans to about 16.5 m. At the 0.15 m/s safety
+  # limit, 120 s leaves almost no allowance for turning and goal settling.
+  per_goal_timeout_sec: 180
 
 defaults:
   timeout_sec: 2400
@@ -57,6 +60,8 @@ scenes:
               - "{scene_id}"
               - --route
               - "{route}"
+              - --timeout
+              - "{per_goal_timeout_sec}"
               - --headless
               - --result-dir
               - "{case_output}"
@@ -80,6 +85,8 @@ scenes:
               - "{scene_id}"
               - --route
               - "{route}"
+              - --timeout
+              - "{per_goal_timeout_sec}"
               - --headless
               - --result-dir
               - "{case_output}"

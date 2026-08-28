@@ -144,6 +144,13 @@ class MatrixClosedLoopBatchTest(unittest.TestCase):
             {'gt_baseline', 'lightning_formal'},
             {mode['name'] for mode in case['modes']})
         self.assertEqual(8, case['min_waypoints'])
+        per_goal_timeout = manifest['variables']['per_goal_timeout_sec']
+        self.assertGreaterEqual(per_goal_timeout, 180)
+        for mode in case['modes']:
+            timeout_index = mode['command'].index('--timeout')
+            self.assertEqual(
+                '{per_goal_timeout_sec}', mode['command'][timeout_index + 1],
+                'batch timeout and per-goal NavigateToPose timeout must be explicit')
 
     def test_timeout_writes_final_status_and_stops_owned_group(self):
         slow = {
