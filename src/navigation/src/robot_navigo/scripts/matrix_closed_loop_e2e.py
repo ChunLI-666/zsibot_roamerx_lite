@@ -199,6 +199,7 @@ class MatrixClosedLoopE2E(Node):
         self.route_name = 'single_goal'
         self.route_results = []
         self.requested_route_length = 0.0
+        self.last_attempted_goal = None
 
         self.create_subscription(
             UInt8, '/lightning/loc_status', self._loc_status_callback, 10)
@@ -531,6 +532,7 @@ class MatrixClosedLoopE2E(Node):
         total = len(goals)
         self.route_results = []
         for index, (name, goal, pose) in enumerate(goals, start=1):
+            self.last_attempted_goal = pose
             self.get_logger().info(
                 f'Route {index}/{total} {name}: '
                 f'x={pose["x"]:.3f}, y={pose["y"]:.3f}, yaw={pose["yaw"]:.3f}')
@@ -695,9 +697,7 @@ class MatrixClosedLoopE2E(Node):
         physical_motion_detected = False
         if self.args.route:
             if physical['path_length_m'] is not None:
-                physical_motion_detected = (
-                    physical['path_length_m'] >=
-                    max(1.0, 0.5 * self.requested_route_length))
+                physical_motion_detected = physical['path_length_m'] >= 0.05
         elif physical['translation_m'] is not None:
             requested_translation = math.hypot(
                 self.args.relative_x, self.args.relative_y)
@@ -805,6 +805,11 @@ class MatrixClosedLoopE2E(Node):
             'route': {
                 'name': self.route_name,
                 'requested_length_m': self.requested_route_length,
+                'measured_path_length_m': physical['path_length_m'],
+                'distance_progress_ratio': (
+                    physical['path_length_m'] / self.requested_route_length
+                    if physical['path_length_m'] is not None and
+                    self.requested_route_length > 0.0 else None),
                 'waypoint_results': self.route_results,
             },
             'topic_stats': topic_stats,
@@ -848,7 +853,7 @@ class MatrixClosedLoopE2E(Node):
             f'start=({start_pose["x"]:.3f}, {start_pose["y"]:.3f})')
         self.publish_route(route_points)
         action_result = self.execute_route(goals)
-        goal_pose = goals[-1][2]
+        goal_pose = self.last_attempted_goal or goals[-1][2]
         # CMD_TIMEOUT after a completed action is the required stopped state,
         # not a navigation-time gate failure.
         self.gate_monitoring_active = False

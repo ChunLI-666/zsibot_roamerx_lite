@@ -15,6 +15,9 @@ Options:
   --gt-alignment FILE      Fixed map_T_ground_truth JSON required by gt_baseline
   --lightning-config FILE  Matrix Lightning config
   --params-file FILE       Navigo parameters (default: package config)
+  --matrix-min-abs-vx V    Matrix adapter X deadband (default: 0.05)
+  --matrix-min-abs-vy V    Matrix adapter Y deadband (default: 0.10)
+  --matrix-min-abs-wz V    Matrix adapter yaw deadband (default: 0.02)
   --robot ID               Matrix robot ID (default: 1 / xgb)
   --scene ID               Matrix scene ID (default: 1 / warehouse)
   --relative-x METERS      Test goal forward offset (default: 1.0)
@@ -39,6 +42,9 @@ MODE="lightning_formal"
 GT_ALIGNMENT=""
 LIGHTNING_CONFIG=""
 PARAMS_FILE=""
+MATRIX_MIN_ABS_VX=0.05
+MATRIX_MIN_ABS_VY=0.10
+MATRIX_MIN_ABS_WZ=0.02
 ROBOT_ID=1
 SCENE_ID=1
 RELATIVE_X=1.0
@@ -62,6 +68,9 @@ while [[ $# -gt 0 ]]; do
     --gt-alignment) GT_ALIGNMENT=$2; shift 2 ;;
     --lightning-config) LIGHTNING_CONFIG=$2; shift 2 ;;
     --params-file) PARAMS_FILE=$2; shift 2 ;;
+    --matrix-min-abs-vx) MATRIX_MIN_ABS_VX=$2; shift 2 ;;
+    --matrix-min-abs-vy) MATRIX_MIN_ABS_VY=$2; shift 2 ;;
+    --matrix-min-abs-wz) MATRIX_MIN_ABS_WZ=$2; shift 2 ;;
     --robot) ROBOT_ID=$2; shift 2 ;;
     --scene) SCENE_ID=$2; shift 2 ;;
     --relative-x) RELATIVE_X=$2; shift 2 ;;
@@ -593,6 +602,9 @@ setsid ros2 launch robot_navigo matrix_lightning_closed_loop.launch.py \
   lightning_cwd:="$LIGHTNING_CWD" \
   map:="$RUNTIME_MAP" \
   params_file:="$RUNTIME_NAV_PARAMS" \
+  matrix_min_abs_vx:="$MATRIX_MIN_ABS_VX" \
+  matrix_min_abs_vy:="$MATRIX_MIN_ABS_VY" \
+  matrix_min_abs_wz:="$MATRIX_MIN_ABS_WZ" \
   start_lightning:=false \
   nav2_delay:=55.0 \
   >"$RESULT_DIR/navigation.log" 2>&1 &

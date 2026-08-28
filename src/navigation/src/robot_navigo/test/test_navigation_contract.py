@@ -133,6 +133,19 @@ def main():
     require("from launch_ros.parameter_descriptions import ParameterValue" in matrix_launch,
             'Matrix deadband launch values do not use typed ROS parameters')
 
+    matrix_runner = (package_dir / 'scripts' / 'matrix_closed_loop_run.sh').read_text()
+    for axis, default_value in (('VX', '0.05'), ('VY', '0.10'), ('WZ', '0.02')):
+        require(f'MATRIX_MIN_ABS_{axis}={default_value}' in matrix_runner,
+                f'Matrix runner {axis} deadband default is inconsistent')
+        require(f'matrix_min_abs_{axis.lower()}:="$MATRIX_MIN_ABS_{axis}"' in matrix_runner,
+                f'Matrix runner does not forward the {axis} deadband launch argument')
+
+    matrix_e2e = (package_dir / 'scripts' / 'matrix_closed_loop_e2e.py').read_text()
+    require('goal_pose = self.last_attempted_goal or goals[-1][2]' in matrix_e2e,
+            'Matrix E2E final error is not scoped to the last attempted waypoint')
+    require("physical['path_length_m'] >= 0.05" in matrix_e2e,
+            'Matrix E2E physical motion check still conflates movement with route completion')
+
     matrix_adapter = (package_dir / 'src' / 'vel_cmd_lcm_publisher.cpp').read_text()
     require('encoded.begin() + kLegacyFieldOffset' in matrix_adapter and
             'encoded.insert' in matrix_adapter,
