@@ -15,7 +15,12 @@
 #ifndef NAVIGO_MPPI_CONTROLLER__CRITICS__VELOCITY_DEADBAND_CRITIC_HPP_
 #define NAVIGO_MPPI_CONTROLLER__CRITICS__VELOCITY_DEADBAND_CRITIC_HPP_
 
+#include <cmath>
 #include <vector>
+
+#include <xtensor/xeval.hpp>
+#include <xtensor/xmath.hpp>
+#include <xtensor/xoperation.hpp>
 
 #include "navigo_mppi_controller/critic_function.hpp"
 #include "navigo_mppi_controller/models/state.hpp"
@@ -23,6 +28,16 @@
 
 namespace mppi::critics
 {
+
+template<typename VelocityArray>
+auto executableDeadbandCost(const VelocityArray & velocity, float deadband)
+{
+  constexpr float kZeroVelocityTolerance = 1.0e-6f;
+  return xt::eval(xt::where(
+      xt::fabs(velocity) > kZeroVelocityTolerance,
+      xt::maximum(std::fabs(deadband) - xt::fabs(velocity), 0.0f),
+      0.0f));
+}
 
 /**
  * @class mppi::critics::VelocityDeadbandCritic
