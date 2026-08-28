@@ -221,6 +221,17 @@ def main():
             'Matrix runner does not screen unstable simulator cold starts')
     require('free_thresh:.*|free_thresh: 0.196' in matrix_runner,
             'Matrix runtime map can classify unknown 205-valued cells as free')
+    require('lightning_formal|gt_baseline|mapping_collect' in matrix_runner and
+            'mapping_collect requires an explicit --route FILE' in matrix_runner and
+            "['GridBased']['allow_unknown'] = False" in matrix_runner,
+            'Matrix mapping collection is not confined to an explicit known-free route')
+    require('--pre-roll-sec' in matrix_runner and '--post-roll-sec' in matrix_runner and
+            'recording %.3fs static pre-roll' in matrix_runner and
+            'recording %.3fs post-roll' in matrix_runner,
+            'Matrix mapping collection does not preserve IMU coverage around the route')
+    require('mapping route completed; deferring acceptance to coverage gate' in
+            matrix_runner,
+            'Matrix mapping collection still uses navigation timing as its acceptance gate')
     require('timeout 180 ros2 run robot_navigo matrix_closed_loop_preflight.sh' in
             matrix_runner,
             'Matrix closed-loop preflight budget is shorter than its bounded checks')

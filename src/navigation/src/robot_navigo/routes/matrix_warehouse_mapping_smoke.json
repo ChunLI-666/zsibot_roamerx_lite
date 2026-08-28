@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "name": "matrix_warehouse_mapping_smoke",
+  "frame_id": "map",
+  "return_to_start": false,
+  "waypoints": [
+    {"name": "mapping_001", "x": 4.8, "y": 0.0, "yaw": 0.0},
+    {"name": "mapping_002", "x": 9.5, "y": 0.5, "yaw": 0.10598435798959989},
+    {"name": "mapping_003", "x": 13.8, "y": 2.0, "yaw": 0.3356385503276092},
+    {"name": "mapping_004", "x": 17.5, "y": 4.0, "yaw": 0.4955516734858286},
+    {"name": "mapping_005", "x": 17.5, "y": 6.0, "yaw": 1.5707963267948966},
+    {"name": "mapping_006", "x": 14.0, "y": 8.0, "yaw": 2.62244653934327}
+  ],
+  "metadata": {
+    "scope": "central_mapping_smoke",
+    "reference_map": "warehouse_gt_reference_v4_20260828",
+    "safety_radius_m": 0.35,
+    "planned_path_length_m": 24.32,
+    "validation": "The matching recorded prefix remained stable for 24.90 m.",
+    "known_limitation": "This is a stable pipeline smoke route, not a full Warehouse coverage route."
+  }
+}

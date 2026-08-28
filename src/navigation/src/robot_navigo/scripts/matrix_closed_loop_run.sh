@@ -7,12 +7,14 @@ Usage: matrix_closed_loop_run.sh --matrix-root DIR --map FILE [options]
 
  Runs Matrix sensors and physics, Navigo, recording, and a scored route test.
  `lightning_formal` uses Lightning localization; `gt_baseline` uses the
- test-only Matrix ground-truth adapter.
+ test-only Matrix ground-truth adapter. `mapping_collect` also uses ground
+ truth for exploration, but records an independent LiDAR/IMU mapping bag.
 
 Options:
   --workspace DIR          Colcon workspace (default: inferred from Matrix root)
-  --mode MODE              lightning_formal or gt_baseline (default: lightning_formal)
-  --gt-alignment FILE      Fixed map_T_ground_truth JSON required by gt_baseline
+  --mode MODE              lightning_formal, gt_baseline, or mapping_collect
+                           (default: lightning_formal)
+  --gt-alignment FILE      Fixed map_T_ground_truth JSON required by GT modes
   --lightning-config FILE  Matrix Lightning config
   --params-file FILE       Navigo parameters (default: package config)
   --matrix-min-abs-vx V    Matrix adapter X deadband (default: 0.05)
@@ -27,6 +29,8 @@ Options:
   --initial-localization-only
                            Use the global map for initialization, then follow LIO
   --timeout SECONDS        Per-goal navigation timeout (default: 120)
+  --pre-roll-sec SECONDS   Static sensor recording before first goal (default: 2)
+  --post-roll-sec SECONDS  Sensor recording after final goal (default: 0)
   --result-dir DIR         Result directory
   --headless               Use UE off-screen rendering (default: visible window)
   --no-sim                 Reuse an already-running Matrix simulator
@@ -53,6 +57,8 @@ RELATIVE_YAW=0.0
 ROUTE_FILE=""
 INITIAL_LOCALIZATION_ONLY=0
 NAV_TIMEOUT=120
+PRE_ROLL_SEC=2
+POST_ROLL_SEC=0
 RESULT_DIR=""
 START_SIM=1
 RECORD=1
@@ -79,6 +85,8 @@ while [[ $# -gt 0 ]]; do
     --route) ROUTE_FILE=$2; shift 2 ;;
     --initial-localization-only) INITIAL_LOCALIZATION_ONLY=1; shift ;;
     --timeout) NAV_TIMEOUT=$2; shift 2 ;;
+    --pre-roll-sec) PRE_ROLL_SEC=$2; shift 2 ;;
+    --post-roll-sec) POST_ROLL_SEC=$2; shift 2 ;;
     --result-dir) RESULT_DIR=$2; shift 2 ;;
     --headless) RENDER_MODE=offscreen; shift ;;
     --no-sim) START_SIM=0; shift ;;
@@ -90,16 +98,42 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$MODE" in
-  lightning_formal|gt_baseline) ;;
-  *) printf '[FAIL] --mode must be lightning_formal or gt_baseline\n' >&2; exit 2 ;;
+  lightning_formal|gt_baseline|mapping_collect) ;;
+  *) printf '[FAIL] invalid --mode: %s\n' "$MODE" >&2; exit 2 ;;
 esac
-if [[ "$MODE" == "gt_baseline" ]]; then
+USES_GT=0
+if [[ "$MODE" == "gt_baseline" || "$MODE" == "mapping_collect" ]]; then
+  USES_GT=1
   [[ -n "$GT_ALIGNMENT" && -f "$GT_ALIGNMENT" ]] || {
-    printf '[FAIL] gt_baseline requires --gt-alignment FILE\n' >&2
+    printf '[FAIL] %s requires --gt-alignment FILE\n' "$MODE" >&2
     exit 2
   }
   GT_ALIGNMENT=$(realpath "$GT_ALIGNMENT")
 fi
+if [[ "$MODE" == "mapping_collect" ]]; then
+  [[ -n "$ROUTE_FILE" ]] || {
+    printf '[FAIL] mapping_collect requires an explicit --route FILE\n' >&2
+    exit 2
+  }
+  [[ "$RECORD" == "1" ]] || {
+    printf '[FAIL] mapping_collect cannot be used with --no-record\n' >&2
+    exit 2
+  }
+fi
+python3 - "$PRE_ROLL_SEC" "$POST_ROLL_SEC" <<'PY' || exit 2
+import math
+import sys
+
+for name, raw in zip(("pre-roll", "post-roll"), sys.argv[1:]):
+    try:
+        value = float(raw)
+    except ValueError:
+        print(f"[FAIL] --{name}-sec must be numeric", file=sys.stderr)
+        raise SystemExit(1)
+    if not math.isfinite(value) or value < 0.0:
+        print(f"[FAIL] --{name}-sec must be finite and non-negative", file=sys.stderr)
+        raise SystemExit(1)
+PY
 
 MATRIX_IFACE=$(ip -o -4 address show | awk '$4 == "192.168.234.1/32" { print $2; exit }')
 if [[ -z "$MATRIX_IFACE" ]]; then
@@ -164,13 +198,15 @@ fi
 }
 MAP_FILE=$(realpath "$MAP_FILE")
 MAP_DIR=$(dirname "$MAP_FILE")
-[[ -f "$MAP_DIR/index.txt" ]] || {
-  printf '[FAIL] Lightning map index is missing: %s/index.txt\n' "$MAP_DIR" >&2; exit 2;
-}
-[[ -f "$MAP_DIR/0.pcd" ]] || {
-  printf '[FAIL] Lightning map chunk is missing: %s/0.pcd\n' "$MAP_DIR" >&2; exit 2;
-}
-if [[ -f "$MAP_DIR/SHA256SUMS" ]]; then
+if [[ "$MODE" == "lightning_formal" ]]; then
+  [[ -f "$MAP_DIR/index.txt" ]] || {
+    printf '[FAIL] Lightning map index is missing: %s/index.txt\n' "$MAP_DIR" >&2; exit 2;
+  }
+  [[ -f "$MAP_DIR/0.pcd" ]] || {
+    printf '[FAIL] Lightning map chunk is missing: %s/0.pcd\n' "$MAP_DIR" >&2; exit 2;
+  }
+fi
+if [[ "$MODE" == "lightning_formal" && -f "$MAP_DIR/SHA256SUMS" ]]; then
   if ! (cd "$MAP_DIR" && sha256sum --check --quiet SHA256SUMS); then
     printf '[FAIL] Lightning map archive checksum verification failed: %s\n' \
       "$MAP_DIR/SHA256SUMS" >&2
@@ -279,21 +315,25 @@ if [[ "$MAP_IMAGE" != /* ]]; then
   MAP_IMAGE="$MAP_DIR/$MAP_IMAGE"
 fi
 MAP_IMAGE=$(realpath "$MAP_IMAGE")
-sed -E \
-  -e "s|^image:.*|image: $MAP_IMAGE|" \
-  -e 's|^free_thresh:.*|free_thresh: 0.196|' \
-  "$MAP_FILE" > "$RUNTIME_MAP"
+if [[ "$MODE" == "mapping_collect" ]]; then
+  sed -E "s|^image:.*|image: $MAP_IMAGE|" "$MAP_FILE" > "$RUNTIME_MAP"
+else
+  sed -E \
+    -e "s|^image:.*|image: $MAP_IMAGE|" \
+    -e 's|^free_thresh:.*|free_thresh: 0.196|' \
+    "$MAP_FILE" > "$RUNTIME_MAP"
+fi
 
 # Matrix TF preserves sensor time but is published after LIO has accumulated
 # enough IMU coverage. A recorded closed-loop run measured 0.410s P95 from
 # LaserScan receipt until TF can satisfy scan_stamp + 50ms. Give the message
 # filter 0.5s to wait; obstacle freshness and controller stale limits remain
 # independent and unchanged. Real-robot parameters remain unchanged.
-python3 - "$PARAMS_FILE" "$RUNTIME_NAV_PARAMS" "$MATRIX_NAV_BT" <<'PY'
+python3 - "$PARAMS_FILE" "$RUNTIME_NAV_PARAMS" "$MATRIX_NAV_BT" "$MODE" <<'PY'
 import sys
 import yaml
 
-source_path, output_path, behavior_tree_path = sys.argv[1:]
+source_path, output_path, behavior_tree_path, mode = sys.argv[1:]
 with open(source_path, encoding='utf-8') as source:
     params = yaml.safe_load(source)
 for costmap_name in ('local_costmap', 'global_costmap'):
@@ -301,6 +341,9 @@ for costmap_name in ('local_costmap', 'global_costmap'):
     costmap['transform_tolerance'] = 0.5
     costmap['obstacle_layer']['scan']['expected_update_rate'] = 0.5
 params['controller_server']['ros__parameters']['costmap_update_timeout'] = 0.6
+if mode == 'mapping_collect':
+    # Mapping acquisition must stay inside the observed reference-map domain.
+    params['planner_server']['ros__parameters']['GridBased']['allow_unknown'] = False
 controller = params['controller_server']['ros__parameters']
 controller['progress_checker']['required_movement_angle'] = 0.1
 controller['progress_checker']['movement_time_allowance'] = 15.0
@@ -529,7 +572,7 @@ verify_recording() {
       return 1
     fi
   done
-  printf '[PASS] recorded bag contains all required localization/navigation topics\n'
+  printf '[PASS] recorded bag contains all required %s topics\n' "$MODE"
 }
 
 sensor_ready=0
@@ -587,8 +630,8 @@ fi
 # simulator configuration as soon as autonomous input ownership is established.
 restore_matrix_input_config
 
-if [[ "$MODE" == "gt_baseline" ]]; then
-  printf '[RUN] starting GT baseline adapter + Navigo closed loop\n'
+if [[ "$USES_GT" == "1" ]]; then
+  printf '[RUN] starting GT adapter + Navigo (%s)\n' "$MODE"
   setsid ros2 run robot_navigo matrix_ground_truth_baseline.py \
     --ros-args -p use_sim_time:=false \
     -p alignment_file:="$GT_ALIGNMENT" \
@@ -642,7 +685,7 @@ fi
 # initializing so the bounded ACTIVE-state global-match holdover is reserved
 # for the navigation test instead of CLI discovery.
 PREFLIGHT_PHASE=closed-loop
-if [[ "$MODE" == "gt_baseline" ]]; then
+if [[ "$USES_GT" == "1" ]]; then
   PREFLIGHT_PHASE=gt-baseline
 fi
 # Formal mode keeps the explicit preflight contract: matrix_closed_loop_preflight.sh closed-loop
@@ -689,7 +732,9 @@ if [[ "$RECORD" == "1" ]]; then
     /navigate_to_pose/_action/feedback \
     >"$RESULT_DIR/rosbag.log" 2>&1 &
   BAG_PID=$!
-  sleep 2
+  printf '[RUN] recording %.3fs static pre-roll before route execution\n' \
+    "$PRE_ROLL_SEC"
+  sleep "$PRE_ROLL_SEC"
 fi
 
 E2E_ARGS=(
@@ -708,6 +753,35 @@ ros2 run robot_navigo matrix_closed_loop_e2e.py "${E2E_ARGS[@]}" \
 TEST_STATUS=${PIPESTATUS[0]}
 set -e
 
+if [[ "$MODE" == "mapping_collect" && -f "$RESULT_DIR/result.json" ]]; then
+  if python3 - "$RESULT_DIR/result.json" <<'PY'
+import json
+import sys
+
+result = json.load(open(sys.argv[1], encoding='utf-8'))
+action = result.get('action', {})
+complete = (
+    action.get('status') == 'SUCCEEDED'
+    and action.get('completed_waypoints') == action.get('total_waypoints')
+    and int(action.get('total_waypoints') or 0) > 0
+)
+raise SystemExit(0 if complete else 1)
+PY
+  then
+    # Mapping acquisition is gated by route completion and the independent
+    # coverage evaluator, not controller-rate acceptance for navigation CI.
+    TEST_STATUS=0
+    printf '[PASS] mapping route completed; deferring acceptance to coverage gate\n'
+  else
+    TEST_STATUS=1
+    printf '[FAIL] mapping route did not complete\n' >&2
+  fi
+fi
+if [[ "$RECORD" == "1" ]]; then
+  printf '[RUN] recording %.3fs post-roll for final LiDAR IMU coverage\n' \
+    "$POST_ROLL_SEC"
+  sleep "$POST_ROLL_SEC"
+fi
 stop_bag "$BAG_PID"
 BAG_PID=""
 if [[ "$RECORD" == "1" ]] && ! verify_recording "$RESULT_DIR/closed_loop_bag"; then

@@ -242,6 +242,7 @@ install(PROGRAMS
         scripts/matrix_closed_loop_run.sh
         scripts/matrix_ground_truth_baseline.py
         scripts/matrix_closed_loop_batch.py
+        scripts/matrix_mapping_collect.sh
         scripts/build_matrix_reference_map.py
         scripts/matrix_localization_batch.py
         scripts/matrix_mapping_batch.py
@@ -338,6 +339,10 @@ if(BUILD_TESTING)
             NAME test_matrix_mapping_batch
             COMMAND ${Python3_EXECUTABLE}
                     ${CMAKE_CURRENT_SOURCE_DIR}/test/test_matrix_mapping_batch.py)
+    add_test(
+            NAME test_matrix_mapping_collect
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_matrix_mapping_collect.py)
     add_test(
             NAME test_map_coverage
             COMMAND ${Python3_EXECUTABLE}
