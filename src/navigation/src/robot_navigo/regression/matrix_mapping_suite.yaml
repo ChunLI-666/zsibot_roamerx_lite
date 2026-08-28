@@ -1,0 +1,91 @@
+schema: robot_navigo.matrix_mapping_suite
+schema_version: 1
+
+# This inventory is deliberately fail-closed. A scene becomes available only
+# after it has an independently recorded full-coverage mapping bag, trajectory
+# coverage evidence, and a different localization/evaluation bag.
+variables:
+  workspace: /home/charles/project/matrix_closed_loop_ws
+  dataset_root: /mnt/data/regression/matrix_mapping
+
+scenes:
+  - name: custom
+    scene_id: 0
+    available: false
+    enabled: false
+    reason: No full-coverage mapping bag or independent localization bag.
+  - name: warehouse
+    scene_id: 1
+    available: false
+    enabled: false
+    reason: Archived map is not reproducible and its safe start-connected free domain is incomplete.
+  - name: town10
+    scene_id: 2
+    available: false
+    enabled: false
+    reason: No full-coverage mapping bag or independent localization bag.
+  - name: yard
+    scene_id: 3
+    available: false
+    enabled: false
+    reason: No validated Lightning map, full-coverage mapping bag, or independent localization bag.
+  - name: crowd
+    scene_id: 4
+    available: false
+    enabled: false
+    reason: No full-coverage mapping bag or independent localization bag.
+  - name: venice
+    scene_id: 5
+    available: false
+    enabled: false
+    reason: No full-coverage mapping bag or independent localization bag.
+  - name: house
+    scene_id: 6
+    available: false
+    enabled: false
+    reason: No versioned Lightning map, full-coverage mapping bag, or independent localization bag.
+  - name: running
+    scene_id: 7
+    available: false
+    enabled: false
+    reason: No full-coverage mapping bag or independent localization bag.
+  - name: town10_zombie
+    scene_id: 8
+    available: false
+    enabled: false
+    reason: No full-coverage mapping bag or independent localization bag.
+  - name: iros_flat
+    scene_id: 9
+    available: false
+    enabled: false
+    reason: No validated Lightning map, full-coverage mapping bag, or independent localization bag.
+  - name: iros_sloped
+    scene_id: 10
+    available: false
+    enabled: false
+    reason: No full-coverage mapping bag or independent localization bag.
+  - name: iros_flat_2025
+    scene_id: 11
+    available: false
+    enabled: false
+    reason: No full-coverage mapping bag or independent localization bag.
+  - name: iros_sloped_2025
+    scene_id: 12
+    available: false
+    enabled: false
+    reason: No full-coverage mapping bag or independent localization bag.
+  - name: office
+    scene_id: 13
+    available: false
+    enabled: false
+    reason: No reproducible full-coverage mapping bag, formal map, or independent localization bag.
+  - name: 3dgs
+    scene_id: 14
+    available: false
+    enabled: false
+    reason: No full-coverage mapping bag or independent localization bag.
+  - name: moon
+    scene_id: 15
+    available: false
+    enabled: false
+    reason: No full-coverage mapping bag or independent localization bag.
