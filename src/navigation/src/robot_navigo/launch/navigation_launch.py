@@ -238,7 +238,7 @@ def generate_launch_description():
                 # ],
             ),
             TimerAction(
-                period=1.0,
+                period=3.0,
                 actions=[Node(
                     package='nav2_lifecycle_manager',
                     executable='lifecycle_manager',
