@@ -78,6 +78,8 @@ def main():
             'nav2_smoother must stay in one ABI-isolated process')
     require("additional_env={'LD_LIBRARY_PATH': smoother_library_path}" in navigation_launch,
             'nav2_smoother does not isolate upstream costmap libraries')
+    require('TimerAction(' in navigation_launch and 'period=1.0' in navigation_launch,
+            'standalone lifecycle manager is not delayed for DDS endpoint discovery')
 
     for launch_name in ('lightning_nav_bringup.launch.py', 'zsibot_nav_bringup.launch.py'):
         launch = (package_dir / 'launch' / launch_name).read_text()

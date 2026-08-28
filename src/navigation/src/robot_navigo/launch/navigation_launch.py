@@ -3,7 +3,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, GroupAction, SetEnvironmentVariable
+from launch.actions import DeclareLaunchArgument, GroupAction, SetEnvironmentVariable, TimerAction
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import LoadComposableNodes, SetParameter
@@ -267,17 +267,20 @@ def generate_launch_description():
                 #     '--log-file=/home/zy/navigo_waypoint_follower.log ',
                 # ],
             ),
-            Node(
-                package='nav2_lifecycle_manager',
-                executable='lifecycle_manager',
-                name='lifecycle_manager_navigation',
-                output='screen',
-                arguments=['--ros-args', '--log-level', log_level],
-                parameters=[{
-                    'autostart': autostart,
-                    'node_names': lifecycle_nodes,
-                    'bond_timeout': 4.0,
-                }],
+            TimerAction(
+                period=1.0,
+                actions=[Node(
+                    package='nav2_lifecycle_manager',
+                    executable='lifecycle_manager',
+                    name='lifecycle_manager_navigation',
+                    output='screen',
+                    arguments=['--ros-args', '--log-level', log_level],
+                    parameters=[{
+                        'autostart': autostart,
+                        'node_names': lifecycle_nodes,
+                        'bond_timeout': 4.0,
+                    }],
+                )],
             ),
         ],
     )
