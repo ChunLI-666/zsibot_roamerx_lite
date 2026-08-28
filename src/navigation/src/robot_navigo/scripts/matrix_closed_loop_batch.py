@@ -235,7 +235,9 @@ def mode_result_metrics(result: Mapping[str, Any] | None) -> dict[str, Any]:
         'action_status': nested_get(result, 'action.status'),
         'waypoints_completed': sum(
             1 for item in route.get('waypoint_results', [])
-            if item.get('within_tolerance') is True),
+            if item.get('within_tolerance') is True
+            or (item.get('within_tolerance') is None
+                and nested_get(item, 'action.status') == 'SUCCEEDED')),
         'waypoints_total': len(route.get('waypoint_results', [])),
         'position_rmse_m': trajectory.get('position_rmse_m'),
         'position_max_error_m': trajectory.get('position_max_error_m'),

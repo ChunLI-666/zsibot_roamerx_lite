@@ -181,6 +181,16 @@ class MatrixClosedLoopBatchTest(unittest.TestCase):
         (share / 'regression').mkdir()
         self.assertEqual(share, BATCH.package_root_for_script(installed))
 
+    def test_legacy_waypoint_results_count_succeeded_actions(self):
+        metrics = BATCH.mode_result_metrics({
+            'route': {'waypoint_results': [
+                {'action': {'status': 'SUCCEEDED'}},
+                {'action': {'status': 'TIMEOUT'}},
+            ]},
+        })
+        self.assertEqual(metrics['waypoints_completed'], 1)
+        self.assertEqual(metrics['waypoints_total'], 2)
+
 
 if __name__ == '__main__':
     unittest.main()
