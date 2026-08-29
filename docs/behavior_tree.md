@@ -252,7 +252,7 @@ bt_navigator:
     global_frame: map
     robot_base_frame: base_link
     odom_topic: /odom
-    bt_loop_duration: 10          # BT 循环周期 (ms)
+    bt_loop_duration: 100         # BT 循环周期 (ms)，真机默认 10 Hz
     default_server_timeout: 20    # 服务超时 (s)
     
     # 导航器插件
