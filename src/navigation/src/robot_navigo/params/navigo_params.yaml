@@ -4,7 +4,9 @@ bt_navigator:
     global_frame: map
     robot_base_frame: base_link
     odom_topic: /odom/current_pose
-    bt_loop_duration: 10
+    # RK3588 production rate: 10 Hz is sufficient for a 10 Hz controller and
+    # avoids the 100 Hz BT scheduling/log pressure seen in real-robot tests.
+    bt_loop_duration: 100
     default_server_timeout: 20
     wait_for_service_timeout: 1000
     # 'default_nav_through_poses_bt_xml' and 'default_nav_to_pose_bt_xml' are use defaults:
@@ -93,7 +95,10 @@ behavior_server:
       plugin: "navigo_behaviors/Wait"
     assisted_teleop:
       plugin: "navigo_behaviors/AssistedTeleop"
-    global_frame: map
+    # Recovery collision checks consume the rolling local costmap below, whose
+    # world coordinates are in odom. Using map here makes map-frame poses look
+    # off-grid whenever map->odom has a nonzero correction.
+    global_frame: odom
     robot_base_frame: base_link
     transform_tolerance: 0.1
     use_sim_time: False

@@ -81,7 +81,8 @@ ros2 bag play "$BAG" --clock 100 --start-paused --disable-keyboard-controls \
   --topics /tf /tf_static /odom/current_pose /laser_scan \
   --remap /tf:=/replay/tf_raw /odom/current_pose:=/replay/odom_raw /laser_scan:=/replay/scan_raw \
   >"${OUTPUT}/player.log" 2>&1 &
-PIDS+=("$!")
+PLAYER_PID="$!"
+PIDS+=("$PLAYER_PID")
 sleep 1
 
 python3 "$RELAY" --ros-args -p use_sim_time:=true \
@@ -117,18 +118,23 @@ ros2 service call /rosbag2_player/resume rosbag2_interfaces/srv/Resume '{}' \
 # The action endpoint can be discoverable before its lifecycle node is active.
 # Wait for TF-driven activation so the test goal is not rejected spuriously.
 for _ in $(seq 1 30); do
-  if ros2 lifecycle get /bt_navigator 2>/dev/null | grep -q 'active'; then
+  if ros2 lifecycle get /bt_navigator 2>/dev/null | grep -Eq '^active \[3\]$'; then
     break
   fi
   sleep 1
 done
 ros2 lifecycle get /bt_navigator >"${OUTPUT}/bt_navigator_state.txt" 2>&1 || true
-grep -q 'active' "${OUTPUT}/bt_navigator_state.txt" || {
+grep -Eq '^active \[3\]$' "${OUTPUT}/bt_navigator_state.txt" || {
   echo "bt_navigator did not become active" >&2; exit 1;
 }
 
+# Keep recording for the complete replay window even if the action is rejected,
+# succeeds early, or fails early. Comparable windows are required for A/B metrics.
 timeout "${DURATION}" ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose \
-  "${GOAL}" >"${OUTPUT}/action.log" 2>&1 || true
+  "${GOAL}" >"${OUTPUT}/action.log" 2>&1 &
+PIDS+=("$!")
+
+wait "$PLAYER_PID" || true
 
 sleep 2
 echo "model=${MODEL}" > "${OUTPUT}/run_metadata.txt"

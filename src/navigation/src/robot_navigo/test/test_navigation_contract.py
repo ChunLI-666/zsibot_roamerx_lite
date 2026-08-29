@@ -56,6 +56,11 @@ def main():
     global_map = params['global_costmap']['global_costmap']['ros__parameters']
     require(local['global_frame'] == 'odom',
             'local costmap must be isolated from map-frame localization corrections')
+    require(params['behavior_server']['ros__parameters']['global_frame'] ==
+            local['global_frame'],
+            'behavior recovery frame must match the local collision costmap frame')
+    require(params['bt_navigator']['ros__parameters']['bt_loop_duration'] == 100,
+            'behavior tree loop must remain at the RK3588 production rate of 10 Hz')
     for name, costmap in [('local', local), ('global', global_map)]:
         require('obstacle_layer' in costmap['plugins'], f'{name} obstacle layer is missing')
         require(costmap['obstacle_layer']['scan']['topic'] == '/laser_scan',
@@ -90,6 +95,18 @@ def main():
             'pose progress checking is not configured')
     require(params['smoother_server']['ros__parameters']['simple_smoother']['plugin'] ==
             'nav2_smoother::SimpleSmoother', 'configured smoother plugin does not exist')
+
+    safety_gate = (package_dir / 'scripts' / 'nav_safety_gate.py').read_text()
+    require("self.declare_parameter('cmd_timeout_ms', 300)" in safety_gate and
+            'self.watchdog_timer = self.create_timer(' in safety_gate and
+            'self.publish_zero(self.GATE_CMD_TIMEOUT)' in safety_gate,
+            'navigation safety gate does not continuously enforce command timeout')
+
+    replay_runner = (package_dir / 'scripts' / 'run_open_loop_model_replay.sh').read_text()
+    require("grep -Eq '^active \\[3\\]$'" in replay_runner,
+            'open-loop replay treats inactive lifecycle state as active')
+    require('wait "$PLAYER_PID" || true' in replay_runner,
+            'open-loop replay recording can end before its fixed input window')
 
     tree = (package_dir.parent / 'navigo_bt_navigator' / 'behavior_trees' /
             'navigate_to_pose_w_replanning_and_recovery.xml').read_text()
