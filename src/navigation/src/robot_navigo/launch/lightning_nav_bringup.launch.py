@@ -36,6 +36,7 @@ from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 from ament_index_python.packages import get_package_share_directory
 
@@ -79,6 +80,7 @@ def generate_launch_description():
     params_file = LaunchConfiguration('params_file')
     autostart = LaunchConfiguration('autostart')
     nav2_delay = LaunchConfiguration('nav2_delay')
+    nav_cmd_timeout_ms = LaunchConfiguration('nav_cmd_timeout_ms')
 
     # Lightning Bridge configurations
     enable_livox_converter = LaunchConfiguration('enable_livox_converter')
@@ -109,6 +111,11 @@ def generate_launch_description():
         'nav2_delay',
         default_value='3.0',
         description='Delay (seconds) before starting Nav2 to wait for TF chain')
+
+    declare_nav_cmd_timeout_cmd = DeclareLaunchArgument(
+        'nav_cmd_timeout_ms',
+        default_value='300',
+        description='Stop actuator output if cmd_vel is stale for this many milliseconds')
 
     declare_enable_livox_converter_cmd = DeclareLaunchArgument(
         'enable_livox_converter',
@@ -178,6 +185,7 @@ def generate_launch_description():
         output='both',
         parameters=[{
             'watchdog_timeout_ms': 200,
+            'cmd_timeout_ms': ParameterValue(nav_cmd_timeout_ms, value_type=int),
             'cmd_vel_input_topic': '/cmd_vel',
             'cmd_vel_output_topic': '/cmd_vel_safe',
             'loc_status_topic': '/lightning/loc_status',
@@ -216,6 +224,7 @@ def generate_launch_description():
     ld.add_action(declare_params_file_cmd)
     ld.add_action(declare_autostart_cmd)
     ld.add_action(declare_nav2_delay_cmd)
+    ld.add_action(declare_nav_cmd_timeout_cmd)
     ld.add_action(declare_enable_livox_converter_cmd)
     ld.add_action(declare_enable_laserscan_cmd)
 
