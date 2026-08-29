@@ -48,6 +48,9 @@
 | `max_linear_x` | double | 0.15 | 最大前后速度 (m/s) |
 | `max_linear_y` | double | 0.15 | 最大横向速度 (m/s) |
 | `max_angular_z` | double | 0.1 | 最大角速度 (rad/s) |
+| `min_linear_x` | double | 0.05 | 最小可执行前后速度；更小的非零值会归零 |
+| `min_linear_y` | double | 0.10 | 最小可执行横向速度；更小的非零值会归零 |
+| `min_angular_z` | double | 0.02 | 最小可执行角速度；更小的非零值会归零 |
 | `cmd_timeout` | double | 0.5 | 命令超时时间（秒） |
 | `command_check_rate` | double | 20.0 | 检查待发送命令和超时状态的频率 (Hz) |
 | `status_rate` | double | 1.0 | 电量/连接状态轮询频率 (Hz) |

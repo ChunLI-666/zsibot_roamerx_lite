@@ -198,14 +198,23 @@ TEST(CmdVelToZsibotTest, DefaultsUseFastUdpRefreshAndNoAutoStandup)
   bool auto_standup = true;
   std::string output_mode;
   int control_port = 0;
+  double min_vx = 0.0;
+  double min_vy = 0.0;
+  double min_wz = 0.0;
   ASSERT_TRUE(harness.bridge()->get_parameter("min_command_interval", interval));
   ASSERT_TRUE(harness.bridge()->get_parameter("auto_standup", auto_standup));
   ASSERT_TRUE(harness.bridge()->get_parameter("output_mode", output_mode));
   ASSERT_TRUE(harness.bridge()->get_parameter("control_port", control_port));
+  ASSERT_TRUE(harness.bridge()->get_parameter("min_linear_x", min_vx));
+  ASSERT_TRUE(harness.bridge()->get_parameter("min_linear_y", min_vy));
+  ASSERT_TRUE(harness.bridge()->get_parameter("min_angular_z", min_wz));
   EXPECT_DOUBLE_EQ(interval, 0.1);
   EXPECT_FALSE(auto_standup);
   EXPECT_EQ(output_mode, "udp");
   EXPECT_EQ(control_port, 6002);
+  EXPECT_DOUBLE_EQ(min_vx, 0.05);
+  EXPECT_DOUBLE_EQ(min_vy, 0.10);
+  EXPECT_DOUBLE_EQ(min_wz, 0.02);
 }
 
 TEST(CmdVelToZsibotTest, PublishesActualUdpPayloadForNonzeroCmdVel)
@@ -258,6 +267,22 @@ TEST(CmdVelToZsibotTest, TinyCmdVelBelowEpsilonSendsStopInsteadOfMinimumMotion)
   EXPECT_NE(payload->find("\"vy\":0"), std::string::npos);
   EXPECT_NE(payload->find("\"wz\":0"), std::string::npos);
   EXPECT_EQ(payload->find("0.05"), std::string::npos);
+}
+
+TEST(CmdVelToZsibotTest, SubMinimumCommandsAreNotPromotedToMotion)
+{
+  UdpCapture udp;
+  NodeHarness harness(udpParams(udp.port()));
+
+  harness.publishCmd(0.049, -0.099, 0.019);
+  auto payload = udp.receive(std::chrono::milliseconds(1000));
+  ASSERT_TRUE(payload.has_value());
+  EXPECT_NE(payload->find("\"vx\":0"), std::string::npos);
+  EXPECT_NE(payload->find("\"vy\":0"), std::string::npos);
+  EXPECT_NE(payload->find("\"wz\":0"), std::string::npos);
+  EXPECT_EQ(payload->find("0.05"), std::string::npos);
+  EXPECT_EQ(payload->find("0.1"), std::string::npos);
+  EXPECT_EQ(payload->find("0.02"), std::string::npos);
 }
 
 TEST(CmdVelToZsibotTest, UnsupportedSdkModeDoesNotSendUdp)

@@ -14,6 +14,8 @@
 #include <thread>
 #include <vector>
 
+#include "robot_navigo/motion_limits.hpp"
+
 class VelCmdLcmPublisher : public rclcpp::Node
 {
 public:
@@ -31,9 +33,12 @@ public:
         const auto cmd_timeout_ms = this->declare_parameter<int>("cmd_timeout_ms", 300);
         const auto publish_rate_hz = std::clamp(
             this->declare_parameter<double>("publish_rate_hz", 50.0), 1.0, 200.0);
-        min_abs_vx_ = std::max(0.0, this->declare_parameter<double>("min_abs_vx", 0.085));
-        min_abs_vy_ = std::max(0.0, this->declare_parameter<double>("min_abs_vy", 0.085));
-        min_abs_wz_ = std::max(0.0, this->declare_parameter<double>("min_abs_wz", 0.0));
+        min_abs_vx_ = std::max(0.0, this->declare_parameter<double>(
+            "min_abs_vx", robot_navigo::motion_limits::kExecutableMinVx));
+        min_abs_vy_ = std::max(0.0, this->declare_parameter<double>(
+            "min_abs_vy", robot_navigo::motion_limits::kExecutableMinVy));
+        min_abs_wz_ = std::max(0.0, this->declare_parameter<double>(
+            "min_abs_wz", robot_navigo::motion_limits::kExecutableMinWz));
         vx_to_stick_scale_ = PositiveScale("vx_to_stick_scale");
         vy_to_stick_scale_ = PositiveScale("vy_to_stick_scale");
         wz_to_stick_scale_ = PositiveScale("wz_to_stick_scale");
@@ -188,9 +193,9 @@ private:
     std::chrono::steady_clock::time_point                      last_command_time_;
     std::chrono::milliseconds                                  cmd_timeout_{300};
     std::chrono::milliseconds                                  stand_button_hold_{500};
-    double                                                     min_abs_vx_{0.085};
-    double                                                     min_abs_vy_{0.085};
-    double                                                     min_abs_wz_{0.0};
+    double                                                     min_abs_vx_{robot_navigo::motion_limits::kExecutableMinVx};
+    double                                                     min_abs_vy_{robot_navigo::motion_limits::kExecutableMinVy};
+    double                                                     min_abs_wz_{robot_navigo::motion_limits::kExecutableMinWz};
     double                                                     vx_to_stick_scale_{1.0};
     double                                                     vy_to_stick_scale_{1.0};
     double                                                     wz_to_stick_scale_{1.0};

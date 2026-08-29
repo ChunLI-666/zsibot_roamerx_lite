@@ -217,7 +217,9 @@ planner_server:
       plugin: "navigo_navfn_planner/NavfnPlanner"
       tolerance: 0.5
       use_astar: false
-      allow_unknown: true
+      # Indoor production navigation is fail-closed: unobserved cells are not
+      # traversable. Exploration deployments must override this explicitly.
+      allow_unknown: false
 
 controller_server:
   ros__parameters:
@@ -278,7 +280,7 @@ controller_server:
         time_step: 3
       AckermannConstraints:
         min_turning_r: 0.1667
-      critics: [ "ConstraintCritic", "CostCritic", "GoalCritic", "PathAlignCritic", "GoalAngleCritic", "PathFollowCritic", "PathAngleCritic", "PreferForwardCritic" ] #
+      critics: [ "ConstraintCritic", "CostCritic", "GoalCritic", "PathAlignCritic", "GoalAngleCritic", "PathFollowCritic", "PathAngleCritic", "PreferForwardCritic", "VelocityDeadbandCritic" ] #
       ConstraintCritic:
         enabled: true
         cost_power: 1
@@ -298,6 +300,11 @@ controller_server:
         cost_power: 1
         cost_weight: 5.0
         threshold_to_consider: 0.5
+      VelocityDeadbandCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 20.0
+        deadband_velocities: [0.05, 0.10, 0.02]
       CostCritic:
         enabled: true
         cost_power: 2

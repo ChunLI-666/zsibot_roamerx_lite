@@ -2,6 +2,7 @@
 
 import json
 import pathlib
+import re
 import sys
 
 import yaml
@@ -12,9 +13,17 @@ def require(condition, message):
         raise AssertionError(message)
 
 
+def motion_constant(source, name):
+    match = re.search(
+        rf'constexpr\s+double\s+{name}\s*=\s*([0-9.]+)', source)
+    require(match is not None, f'motion contract is missing {name}')
+    return float(match.group(1))
+
+
 def main():
     package_dir = pathlib.Path(sys.argv[1])
     params = yaml.safe_load((package_dir / 'params' / 'navigo_params.yaml').read_text())
+    motion_header = (package_dir / 'include' / 'robot_navigo' / 'motion_limits.hpp').read_text()
 
     require('velocity_smoother' in params, 'velocity_smoother node key is missing')
     require('velocity_optimizer' not in params, 'stale velocity_optimizer node key is present')
@@ -28,6 +37,20 @@ def main():
     require(velocity['max_accel'][1] > 0.0 and velocity['max_decel'][1] < 0.0,
             'velocity smoother lateral acceleration is disabled')
     require(velocity['velocity_timeout'] <= 0.3, 'stale commands persist too long')
+    contract_max = [
+        motion_constant(motion_header, 'kNavigationMaxVx'),
+        motion_constant(motion_header, 'kNavigationMaxVy'),
+        motion_constant(motion_header, 'kNavigationMaxWz'),
+    ]
+    contract_min = [
+        motion_constant(motion_header, 'kExecutableMinVx'),
+        motion_constant(motion_header, 'kExecutableMinVy'),
+        motion_constant(motion_header, 'kExecutableMinWz'),
+    ]
+    require(velocity['max_velocity'] == contract_max,
+            'velocity smoother and C++ navigation limits differ')
+    require(velocity['deadband_velocity'] == contract_min,
+            'velocity smoother and C++ executable minimums differ')
 
     local = params['local_costmap']['local_costmap']['ros__parameters']
     global_map = params['global_costmap']['global_costmap']['ros__parameters']
@@ -52,10 +75,17 @@ def main():
             'MPPI vy limit differs from velocity smoother')
     require(follow_path['wz_max'] == velocity['max_velocity'][2],
             'MPPI wz limit differs from velocity smoother')
+    require('VelocityDeadbandCritic' in follow_path['critics'],
+            'MPPI does not account for the executable velocity deadband')
+    require(follow_path['VelocityDeadbandCritic']['deadband_velocities'] ==
+            velocity['deadband_velocity'],
+            'MPPI and velocity smoother deadbands differ')
     require(controller['FollowPath']['vx_min'] < 0.0,
             'normal reverse capability must remain available')
     require(controller['costmap_update_timeout'] <= 0.3,
             'controller costmap fail-closed timeout is too long')
+    require(params['planner_server']['ros__parameters']['GridBased']['allow_unknown'] is False,
+            'indoor production planner must not traverse unknown cells')
     require(controller['progress_checker']['plugin'].endswith('PoseProgressChecker'),
             'pose progress checking is not configured')
     require(params['smoother_server']['ros__parameters']['simple_smoother']['plugin'] ==
@@ -68,6 +98,8 @@ def main():
     require('check_for_collisions="true"' in tree, 'smoothed path collision check is disabled')
 
     navigation_launch = (package_dir / 'launch' / 'navigation_launch.py').read_text()
+    require('UnlessCondition(use_composition)' in navigation_launch,
+            'standalone launch condition does not parse use_composition safely')
     require("'smoother_server'" in navigation_launch,
             'smoother_server is absent from the lifecycle set')
     require("package='nav2_smoother'" in navigation_launch,

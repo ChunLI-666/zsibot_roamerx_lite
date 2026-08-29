@@ -118,7 +118,8 @@ target_link_libraries(odom_communication_node_udp
 )
 target_include_directories(odom_communication_node_udp
   PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/udp/include  
+    ${CMAKE_CURRENT_SOURCE_DIR}/udp/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
 #==========================>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -164,6 +165,7 @@ target_link_libraries(vel_cmd_lcm_pub
         lcm_msg
         lcm
 )
+target_include_directories(vel_cmd_lcm_pub PRIVATE include)
 
 #==========================>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 add_executable(vel_cmd_udp_pub
@@ -179,7 +181,8 @@ target_link_libraries(vel_cmd_udp_pub
 )
 target_include_directories(vel_cmd_udp_pub
   PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/udp/include 
+    ${CMAKE_CURRENT_SOURCE_DIR}/udp/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
 #==========================>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -205,7 +208,8 @@ target_link_libraries(vel_with_mc_trajectory_cmd_udp_pub
 )
 target_include_directories(vel_with_mc_trajectory_cmd_udp_pub
   PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/udp/include 
+    ${CMAKE_CURRENT_SOURCE_DIR}/udp/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
 #==========================>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -326,6 +330,8 @@ if(BUILD_TESTING)
     ament_add_gtest(test_livox_scan_projection
             test/test_livox_scan_projection.cpp)
     target_include_directories(test_livox_scan_projection PRIVATE include)
+    ament_add_gtest(test_motion_limits test/test_motion_limits.cpp)
+    target_include_directories(test_motion_limits PRIVATE include)
     add_test(
             NAME test_navigation_contract
             COMMAND ${Python3_EXECUTABLE}

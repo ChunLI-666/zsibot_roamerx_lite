@@ -4,6 +4,7 @@
 
 #include "geometry_msgs/msg/twist.hpp"
 #include "highlevel_connector.h"
+#include "robot_navigo/motion_limits.hpp"
 
 class VelCmdUdpPublisher : public rclcpp::Node {
  public:
@@ -77,9 +78,12 @@ class VelCmdUdpPublisher : public rclcpp::Node {
       const geometry_msgs::msg::Twist::SharedPtr msg) {
     // std::lock_guard<std::mutex> lk(planner_vel_mutex_);
 
-    cmd_.vx = std::fabs(msg->linear.x) < 0.085 ? 0.0 : msg->linear.x;
-    cmd_.vy = std::fabs(msg->linear.y) < 0.085 ? 0.0 : msg->linear.y;
-    cmd_.yaw_rate = msg->angular.z;
+    cmd_.vx = robot_navigo::motion_limits::executableOrZero(
+      msg->linear.x, robot_navigo::motion_limits::kExecutableMinVx);
+    cmd_.vy = robot_navigo::motion_limits::executableOrZero(
+      msg->linear.y, robot_navigo::motion_limits::kExecutableMinVy);
+    cmd_.yaw_rate = robot_navigo::motion_limits::executableOrZero(
+      msg->angular.z, robot_navigo::motion_limits::kExecutableMinWz);
 
     cmd_.len = sizeof(navigo_sdk::highLevelCmd);
     cmd_.head = (uint16_t)0x5AA5;  // 获取控制权

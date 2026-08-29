@@ -187,6 +187,9 @@ private:
   double max_linear_x_;
   double max_linear_y_;
   double max_angular_z_;
+  double min_linear_x_;
+  double min_linear_y_;
+  double min_angular_z_;
   double cmd_timeout_;
   double command_check_rate_;
   double status_rate_;

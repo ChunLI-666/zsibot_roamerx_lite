@@ -6,6 +6,7 @@
 #include <unordered_map>
 
 #include "highlevel_connector.h"
+#include "robot_navigo/motion_limits.hpp"
 #include "robots_dog_msgs/msg/cmd_vel_with_trajectory.hpp"
 
 class VelWithMcTrajecotryCmdUdpPublisher : public rclcpp::Node {
@@ -81,13 +82,12 @@ class VelWithMcTrajecotryCmdUdpPublisher : public rclcpp::Node {
       const robots_dog_msgs::msg::CmdVelWithTrajectory::SharedPtr msg) {
     std::lock_guard<std::mutex> lk(planner_vel_mutex_);
 
-    cmd_.vx = std::fabs(msg->cmd_vel.twist.linear.x) < 0.085
-                  ? 0.0
-                  : msg->cmd_vel.twist.linear.x;
-    cmd_.vy = std::fabs(msg->cmd_vel.twist.linear.y) < 0.085
-                  ? 0.0
-                  : msg->cmd_vel.twist.linear.y;
-    cmd_.yaw_rate = msg->cmd_vel.twist.angular.z;
+    cmd_.vx = robot_navigo::motion_limits::executableOrZero(
+      msg->cmd_vel.twist.linear.x, robot_navigo::motion_limits::kExecutableMinVx);
+    cmd_.vy = robot_navigo::motion_limits::executableOrZero(
+      msg->cmd_vel.twist.linear.y, robot_navigo::motion_limits::kExecutableMinVy);
+    cmd_.yaw_rate = robot_navigo::motion_limits::executableOrZero(
+      msg->cmd_vel.twist.angular.z, robot_navigo::motion_limits::kExecutableMinWz);
 
     if (msg->trajectory.poses.size() != std::size(cmd_.trajectory)) {
       RCLCPP_ERROR(this->get_logger(),
