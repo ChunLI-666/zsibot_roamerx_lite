@@ -17,9 +17,12 @@ cmd_vel_to_zsibot:
     control_port: 6002           # yz-robot-ctrl local algorithm port
     
     # Velocity limits (m/s and rad/s)
-    max_linear_x: 0.15           # Match yz_robot_ctrl MAX_LINEAR_SPEED (m/s)
-    max_linear_y: 0.15           # Match yz_robot_ctrl MAX_STRAFE_SPEED (m/s)
+    max_linear_x: 0.15           # Production navigation limit (m/s); hardware hard limit is 0.30
+    max_linear_y: 0.15           # Production navigation and hardware limit (m/s)
     max_angular_z: 0.1           # Conservative yaw limit for dog navigation (rad/s)
+    min_linear_x: 0.05           # SDK executable minimum; smaller commands become zero
+    min_linear_y: 0.10
+    min_angular_z: 0.02
     
     # Timing parameters
     cmd_timeout: 0.5             # Command timeout in seconds (send zero once if no cmd received)

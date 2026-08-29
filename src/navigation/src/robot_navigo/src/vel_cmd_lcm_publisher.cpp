@@ -4,6 +4,10 @@
 #include <lcm/lcm-cpp.hpp>
 #include <rclcpp/rclcpp.hpp>
 
+#include <mutex>
+
+#include "robot_navigo/motion_limits.hpp"
+
 class VelCmdLcmPublisher : public rclcpp::Node
 {
 public:
@@ -21,9 +25,12 @@ private:
     {
         std::lock_guard<std::mutex> lk(planner_vel_mutex_);
         gamepad_lcmt                lcmt;
-        lcmt.leftStickAnalog[1]  = std::fabs(msg->linear.x) < 0.085 ? 0.0 : msg->linear.x;
-        lcmt.leftStickAnalog[0]  = std::fabs(msg->linear.y) < 0.085 ? 0.0 : msg->linear.y;
-        lcmt.rightStickAnalog[0] = -msg->angular.z;
+        lcmt.leftStickAnalog[1] = robot_navigo::motion_limits::executableOrZero(
+            msg->linear.x, robot_navigo::motion_limits::kExecutableMinVx);
+        lcmt.leftStickAnalog[0] = robot_navigo::motion_limits::executableOrZero(
+            msg->linear.y, robot_navigo::motion_limits::kExecutableMinVy);
+        lcmt.rightStickAnalog[0] = -robot_navigo::motion_limits::executableOrZero(
+            msg->angular.z, robot_navigo::motion_limits::kExecutableMinWz);
 
         lc.publish("vel_cmd_lcm_data", &lcmt);
     }

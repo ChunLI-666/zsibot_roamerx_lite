@@ -8,6 +8,7 @@
 #include <functional>
 #include <limits>
 #include <sstream>
+#include <stdexcept>
 #include <thread>
 #include <arpa/inet.h>
 #include <unistd.h>
@@ -48,6 +49,9 @@ CmdVelToZsibot::CmdVelToZsibot(const rclcpp::NodeOptions & options)
   this->declare_parameter<double>("max_linear_x", 0.15);
   this->declare_parameter<double>("max_linear_y", 0.15);
   this->declare_parameter<double>("max_angular_z", 0.1);
+  this->declare_parameter<double>("min_linear_x", 0.05);
+  this->declare_parameter<double>("min_linear_y", 0.10);
+  this->declare_parameter<double>("min_angular_z", 0.02);
   this->declare_parameter<double>("cmd_timeout", 0.5);
   this->declare_parameter<double>("command_check_rate", 20.0);
   this->declare_parameter<double>("status_rate", 1.0);
@@ -66,6 +70,9 @@ CmdVelToZsibot::CmdVelToZsibot(const rclcpp::NodeOptions & options)
   max_linear_x_ = this->get_parameter("max_linear_x").as_double();
   max_linear_y_ = this->get_parameter("max_linear_y").as_double();
   max_angular_z_ = this->get_parameter("max_angular_z").as_double();
+  min_linear_x_ = this->get_parameter("min_linear_x").as_double();
+  min_linear_y_ = this->get_parameter("min_linear_y").as_double();
+  min_angular_z_ = this->get_parameter("min_angular_z").as_double();
   cmd_timeout_ = this->get_parameter("cmd_timeout").as_double();
   command_check_rate_ = this->get_parameter("command_check_rate").as_double();
   status_rate_ = this->get_parameter("status_rate").as_double();
@@ -83,6 +90,12 @@ CmdVelToZsibot::CmdVelToZsibot(const rclcpp::NodeOptions & options)
   if (min_command_interval_ < 0.0) {
     min_command_interval_ = 0.0;
   }
+  if (min_linear_x_ <= 0.0 || min_linear_x_ > max_linear_x_ ||
+    min_linear_y_ <= 0.0 || min_linear_y_ > max_linear_y_ ||
+    min_angular_z_ <= 0.0 || min_angular_z_ > max_angular_z_)
+  {
+    throw std::invalid_argument("executable velocity minimums must be positive and <= maximums");
+  }
 
   RCLCPP_INFO(this->get_logger(), "Initializing CmdVelToZsibot node");
   RCLCPP_INFO(this->get_logger(), "  Output mode: %s", output_mode_.c_str());
@@ -96,6 +109,8 @@ CmdVelToZsibot::CmdVelToZsibot(const rclcpp::NodeOptions & options)
   }
   RCLCPP_INFO(this->get_logger(), "  Max velocities: vx=%.2f, vy=%.2f, wz=%.2f",
     max_linear_x_, max_linear_y_, max_angular_z_);
+  RCLCPP_INFO(this->get_logger(), "  Executable minimums: vx=%.2f, vy=%.2f, wz=%.2f",
+    min_linear_x_, min_linear_y_, min_angular_z_);
   RCLCPP_INFO(this->get_logger(), "  Cmd timeout: %.2f s", cmd_timeout_);
   RCLCPP_INFO(this->get_logger(), "  Command check rate: %.1f Hz", command_check_rate_);
   RCLCPP_INFO(this->get_logger(), "  Status rate: %.1f Hz", status_rate_);
@@ -315,19 +330,16 @@ geometry_msgs::msg::Twist CmdVelToZsibot::normalizeCommand(
     normalized.angular.z = 0.0;
   }
 
-  // Same minimums used by yz_robot_ctrl's RobotController::move().
-  constexpr double MIN_VX = 0.05;
-  constexpr double MIN_VY = 0.1;
-  constexpr double MIN_YAW = 0.02;
-
-  if (normalized.linear.x != 0.0 && std::abs(normalized.linear.x) < MIN_VX) {
-    normalized.linear.x = normalized.linear.x > 0.0 ? MIN_VX : -MIN_VX;
+  // Preserve Nav2's executable-set contract. The low-level controller promotes
+  // sub-minimum values, so dropping them here avoids unmodelled motion.
+  if (normalized.linear.x != 0.0 && std::abs(normalized.linear.x) < min_linear_x_) {
+    normalized.linear.x = 0.0;
   }
-  if (normalized.linear.y != 0.0 && std::abs(normalized.linear.y) < MIN_VY) {
-    normalized.linear.y = normalized.linear.y > 0.0 ? MIN_VY : -MIN_VY;
+  if (normalized.linear.y != 0.0 && std::abs(normalized.linear.y) < min_linear_y_) {
+    normalized.linear.y = 0.0;
   }
-  if (normalized.angular.z != 0.0 && std::abs(normalized.angular.z) < MIN_YAW) {
-    normalized.angular.z = normalized.angular.z > 0.0 ? MIN_YAW : -MIN_YAW;
+  if (normalized.angular.z != 0.0 && std::abs(normalized.angular.z) < min_angular_z_) {
+    normalized.angular.z = 0.0;
   }
 
   return normalized;

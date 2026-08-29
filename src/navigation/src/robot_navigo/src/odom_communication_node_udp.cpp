@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <thread>
 
+#include "robot_navigo/motion_limits.hpp"
+
 #ifdef FOR_3588
 constexpr int     CLIENT_PORT = 43909;        // local port
 constexpr int     SERVER_PORT = 43998;        // target port
@@ -75,9 +77,12 @@ OdomCommunicationNodeUdp::OdomCommunicationNodeUdp()
 void OdomCommunicationNodeUdp::HandlPlannerVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg)
 {
     std::unique_lock lk(lk_);
-    cmd_.vx       = std::fabs(msg->linear.x) < 0.085 ? 0.0 : msg->linear.x;
-    cmd_.vy       = std::fabs(msg->linear.y) < 0.085 ? 0.0 : msg->linear.y;
-    cmd_.yaw_rate = msg->angular.z;
+    cmd_.vx = robot_navigo::motion_limits::executableOrZero(
+      msg->linear.x, robot_navigo::motion_limits::kExecutableMinVx);
+    cmd_.vy = robot_navigo::motion_limits::executableOrZero(
+      msg->linear.y, robot_navigo::motion_limits::kExecutableMinVy);
+    cmd_.yaw_rate = robot_navigo::motion_limits::executableOrZero(
+      msg->angular.z, robot_navigo::motion_limits::kExecutableMinWz);
 
     RCLCPP_INFO(this->get_logger(), "==> 发送了: %f", cmd_.vx);
 }

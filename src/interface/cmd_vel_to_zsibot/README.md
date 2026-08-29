@@ -48,6 +48,9 @@ This package provides a bridge between the standard ROS2 navigation stack (which
 | `max_linear_x` | double | 0.15 | Max forward/backward velocity (m/s) |
 | `max_linear_y` | double | 0.15 | Max lateral velocity (m/s) |
 | `max_angular_z` | double | 0.1 | Max angular velocity (rad/s) |
+| `min_linear_x` | double | 0.05 | Smallest executable forward/backward velocity; smaller values become zero |
+| `min_linear_y` | double | 0.10 | Smallest executable lateral velocity; smaller values become zero |
+| `min_angular_z` | double | 0.02 | Smallest executable yaw rate; smaller values become zero |
 | `cmd_timeout` | double | 0.5 | Command timeout in seconds |
 | `command_check_rate` | double | 20.0 | Rate to check pending commands and timeout state (Hz) |
 | `status_rate` | double | 1.0 | Battery/connectivity polling rate (Hz) |
