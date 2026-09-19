@@ -29,6 +29,12 @@ NavigateThroughPosesNavigator::configure(
 {
   start_time_ = rclcpp::Time(0);
   auto node = parent_node.lock();
+  if (!node->has_parameter("enable_epoch_contract")) {
+    node->declare_parameter("enable_epoch_contract", false);
+  }
+  enable_epoch_contract_ = node->get_parameter("enable_epoch_contract").as_bool();
+  strict_bt_path_ = ament_index_cpp::get_package_share_directory("navigo_bt_navigator") +
+    "/behavior_trees/navigate_through_poses_with_epoch.xml";
 
   if (!node->has_parameter("goals_blackboard_id")) {
     node->declare_parameter("goals_blackboard_id", std::string("goals"));
@@ -54,6 +60,12 @@ NavigateThroughPosesNavigator::getDefaultBTFilepath(
 {
   std::string default_bt_xml_filename;
   auto node = parent_node.lock();
+  if (!node->has_parameter("enable_epoch_contract")) {
+    node->declare_parameter("enable_epoch_contract", false);
+  }
+  enable_epoch_contract_ = node->get_parameter("enable_epoch_contract").as_bool();
+  strict_bt_path_ = ament_index_cpp::get_package_share_directory("navigo_bt_navigator") +
+    "/behavior_trees/navigate_through_poses_with_epoch.xml";
 
   if (!node->has_parameter("default_nav_through_poses_bt_xml")) {
     std::string pkg_share_dir =
@@ -66,13 +78,17 @@ NavigateThroughPosesNavigator::getDefaultBTFilepath(
 
   node->get_parameter("default_nav_through_poses_bt_xml", default_bt_xml_filename);
 
-  return default_bt_xml_filename;
+  return enable_epoch_contract_ ? strict_bt_path_ : default_bt_xml_filename;
 }
 
 bool
 NavigateThroughPosesNavigator::goalReceived(ActionT::Goal::ConstSharedPtr goal)
 {
-  auto bt_xml_filename = goal->behavior_tree;
+  if (enable_epoch_contract_ && !goal->behavior_tree.empty() && goal->behavior_tree != strict_bt_path_) {
+    RCLCPP_ERROR(logger_, "Epoch navigation rejects an unverified custom behavior tree");
+    return false;
+  }
+  auto bt_xml_filename = enable_epoch_contract_ ? strict_bt_path_ : goal->behavior_tree;
 
   if (!bt_action_server_->loadBehaviorTree(bt_xml_filename)) {
     RCLCPP_ERROR(
@@ -211,6 +227,10 @@ NavigateThroughPosesNavigator::initializeGoalPoses(ActionT::Goal::ConstSharedPtr
   start_time_ = clock_->now();
   auto blackboard = bt_action_server_->getBlackboard();
   blackboard->set<int>("number_recoveries", 0);  // NOLINT
+  uint64_t revision = 0;
+  blackboard->get("epoch_goal_revision", revision);
+  blackboard->set("epoch_goal_revision", revision + 1);
+
 
   // Update the goal pose on the blackboard
   blackboard->set<Goals>(goals_blackboard_id_, goal->poses);

@@ -121,9 +121,13 @@ VelocityOptimizer::on_configure(const rclcpp_lifecycle::State &)
 
   // Setup inputs / outputs
   smoothed_cmd_pub_ = create_publisher<geometry_msgs::msg::Twist>("cmd_vel_smoothed", 1);
+  declare_parameter_if_not_declared(node, "enable_epoch_contract", rclcpp::ParameterValue(false));
+  epoch_contract_ = get_parameter("enable_epoch_contract").as_bool();
+  if (epoch_contract_) {configureEpoch();} else {
   cmd_sub_ = create_subscription<geometry_msgs::msg::Twist>(
     "cmd_vel", rclcpp::QoS(1),
     std::bind(&VelocityOptimizer::inputCommandCallback, this, std::placeholders::_1));
+  }
 
   return navigo_util::CallbackReturn::SUCCESS;
 }
@@ -133,6 +137,7 @@ VelocityOptimizer::on_activate(const rclcpp_lifecycle::State &)
 {
   RCLCPP_INFO(get_logger(), "Activating");
   smoothed_cmd_pub_->on_activate();
+  if (epoch_pub_) {epoch_pub_->on_activate();}
   double timer_duration_ms = 1000.0 / smoothing_frequency_;
   timer_ = this->create_wall_timer(
     std::chrono::milliseconds(static_cast<int>(timer_duration_ms)),
@@ -154,6 +159,9 @@ VelocityOptimizer::on_deactivate(const rclcpp_lifecycle::State &)
     timer_->cancel();
     timer_.reset();
   }
+  if (epoch_pub_) {
+    std::lock_guard<std::mutex> lock(epoch_mutex_); clearEpochCommand(); epoch_pub_->on_deactivate();
+  }
   smoothed_cmd_pub_->on_deactivate();
   dyn_params_handler_.reset();
 
@@ -169,6 +177,8 @@ VelocityOptimizer::on_cleanup(const rclcpp_lifecycle::State &)
   smoothed_cmd_pub_.reset();
   odom_smoother_.reset();
   cmd_sub_.reset();
+  epoch_sub_.reset(); epoch_loc_sub_.reset(); epoch_intent_sub_.reset(); epoch_gate_sub_.reset();
+  epoch_pub_.reset(); epoch_command_.reset(); command_.reset(); last_cmd_ = geometry_msgs::msg::Twist();
   return navigo_util::CallbackReturn::SUCCESS;
 }
 
@@ -177,6 +187,68 @@ VelocityOptimizer::on_shutdown(const rclcpp_lifecycle::State &)
 {
   RCLCPP_INFO(get_logger(), "Shutting down");
   return navigo_util::CallbackReturn::SUCCESS;
+}
+
+void VelocityOptimizer::configureEpoch()
+{
+  auto parameter = [this](const std::string & name, double value) {
+    declare_parameter_if_not_declared(shared_from_this(), name, rclcpp::ParameterValue(value));
+    double result = get_parameter(name).as_double();
+    if (!std::isfinite(result) || result <= 0.) {throw std::runtime_error("Invalid epoch parameter " + name);}
+    return result;
+  };
+  epoch_authority_.localization_ttl_ns = parameter("epoch_localization_timeout", .4) * 1e9;
+  epoch_authority_.intent_ttl_ns = parameter("epoch_intent_timeout", .4) * 1e9;
+  epoch_authority_.gate_ttl_ns = parameter("epoch_gate_timeout", .4) * 1e9;
+  epoch_command_ttl_ns_ = parameter("epoch_command_timeout", .3) * 1e9;
+  epoch_pub_ = create_publisher<navigo_epoch_msgs::msg::EpochCommand>("/cmd_vel_epoch", 1);
+  epoch_sub_ = create_subscription<navigo_epoch_msgs::msg::EpochCommand>("/cmd_vel_epoch_raw", 1,
+    std::bind(&VelocityOptimizer::epochCommandCallback, this, std::placeholders::_1));
+  epoch_loc_sub_ = create_subscription<navigo_epoch_msgs::msg::LocalizationEpoch>("/lightning/localization_epoch", 10,
+    [this](navigo_epoch_msgs::msg::LocalizationEpoch::ConstSharedPtr msg) {
+      std::lock_guard<std::mutex> lock(epoch_mutex_);
+      epoch_authority_.updateLocalization(*msg, navigo_core::epoch::steadyNow());
+      if (epoch_command_ && !epoch_authority_.permits(epoch_command_->token, navigo_core::epoch::steadyNow())) {clearEpochCommand();}
+    });
+  epoch_intent_sub_ = create_subscription<navigo_epoch_msgs::msg::NavigationIntent>("/nav_epoch/intent", 10,
+    [this](navigo_epoch_msgs::msg::NavigationIntent::ConstSharedPtr msg) {
+      std::lock_guard<std::mutex> lock(epoch_mutex_);
+      epoch_authority_.updateIntent(*msg, navigo_core::epoch::steadyNow());
+      if (epoch_command_ && !epoch_authority_.permits(epoch_command_->token, navigo_core::epoch::steadyNow())) {clearEpochCommand();}
+    });
+  epoch_gate_sub_ = create_subscription<std_msgs::msg::String>("/nav_epoch/gate_session", 10,
+    [this](std_msgs::msg::String::ConstSharedPtr msg) {
+      std::lock_guard<std::mutex> lock(epoch_mutex_);
+      epoch_authority_.updateGate(msg->data, navigo_core::epoch::steadyNow());
+      if (epoch_command_ && !epoch_authority_.permits(epoch_command_->token, navigo_core::epoch::steadyNow())) {clearEpochCommand();}
+    });
+}
+
+void VelocityOptimizer::clearEpochCommand()
+{
+  if (epoch_command_ && epoch_pub_ && epoch_pub_->is_activated()) {
+    auto zero = *epoch_command_;
+    zero.velocity = geometry_msgs::msg::Twist();
+    zero.relay_session_id = relay_session_; zero.relay_sequence = ++relay_sequence_;
+    // Revocation never renews source time or grants a new command identity.
+    epoch_pub_->publish(zero);
+  }
+  epoch_command_.reset(); command_.reset(); last_cmd_ = geometry_msgs::msg::Twist(); stopped_ = true;
+}
+
+void VelocityOptimizer::epochCommandCallback(navigo_epoch_msgs::msg::EpochCommand::ConstSharedPtr msg)
+{
+  std::lock_guard<std::mutex> lock(epoch_mutex_);
+  const auto now_ns = navigo_core::epoch::steadyNow();
+  if (!epoch_authority_.permits(msg->token, now_ns) ||
+    !navigo_core::epoch::commandFresh(*msg, epoch_authority_.boot, now_ns, epoch_command_ttl_ns_) ||
+    !msg->relay_session_id.empty() || msg->relay_sequence != 0 || !navigo_util::validateTwist(msg->velocity)) {return;}
+  auto & high = source_highwater_[msg->controller_session_id];
+  if (msg->command_sequence <= high.first || msg->source_steady_time_ns <= high.second) {return;}
+  high = {msg->command_sequence, msg->source_steady_time_ns};
+  if (epoch_command_ && (epoch_command_->token != msg->token || epoch_command_->controller_session_id != msg->controller_session_id)) {clearEpochCommand();}
+  epoch_command_ = msg;
+  command_ = std::make_shared<geometry_msgs::msg::Twist>(msg->velocity);
 }
 
 void VelocityOptimizer::inputCommandCallback(const geometry_msgs::msg::Twist::SharedPtr msg)
@@ -247,6 +319,15 @@ double VelocityOptimizer::applyConstraints(
 
 void VelocityOptimizer::smootherTimer()
 {
+  std::unique_lock<std::mutex> epoch_lock(epoch_mutex_, std::defer_lock);
+  if (epoch_contract_) {
+    epoch_lock.lock();
+    const auto now_ns = navigo_core::epoch::steadyNow();
+    if (!epoch_command_ || !epoch_authority_.permits(epoch_command_->token, now_ns) ||
+      !navigo_core::epoch::commandFresh(*epoch_command_, epoch_authority_.boot, now_ns, epoch_command_ttl_ns_)) {
+      clearEpochCommand(); return;
+    }
+  }
   // Wait until the first command is received
   if (!command_) {
     return;
@@ -255,7 +336,7 @@ void VelocityOptimizer::smootherTimer()
   auto cmd_vel = std::make_unique<geometry_msgs::msg::Twist>();
 
   // Check for velocity timeout. If nothing received, publish zeros to apply deceleration
-  if (now() - last_command_time_ > velocity_timeout_) {
+  if (!epoch_contract_ && now() - last_command_time_ > velocity_timeout_) {
     if (last_cmd_ == geometry_msgs::msg::Twist() || stopped_) {
       stopped_ = true;
       return;
@@ -320,7 +401,13 @@ void VelocityOptimizer::smootherTimer()
   cmd_vel->angular.z = fabs(cmd_vel->angular.z) <
     deadband_velocities_[2] ? 0.0 : cmd_vel->angular.z;
 
-  smoothed_cmd_pub_->publish(std::move(cmd_vel));
+  if (epoch_contract_) {
+    auto output = *epoch_command_;
+    output.velocity = *cmd_vel;
+    output.relay_session_id = relay_session_;
+    output.relay_sequence = ++relay_sequence_;
+    epoch_pub_->publish(output);
+  } else {smoothed_cmd_pub_->publish(std::move(cmd_vel));}
 }
 
 rcl_interfaces::msg::SetParametersResult

@@ -2,11 +2,13 @@ cmake_minimum_required(VERSION 3.5)
 project(navigo_velocity_optimizer)
 
 find_package(ament_cmake REQUIRED)
+find_package(navigo_epoch_msgs REQUIRED)
 find_package(nav2_common REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(navigo_util REQUIRED)
+find_package(navigo_core REQUIRED)
 
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 17)
@@ -27,10 +29,12 @@ set(executable_name velocity_smoother)
 set(library_name ${executable_name}_core)
 
 set(dependencies
+  navigo_epoch_msgs
   rclcpp
   rclcpp_components
   geometry_msgs
   navigo_util
+  navigo_core
 )
 
 # Main library

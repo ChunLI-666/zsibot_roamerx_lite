@@ -361,6 +361,13 @@ if(BUILD_TESTING)
             ENVIRONMENT "ROS_DOMAIN_ID=187;ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST"
             RUN_SERIAL TRUE TIMEOUT 60)
     add_test(
+            NAME test_epoch_gate
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_epoch_gate.py)
+    set_tests_properties(test_epoch_gate PROPERTIES
+            ENVIRONMENT "ROS_DOMAIN_ID=189;ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST"
+            RUN_SERIAL TRUE TIMEOUT 30)
+    add_test(
             NAME test_navigation_contract
             COMMAND ${Python3_EXECUTABLE}
                     ${CMAKE_CURRENT_SOURCE_DIR}/test/test_navigation_contract.py

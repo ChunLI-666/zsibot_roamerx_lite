@@ -206,6 +206,9 @@ ControllerServer::on_configure(const rclcpp_lifecycle::State & /*state*/)
     create_publisher<robots_dog_msgs::msg::NavigoControllerDebug>("~/debug", rclcpp::QoS(10));
 
   // Create the action server that we implement with our followPath method
+  navigo_util::declare_parameter_if_not_declared(shared_from_this(), "enable_epoch_contract", rclcpp::ParameterValue(false));
+  epoch_contract_ = get_parameter("enable_epoch_contract").as_bool();
+  if (epoch_contract_) {configureEpoch();} else {
   action_server_ = std::make_unique<ActionServer>(
     shared_from_this(),
     "follow_path",
@@ -213,6 +216,7 @@ ControllerServer::on_configure(const rclcpp_lifecycle::State & /*state*/)
     nullptr,
     std::chrono::milliseconds(500),
     true);
+  }
 
   // Set subscribtion to the speed limiting topic
   speed_limit_sub_ = create_subscription<nav2_msgs::msg::SpeedLimit>(
@@ -234,7 +238,11 @@ ControllerServer::on_activate(const rclcpp_lifecycle::State & /*state*/)
   }
   vel_publisher_->on_activate();
   debug_publisher_->on_activate();
-  action_server_->activate();
+  if (action_server_) {action_server_->activate();}
+  if (epoch_action_server_) {
+    epoch_cmd_pub_->on_activate(); epoch_execution_pub_->on_activate();
+    epoch_action_server_->activate();
+  }
 
   auto node = shared_from_this();
   // Add callback for dynamic parameters
@@ -252,7 +260,12 @@ ControllerServer::on_deactivate(const rclcpp_lifecycle::State & /*state*/)
 {
   RCLCPP_INFO(get_logger(), "Deactivating");
 
-  action_server_->deactivate();
+  if (action_server_) {action_server_->deactivate();}
+  if (epoch_action_server_) {
+    epoch_action_server_->deactivate();
+    invalidateEpoch("deactivated");
+    epoch_cmd_pub_->on_deactivate(); epoch_execution_pub_->on_deactivate();
+  }
   ControllerMap::iterator it;
   for (it = controllers_.begin(); it != controllers_.end(); ++it) {
     it->second->deactivate();
@@ -296,6 +309,10 @@ ControllerServer::on_cleanup(const rclcpp_lifecycle::State & /*state*/)
 
 
   // Release any allocated resources
+  epoch_timer_.reset();
+  epoch_action_server_.reset();
+  epoch_loc_sub_.reset(); epoch_intent_sub_.reset(); epoch_gate_sub_.reset();
+  epoch_cmd_pub_.reset(); epoch_execution_pub_.reset();
   action_server_.reset();
   odom_sub_.reset();
   costmap_thread_.reset();
@@ -363,6 +380,220 @@ bool ControllerServer::findGoalCheckerId(
   }
 
   return true;
+}
+
+void ControllerServer::configureEpoch()
+{
+  auto parameter = [this](const std::string & name, double value) {
+    navigo_util::declare_parameter_if_not_declared(shared_from_this(), name, rclcpp::ParameterValue(value));
+    double result = get_parameter(name).as_double();
+    if (!std::isfinite(result) || result <= 0.) {throw std::runtime_error("Invalid epoch parameter " + name);}
+    return result;
+  };
+  epoch_authority_.localization_ttl_ns = parameter("epoch_localization_timeout", .4) * 1e9;
+  epoch_authority_.intent_ttl_ns = parameter("epoch_intent_timeout", .4) * 1e9;
+  epoch_authority_.gate_ttl_ns = parameter("epoch_gate_timeout", .4) * 1e9;
+  command_ttl_ns_ = parameter("epoch_command_timeout", .3) * 1e9;
+  epoch_tf_position_tolerance_ = parameter("epoch_tf_position_tolerance", 1e-5);
+  epoch_tf_angle_tolerance_ = parameter("epoch_tf_angle_tolerance", 1e-5);
+  epoch_cmd_pub_ = create_publisher<navigo_epoch_msgs::msg::EpochCommand>("/cmd_vel_epoch_raw", 1);
+  epoch_execution_pub_ = create_publisher<navigo_epoch_msgs::msg::NavExecutionState>("/nav_epoch/execution", 10);
+  epoch_loc_sub_ = create_subscription<navigo_epoch_msgs::msg::LocalizationEpoch>("/lightning/localization_epoch", 10,
+    [this](navigo_epoch_msgs::msg::LocalizationEpoch::ConstSharedPtr msg) {
+      std::lock_guard<std::mutex> lock(epoch_mutex_);
+      epoch_authority_.updateLocalization(*msg, navigo_core::epoch::steadyNow());
+      if (epoch_execution_active_ && !epoch_authority_.permits(installed_token_, navigo_core::epoch::steadyNow())) {
+        epoch_execution_active_ = false; publishEpochExecution("localization_revoked");
+      }
+    });
+  epoch_intent_sub_ = create_subscription<navigo_epoch_msgs::msg::NavigationIntent>("/nav_epoch/intent", 10,
+    [this](navigo_epoch_msgs::msg::NavigationIntent::ConstSharedPtr msg) {
+      std::lock_guard<std::mutex> lock(epoch_mutex_);
+      epoch_authority_.updateIntent(*msg, navigo_core::epoch::steadyNow());
+      if (epoch_execution_active_ && !epoch_authority_.permits(installed_token_, navigo_core::epoch::steadyNow())) {
+        epoch_execution_active_ = false; publishEpochExecution("intent_revoked");
+      }
+    });
+  epoch_gate_sub_ = create_subscription<std_msgs::msg::String>("/nav_epoch/gate_session", 10,
+    [this](std_msgs::msg::String::ConstSharedPtr msg) {
+      std::lock_guard<std::mutex> lock(epoch_mutex_);
+      epoch_authority_.updateGate(msg->data, navigo_core::epoch::steadyNow());
+      if (epoch_execution_active_ && !epoch_authority_.permits(installed_token_, navigo_core::epoch::steadyNow())) {
+        epoch_execution_active_ = false; publishEpochExecution("gate_session_revoked");
+      }
+    });
+  epoch_timer_ = create_wall_timer(std::chrono::milliseconds(50), [this]() {
+      std::lock_guard<std::mutex> lock(epoch_mutex_);
+      if (!epoch_authority_.permits(installed_token_, navigo_core::epoch::steadyNow())) {epoch_execution_active_ = false;}
+      publishEpochExecution(epoch_execution_active_ ? "installed" : "not_authorized");
+    });
+  epoch_action_server_ = std::make_unique<EpochActionServer>(shared_from_this(), "follow_path_epoch",
+    std::bind(&ControllerServer::computeEpochControl, this), nullptr, std::chrono::milliseconds(500), true);
+}
+
+void ControllerServer::publishEpochExecution(const std::string & reason)
+{
+  // epoch_mutex_ is held by caller. Only the action thread installs a path.
+  if (!epoch_execution_pub_ || !epoch_execution_pub_->is_activated()) {return;}
+  navigo_epoch_msgs::msg::NavExecutionState state;
+  state.token = installed_token_;
+  state.controller_session_id = controller_session_;
+  state.heartbeat_sequence = ++execution_sequence_;
+  state.active = epoch_execution_active_;
+  state.boot_id = epoch_authority_.boot;
+  state.source_steady_time_ns = navigo_core::epoch::steadyNow();
+  state.reason = reason;
+  epoch_execution_pub_->publish(state);
+}
+
+void ControllerServer::invalidateEpoch(const std::string & reason)
+{
+  std::lock_guard<std::mutex> lock(epoch_mutex_);
+  epoch_execution_active_ = false;
+  publishEpochExecution(reason);
+}
+
+bool ControllerServer::epochReady(bool verify_tf)
+{
+  navigo_epoch_msgs::msg::LocalizationEpoch localization;
+  {
+    std::lock_guard<std::mutex> lock(epoch_mutex_);
+    if (!epoch_execution_active_ || !epoch_authority_.permits(installed_token_, navigo_core::epoch::steadyNow())) {return false;}
+    localization = epoch_authority_.localization;
+  }
+  if (!verify_tf) {return true;}
+  if (localization.base_frame_id != costmap_ros_->getBaseFrameID()) {return false;}
+  try {
+    auto transform = costmap_ros_->getTfBuffer()->lookupTransform(localization.output_pose.header.frame_id,
+      localization.base_frame_id, rclcpp::Time(localization.output_pose.header.stamp), rclcpp::Duration::from_seconds(.02));
+    const auto & p = localization.output_pose.pose.position;
+    const auto & q = localization.output_pose.pose.orientation;
+    const auto & t = transform.transform.translation;
+    const auto & r = transform.transform.rotation;
+    const double distance = std::sqrt((p.x-t.x)*(p.x-t.x)+(p.y-t.y)*(p.y-t.y)+(p.z-t.z)*(p.z-t.z));
+    const double norm = r.x*r.x+r.y*r.y+r.z*r.z+r.w*r.w;
+    if (!std::isfinite(norm) || std::abs(norm-1.) > 1e-3) {return false;}
+    const double dot = std::abs(q.x*r.x+q.y*r.y+q.z*r.z+q.w*r.w);
+    const double angle = 2. * std::acos(std::clamp(dot, 0., 1.));
+    if (!(std::isfinite(distance) && std::isfinite(angle) && distance <= epoch_tf_position_tolerance_ && angle <= epoch_tf_angle_tolerance_)) {return false;}
+    geometry_msgs::msg::PoseStamped source_pose;
+    costmap_ros_->getTfBuffer()->transform(localization.output_pose, source_pose, costmap_ros_->getGlobalFrameID(), tf2::durationFromSec(.02));
+    std::lock_guard<std::mutex> lock(epoch_mutex_);
+    if (!epoch_execution_active_ || installed_token_.localization != localization.identity ||
+      !epoch_authority_.permits(installed_token_, navigo_core::epoch::steadyNow())) {return false;}
+    epoch_cycle_pose_ = source_pose;
+    epoch_cycle_token_ = installed_token_;
+    epoch_cycle_valid_ = true;
+    return true;
+  } catch (const tf2::TransformException &) {return false;}
+}
+
+void ControllerServer::installEpochPath(const EpochAction::Goal & goal)
+{
+  const auto & ep = goal.epoch_path;
+  const auto intent_deadline = navigo_core::epoch::steadyNow() + epoch_authority_.intent_ttl_ns;
+  while (true) {
+    {
+      std::lock_guard<std::mutex> lock(epoch_mutex_);
+      const auto now_ns = navigo_core::epoch::steadyNow();
+      if (epoch_authority_.permits(ep.token, now_ns)) {break;}
+      if (ep.token.localization != epoch_authority_.localization.identity ||
+        ep.token.gate_session_id != epoch_authority_.gate_session || epoch_authority_.map_changed ||
+        now_ns >= intent_deadline) {throw std::runtime_error("Path intent not delivered or epoch revoked");}
+    }
+    if (!epoch_action_server_->is_server_active() || epoch_action_server_->is_cancel_requested()) {
+      throw std::runtime_error("Canceled while awaiting path intent");
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  if (!navigo_core::epoch::finitePose(ep.planning_start) || ep.path.poses.empty() || ep.path.header.frame_id.empty() ||
+    ep.planning_start.header.frame_id != ep.path.header.frame_id) {throw std::runtime_error("Invalid typed planning path/start");}
+  for (const auto & pose : ep.path.poses) {
+    auto checked = pose;
+    checked.header = ep.planning_start.header;
+    if (!navigo_core::epoch::finitePose(checked)) {throw std::runtime_error("Nonfinite path geometry");}
+  }
+  {
+    std::lock_guard<std::mutex> lock(epoch_mutex_);
+    if (!epoch_authority_.permits(ep.token, navigo_core::epoch::steadyNow()) || ep.planning_heartbeat_sequence == 0 ||
+      ep.planning_heartbeat_sequence > epoch_authority_.localization.heartbeat_sequence ||
+      ep.path.header.frame_id != epoch_authority_.localization.output_pose.header.frame_id) {throw std::runtime_error("Path epoch/intent unavailable");}
+    const auto key = ep.token.navigation_session_id + ":" + std::to_string(ep.token.task_sequence);
+    if (ep.token.plan_sequence <= installed_plan_highwater_[key]) {throw std::runtime_error("Replayed or regressing path request");}
+    epoch_execution_active_ = false;
+  }
+  if (!findControllerId(goal.controller_id, current_controller_) || !findGoalCheckerId(goal.goal_checker_id, current_goal_checker_) ||
+    (!goal.progress_checker_id.empty() && goal.progress_checker_id != progress_checker_id_)) {throw std::runtime_error("Invalid controller/checker");}
+  const bool same_task = navigo_core::epoch::validToken(installed_token_) &&
+    installed_token_.localization == ep.token.localization && installed_token_.navigation_session_id == ep.token.navigation_session_id &&
+    installed_token_.task_sequence == ep.token.task_sequence && installed_token_.gate_session_id == ep.token.gate_session_id;
+  if (!same_task) {controllers_[current_controller_]->reset(); progress_checker_->reset();}
+  preserve_progress_on_replan_ = same_task;
+  setPlannerPath(ep.path);
+  preserve_progress_on_replan_ = false;
+  {
+    std::lock_guard<std::mutex> lock(epoch_mutex_);
+    if (!epoch_authority_.permits(ep.token, navigo_core::epoch::steadyNow())) {throw std::runtime_error("Epoch changed while installing path");}
+    installed_plan_highwater_[ep.token.navigation_session_id + ":" + std::to_string(ep.token.task_sequence)] = ep.token.plan_sequence;
+    installed_token_ = ep.token;
+    epoch_execution_active_ = true;
+  }
+  if (!epochReady(true)) {invalidateEpoch("epoch_tf_mismatch"); throw std::runtime_error("Epoch pose differs from source-stamped TF");}
+  std::lock_guard<std::mutex> lock(epoch_mutex_);
+  publishEpochExecution("installed");
+}
+
+void ControllerServer::computeEpochControl()
+{
+  std::lock_guard<std::mutex> lock(dynamic_params_lock_);
+  try {
+    auto initial_goal = epoch_action_server_->get_current_goal();
+    if (!initial_goal) {throw std::runtime_error("No active epoch goal");}
+    installEpochPath(*initial_goal);
+    last_valid_cmd_time_ = now();
+    rclcpp::WallRate rate(controller_frequency_);
+    while (rclcpp::ok() && epoch_action_server_->is_server_active()) {
+      if (epoch_action_server_->is_cancel_requested()) {
+        publishZeroVelocity(); invalidateEpoch("canceled"); epoch_action_server_->terminate_current(); break;
+      }
+      if (epoch_action_server_->is_preempt_requested()) {
+        auto pending = epoch_action_server_->accept_pending_goal();
+        if (!pending) {throw std::runtime_error("Pending epoch goal vanished");}
+        installEpochPath(*pending);
+      }
+      if (!epochReady(true)) {
+        bool plan_handoff = false;
+        {
+          std::lock_guard<std::mutex> guard(epoch_mutex_);
+          const auto & next = epoch_authority_.intent.token;
+          plan_handoff = epoch_authority_.permits(next, navigo_core::epoch::steadyNow()) &&
+            next.localization == installed_token_.localization && next.navigation_session_id == installed_token_.navigation_session_id &&
+            next.task_sequence == installed_token_.task_sequence && next.gate_session_id == installed_token_.gate_session_id &&
+            next.plan_sequence > installed_token_.plan_sequence;
+        }
+        if (plan_handoff) {rate.sleep(); continue;}
+        throw std::runtime_error("Epoch authority or source TF revoked");
+      }
+      if (!costmap_ros_->isCurrent()) {throw std::runtime_error("Costmap observations stale");}
+      computeAndPublishVelocity();
+      if (!epochReady()) {rate.sleep(); continue;}
+      if (isGoalReached()) {
+        publishZeroVelocity(); invalidateEpoch("goal_reached"); epoch_action_server_->succeeded_current(); break;
+      }
+      rate.sleep();
+    }
+  } catch (const std::exception & error) {
+    invalidateEpoch(error.what());
+    auto result = std::make_shared<EpochAction::Result>();
+    result->error_code = EpochAction::Result::INVALID_EPOCH;
+    result->error_msg = error.what();
+    epoch_action_server_->terminate_current(result);
+  }
+  invalidateEpoch("controller_idle");
+  current_path_ = nav_msgs::msg::Path();
+  epoch_cycle_valid_ = false;
+  if (controllers_.count(current_controller_)) {controllers_[current_controller_]->reset();}
+  progress_checker_->reset();
 }
 
 void ControllerServer::computeControl()
@@ -476,7 +707,7 @@ void ControllerServer::setPlannerPath(const nav_msgs::msg::Path & path)
 
   end_pose_ = path.poses.back();
   end_pose_.header.frame_id = path.header.frame_id;
-  goal_checkers_[current_goal_checker_]->reset();
+  if (!epoch_contract_ || !preserve_progress_on_replan_) {goal_checkers_[current_goal_checker_]->reset();}
 
   RCLCPP_DEBUG(
     get_logger(), "Path end point is (%.2f, %.2f)",
@@ -571,7 +802,11 @@ void ControllerServer::computeAndPublishVelocity()
 
   feedback->distance_to_goal =
     navigo_util::geometry_utils::calculate_path_length(current_path_, find_closest_pose_idx());
-  action_server_->publish_feedback(feedback);
+  if (epoch_contract_) {
+    auto epoch_feedback = std::make_shared<EpochAction::Feedback>();
+    epoch_feedback->speed = feedback->speed; epoch_feedback->distance_to_goal = feedback->distance_to_goal;
+    epoch_action_server_->publish_feedback(epoch_feedback);
+  } else {action_server_->publish_feedback(feedback);}
 
   RCLCPP_DEBUG(get_logger(), "Publishing velocity at time %.2f", now().seconds());
   publishVelocity(cmd_vel_2d);
@@ -608,6 +843,23 @@ void ControllerServer::updateGlobalPath()
 
 void ControllerServer::publishVelocity(const geometry_msgs::msg::TwistStamped & velocity)
 {
+  if (epoch_contract_) {
+    std::lock_guard<std::mutex> lock(epoch_mutex_);
+    const auto now_ns = navigo_core::epoch::steadyNow();
+    if (!epoch_execution_active_ || !epoch_cycle_valid_ || epoch_cycle_token_ != installed_token_ ||
+      !epoch_authority_.permits(installed_token_, now_ns)) {return;}
+    if (!epoch_cmd_pub_->is_activated()) {return;}
+    navigo_epoch_msgs::msg::EpochCommand command;
+    command.token = installed_token_;
+    command.controller_session_id = controller_session_;
+    command.command_sequence = ++command_sequence_;
+    command.boot_id = epoch_authority_.boot;
+    command.source_steady_time_ns = now_ns;
+    command.max_age_ms = command_ttl_ns_ / 1000000;
+    command.velocity = velocity.twist;
+    epoch_cmd_pub_->publish(command);
+    return;
+  }
   auto cmd_vel = std::make_unique<geometry_msgs::msg::Twist>(velocity.twist);
   if (vel_publisher_->is_activated() && vel_publisher_->get_subscription_count() > 0) {
     vel_publisher_->publish(std::move(cmd_vel));
@@ -766,13 +1018,15 @@ void ControllerServer::publishControllerDebug(
     }
   }
 
+  geometry_msgs::msg::PoseStamped stamped_end_pose = end_pose_;
+  if (epoch_contract_) {stamped_end_pose.header.stamp = pose.header.stamp;}
   geometry_msgs::msg::PoseStamped transformed_end_pose;
   try {
     rclcpp::Duration tolerance(
       rclcpp::Duration::from_seconds(costmap_ros_->getTransformTolerance()));
     nav_2d_utils::transformPose(
       costmap_ros_->getTfBuffer(), costmap_ros_->getGlobalFrameID(),
-      end_pose_, transformed_end_pose, tolerance);
+      stamped_end_pose, transformed_end_pose, tolerance);
   } catch (const std::exception &) {
     transformed_end_pose = end_pose_;
   }
@@ -830,11 +1084,13 @@ bool ControllerServer::isGoalReached()
   nav_2d_msgs::msg::Twist2D twist = getThresholdedTwist(odom_sub_->getTwist());
   geometry_msgs::msg::Twist velocity = nav_2d_utils::twist2Dto3D(twist);
 
+  geometry_msgs::msg::PoseStamped stamped_end_pose = end_pose_;
+  if (epoch_contract_) {stamped_end_pose.header.stamp = pose.header.stamp;}
   geometry_msgs::msg::PoseStamped transformed_end_pose;
   rclcpp::Duration tolerance(rclcpp::Duration::from_seconds(costmap_ros_->getTransformTolerance()));
   if (!nav_2d_utils::transformPose(
       costmap_ros_->getTfBuffer(), costmap_ros_->getGlobalFrameID(),
-      end_pose_, transformed_end_pose, tolerance))
+      stamped_end_pose, transformed_end_pose, tolerance))
   {
     RCLCPP_WARN_THROTTLE(
       get_logger(), *get_clock(), 2000,
@@ -850,6 +1106,13 @@ bool ControllerServer::isGoalReached()
 
 bool ControllerServer::getRobotPose(geometry_msgs::msg::PoseStamped & pose)
 {
+  if (epoch_contract_) {
+    std::lock_guard<std::mutex> lock(epoch_mutex_);
+    if (!epoch_cycle_valid_ || !epoch_execution_active_ || epoch_cycle_token_ != installed_token_ ||
+      !epoch_authority_.permits(installed_token_, navigo_core::epoch::steadyNow())) {return false;}
+    pose = epoch_cycle_pose_;
+    return true;
+  }
   geometry_msgs::msg::PoseStamped current_pose;
   if (!costmap_ros_->getRobotPose(current_pose)) {
     return false;

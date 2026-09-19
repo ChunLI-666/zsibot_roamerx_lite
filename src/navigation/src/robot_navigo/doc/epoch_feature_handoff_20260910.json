@@ -1,0 +1,179 @@
+{
+  "date": "2026-09-10",
+  "scope": "P2 localization identity to actual planning, typed path installation, source command, smoother and final gate; goal remains active. Review heads freeze implementation and tests before a subsequent navigation handoff-documents commit.",
+  "workflow": {
+    "canonical_checkouts_only": true,
+    "feature_branches_only": true,
+    "created_worktrees": false,
+    "pushed_or_merged": false,
+    "robot_motion_or_deployment": false
+  },
+  "repositories": [
+    {
+      "path": "/home/charles/project/colcon_ws/src/zsibot/zsibot_roamerx_lite",
+      "branch": "feature/forward-aligned-navigation",
+      "feature_base": "69429743ffc8a3f912eea02a4280e90cddd4431f",
+      "iteration_base": "2b8effd1aed4bb53c59e27bd2e09dccd6dd312f1",
+      "implementation_review_head_before_handoff_docs": "1a9405bdd590ccc7e7d5fb95992609d52eebc52d",
+      "new_commits": [
+        {
+          "commit": "b2c0d4e83eae7eb07642ada363755250c2519c16",
+          "subject": "feat(navigation): define typed localization and execution identity protocol"
+        },
+        {
+          "commit": "842f38f6fc9235bcc0470f4436c2d027e78c5894",
+          "subject": "feat(navigation): bind planning and tracking to immutable localization epochs"
+        },
+        {
+          "commit": "01adaa049d07e6b5d58b88285a00fb0f0eeb172f",
+          "subject": "Enforce epoch-bound controller commands through smoother and safety gate"
+        },
+        {
+          "commit": "4b8cb0304c6f4b32c9bdcefa36b12f79a1aebcfc",
+          "subject": "fix(navigation): prune visited waypoints from epoch-bound planning requests"
+        },
+        {
+          "commit": "1a9405bdd590ccc7e7d5fb95992609d52eebc52d",
+          "subject": "test(navigation): validate epoch authority with real Nav2 feedback stack"
+        }
+      ],
+      "diff_summary": "55 files changed, 6691 insertions(+), 22 deletions(-)",
+      "diff_numstat": [
+        "28\t0\tsrc/navigation/src/navigo_behavior_tree/CMakeLists.txt",
+        "6\t1\tsrc/navigation/src/navigo_behavior_tree/include/navigo_behavior_tree/bt_action_server_impl.hpp",
+        "2\t0\tsrc/navigation/src/navigo_behavior_tree/package.xml",
+        "550\t0\tsrc/navigation/src/navigo_behavior_tree/plugins/action/epoch_navigation.cpp",
+        "227\t0\tsrc/navigation/src/navigo_behavior_tree/test/test_bt_terminal_preempt.cpp",
+        "283\t0\tsrc/navigation/src/navigo_behavior_tree/test/test_epoch_bt_lineage.cpp",
+        "25\t0\tsrc/navigation/src/navigo_bt_navigator/behavior_trees/navigate_through_poses_with_epoch.xml",
+        "25\t0\tsrc/navigation/src/navigo_bt_navigator/behavior_trees/navigate_to_pose_with_epoch.xml",
+        "2\t0\tsrc/navigation/src/navigo_bt_navigator/include/navigo_bt_navigator/navigators/navigate_through_poses.hpp",
+        "2\t0\tsrc/navigation/src/navigo_bt_navigator/include/navigo_bt_navigator/navigators/navigate_to_pose.hpp",
+        "8\t0\tsrc/navigation/src/navigo_bt_navigator/src/bt_navigator.cpp",
+        "22\t2\tsrc/navigation/src/navigo_bt_navigator/src/navigators/navigate_through_poses.cpp",
+        "22\t2\tsrc/navigation/src/navigo_bt_navigator/src/navigators/navigate_to_pose.cpp",
+        "2\t0\tsrc/navigation/src/navigo_core/CMakeLists.txt",
+        "3\t0\tsrc/navigation/src/navigo_core/include/navigo_core/controller.hpp",
+        "153\t0\tsrc/navigation/src/navigo_core/include/navigo_core/epoch_contract.hpp",
+        "1\t0\tsrc/navigation/src/navigo_core/package.xml",
+        "20\t0\tsrc/navigation/src/navigo_epoch_msgs/CMakeLists.txt",
+        "21\t0\tsrc/navigation/src/navigo_epoch_msgs/action/FollowPathEpoch.action",
+        "11\t0\tsrc/navigation/src/navigo_epoch_msgs/msg/EpochCommand.msg",
+        "4\t0\tsrc/navigation/src/navigo_epoch_msgs/msg/EpochPath.msg",
+        "21\t0\tsrc/navigation/src/navigo_epoch_msgs/msg/LocalizationEpoch.msg",
+        "5\t0\tsrc/navigation/src/navigo_epoch_msgs/msg/LocalizationIdentity.msg",
+        "8\t0\tsrc/navigation/src/navigo_epoch_msgs/msg/NavExecutionState.msg",
+        "7\t0\tsrc/navigation/src/navigo_epoch_msgs/msg/NavigationIntent.msg",
+        "8\t0\tsrc/navigation/src/navigo_epoch_msgs/msg/NavigationToken.msg",
+        "17\t0\tsrc/navigation/src/navigo_epoch_msgs/package.xml",
+        "8\t0\tsrc/navigation/src/navigo_path_controller/CMakeLists.txt",
+        "34\t0\tsrc/navigation/src/navigo_path_controller/include/navigo_path_controller/controller_server.hpp",
+        "2\t0\tsrc/navigation/src/navigo_path_controller/package.xml",
+        "269\t6\tsrc/navigation/src/navigo_path_controller/src/controller_server.cpp",
+        "123\t0\tsrc/navigation/src/navigo_path_controller/test/test_epoch_authority.cpp",
+        "4\t0\tsrc/navigation/src/navigo_velocity_optimizer/CMakeLists.txt",
+        "21\t0\tsrc/navigation/src/navigo_velocity_optimizer/include/navigo_velocity_optimizer/velocity_smoother.hpp",
+        "2\t0\tsrc/navigation/src/navigo_velocity_optimizer/package.xml",
+        "89\t2\tsrc/navigation/src/navigo_velocity_optimizer/src/velocity_smoother.cpp",
+        "7\t0\tsrc/navigation/src/robot_navigo/CMakeLists.txt",
+        "75\t0\tsrc/navigation/src/robot_navigo/doc/epoch_controller_gate_implementation_20260910.md",
+        "47\t0\tsrc/navigation/src/robot_navigo/doc/epoch_navigation_contract_20260910.md",
+        "2883\t0\tsrc/navigation/src/robot_navigo/doc/epoch_navigation_integration_results_20260910.json",
+        "63\t0\tsrc/navigation/src/robot_navigo/doc/epoch_navigation_integration_review_20260910.md",
+        "1\t1\tsrc/navigation/src/robot_navigo/launch/lightning_nav_bringup.launch.py",
+        "1\t1\tsrc/navigation/src/robot_navigo/launch/zsibot_nav_bringup.launch.py",
+        "1\t0\tsrc/navigation/src/robot_navigo/package.xml",
+        "15\t0\tsrc/navigation/src/robot_navigo/params/epoch_navigation_experiment.yaml",
+        "67\t0\tsrc/navigation/src/robot_navigo/scripts/epoch_navigation_validation/README.md",
+        "81\t0\tsrc/navigation/src/robot_navigo/scripts/epoch_navigation_validation/action_delay_proxy.py",
+        "88\t0\tsrc/navigation/src/robot_navigo/scripts/epoch_navigation_validation/audit_events.py",
+        "155\t0\tsrc/navigation/src/robot_navigo/scripts/epoch_navigation_validation/fixture.py",
+        "477\t0\tsrc/navigation/src/robot_navigo/scripts/epoch_navigation_validation/run_stack.py",
+        "41\t0\tsrc/navigation/src/robot_navigo/scripts/epoch_navigation_validation/scene.py",
+        "71\t0\tsrc/navigation/src/robot_navigo/scripts/epoch_navigation_validation/test_audit.py",
+        "24\t0\tsrc/navigation/src/robot_navigo/scripts/epoch_navigation_validation/test_scene.py",
+        "287\t7\tsrc/navigation/src/robot_navigo/scripts/nav_safety_gate.py",
+        "272\t0\tsrc/navigation/src/robot_navigo/test/test_epoch_gate.py"
+      ]
+    },
+    {
+      "path": "/home/charles/project/colcon_ws/src/lightning-lm",
+      "branch": "feature/descriptor-relocalization-verification",
+      "feature_base": "c19f20b4e450ce70f87985f9750d9d491cc84e76",
+      "iteration_base": "72532e8d7834ff2617bfc12ed6f285c3722e581d",
+      "implementation_review_head_before_handoff_docs": "322f745626da496c8d462dedd76a5d6a8d1db682",
+      "new_commits": [
+        {
+          "commit": "322f745626da496c8d462dedd76a5d6a8d1db682",
+          "subject": "feat(localization): publish epoch-bound native output readiness contract"
+        }
+      ],
+      "diff_summary": "22 files changed, 1275 insertions(+), 6 deletions(-)",
+      "diff_numstat": [
+        "1\t0\tcmake/packages.cmake",
+        "662\t0\tdoc/localization_epoch_contract_results.json",
+        "116\t0\tdoc/localization_epoch_contract_review.md",
+        "1\t0\tpackage.xml",
+        "113\t0\tscripts/audit_localization_epoch_stream.py",
+        "42\t0\tscripts/test_audit_localization_epoch_stream.py",
+        "1\t0\tsrc/CMakeLists.txt",
+        "3\t0\tsrc/app/CMakeLists.txt",
+        "5\t1\tsrc/core/localization/lidar_loc/lidar_loc.cc",
+        "1\t0\tsrc/core/localization/lidar_loc/lidar_loc.h",
+        "56\t0\tsrc/core/localization/localization.cpp",
+        "12\t0\tsrc/core/localization/localization.h",
+        "78\t0\tsrc/core/localization/localization_epoch.h",
+        "3\t0\tsrc/core/localization/localization_result.h",
+        "1\t0\tsrc/core/localization/pose_graph/pgo.cc",
+        "1\t0\tsrc/core/localization/pose_graph/pgo_impl.cc",
+        "1\t0\tsrc/core/localization/pose_graph/pgo_impl.h",
+        "4\t0\tsrc/core/localization/relocalization_lifecycle.h",
+        "44\t5\tsrc/core/system/loc_system.cc",
+        "6\t0\tsrc/core/system/loc_system.h",
+        "17\t0\tsrc/core/system/localization_session.h",
+        "107\t0\tsrc/test/test_localization_epoch.cc"
+      ]
+    }
+  ],
+  "dependency": "lightning-lm now depends on navigo_epoch_msgs in the navigation feature branch. Build and review the paired branch changes together. Actual verification used ROS2 Jazzy.",
+  "verification": {
+    "navigation_bt_real_action_tests": 9,
+    "bt_terminal_preempt_test": 1,
+    "controller_authority_tests": 8,
+    "strict_gate_tests": 16,
+    "legacy_gate_tests": 9,
+    "navigation_validation_tool_tests": 14,
+    "navigation_real_stack_scenarios": 16,
+    "navigation_scope": "Real Nav2 algorithms and action servers with typed localization fixture and SE2/raycast feedback; final strict offline audit and scenario-specific action/geometry/stop checks. Canceled cases are not arrival successes.",
+    "final_normal_production_commit": "4b8cb0304c6f4b32c9bdcefa36b12f79a1aebcfc",
+    "final_normal_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_navigation_20260910/normal_final",
+    "localization_ctest_suites": 9,
+    "localization_typed_stream_tests": 6,
+    "localization_ready_heartbeats_matched_to_native_pose_and_tf": 183,
+    "localization_online_lost_to_active_sec": 19.742,
+    "localization_frozen_executable_and_library_files": 35,
+    "codacy": "Tool unavailable; not run."
+  },
+  "report_indices": [
+    {
+      "path": "/home/charles/project/colcon_ws/src/zsibot/zsibot_roamerx_lite/src/navigation/src/robot_navigo/doc/epoch_navigation_integration_results_20260910.json",
+      "sha256": "4fa050edf022273db410490a66251b5be302e6a7c8cd698a0ea862799c4cdb5a"
+    },
+    {
+      "path": "/home/charles/project/colcon_ws/src/lightning-lm/doc/localization_epoch_contract_results.json",
+      "sha256": "8322f31243225d13f780eb33527f3969bbacdf01938032ce74f3e1dfb3c74474"
+    }
+  ],
+  "remaining_risks": [
+    "Model footprint covers only documented Matrix home pose; measured gait, payload and navigation frame calibration remain incomplete. Default deployment footprint was not changed.",
+    "Descriptor alternatives beyond Pd1 not integrated; independent localization ground truth and sufficient held-out trials remain incomplete.",
+    "Smoother dynamics can change the MPPI collision-checked command; end-to-end swept-geometry validation remains incomplete.",
+    "Strict typed moving recovery is not implemented; bare Spin/BackUp are blocked.",
+    "Actual controller late ACK/current-pending cancel race, repeated-loss combinations and controller/smoother restart need additional full-stack cases.",
+    "Fixed map instance only; explicit coordinated navigation/localization map reload remains incomplete.",
+    "Command monotonic source clocks assume a common Linux boot/time domain.",
+    "Gate process failure stopping depends on lower-level watchdog; fixture timeout does not validate physical SDK stopping.",
+    "Shared LM numerical guard still needs complete SLAM/loop regression and remaining loop-caller failure handling.",
+    "RK3588 timing/resource and hardware route/gait acceptance remain outstanding."
+  ]
+}

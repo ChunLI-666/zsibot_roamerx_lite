@@ -15,6 +15,7 @@
 #include "navigo_bt_navigator/bt_navigator.hpp"
 
 #include <memory>
+#include <algorithm>
 #include <string>
 #include <utility>
 #include <set>
@@ -119,6 +120,13 @@ BtNavigator::on_configure(const rclcpp_lifecycle::State & /*state*/)
 
   // Libraries to pull plugins (BT Nodes) from
   auto plugin_lib_names = get_parameter("plugin_lib_names").as_string_array();
+  navigo_util::declare_parameter_if_not_declared(
+    this, "enable_epoch_contract", rclcpp::ParameterValue(false));
+  if (get_parameter("enable_epoch_contract").as_bool() &&
+    std::find(plugin_lib_names.begin(), plugin_lib_names.end(), "navigo_epoch_navigation_bt_node") == plugin_lib_names.end()) {
+    plugin_lib_names.push_back("navigo_epoch_navigation_bt_node");
+  }
+
 
   pose_navigator_ = std::make_unique<navigo_bt_navigator::NavigateToPoseNavigator>();
   poses_navigator_ = std::make_unique<navigo_bt_navigator::NavigateThroughPosesNavigator>();

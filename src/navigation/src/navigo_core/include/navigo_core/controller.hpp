@@ -66,6 +66,9 @@ public:
   /**
    * @brief Virtual destructor
    */
+  // Discard prediction/history when a localization epoch revokes a path.
+  virtual void reset() {}
+
   virtual ~Controller() {}
 
   /**

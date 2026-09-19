@@ -41,6 +41,7 @@
 
   <!-- Lightning Bridge dependencies -->
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>navigo_epoch_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>rosbag2_py</exec_depend>
   <exec_depend>ros2bag</exec_depend>

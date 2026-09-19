@@ -1,0 +1,25 @@
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <!-- Retain the business goal while localization is unavailable. A fresh
+         request/typed path is mandatory after every revoked gate session. -->
+    <EpochGuard recovery_wait_sec="60" mission_timeout_sec="600">
+      <RecoveryNode number_of_retries="6" name="EpochNavigationRecovery">
+        <PipelineSequence name="EpochNavigateWithReplanning">
+          <RateController hz="1.0">
+            <Sequence>
+              <EpochComputePathThroughPoses goals="{goals}" epoch_path="{epoch_raw_path}" planner_id="GridBased"/>
+              <EpochSmoothPath input_path="{epoch_raw_path}" epoch_path="{epoch_path}" path="{path}"
+                               smoother_id="simple_smoother" max_smoothing_duration="0.2"/>
+            </Sequence>
+          </RateController>
+          <EpochFollowPath epoch_path="{epoch_path}" controller_id="FollowPath"/>
+        </PipelineSequence>
+        <Sequence name="NonmovingRecovery">
+          <ClearEntireCostmap name="ClearLocalCostmap-Epoch" service_name="local_costmap/clear_entirely_local_costmap"/>
+          <ClearEntireCostmap name="ClearGlobalCostmap-Epoch" service_name="global_costmap/clear_entirely_global_costmap"/>
+          <Wait wait_duration="1"/>
+        </Sequence>
+      </RecoveryNode>
+    </EpochGuard>
+  </BehaviorTree>
+</root>

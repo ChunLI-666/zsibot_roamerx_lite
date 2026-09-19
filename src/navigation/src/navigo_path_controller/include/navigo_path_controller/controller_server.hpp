@@ -23,6 +23,10 @@
 #include <mutex>
 
 #include "navigo_core/controller.hpp"
+#include "navigo_core/epoch_contract.hpp"
+#include "navigo_epoch_msgs/action/follow_path_epoch.hpp"
+#include "navigo_epoch_msgs/msg/nav_execution_state.hpp"
+#include "std_msgs/msg/string.hpp"
 #include "navigo_core/progress_checker.hpp"
 #include "navigo_core/goal_checker.hpp"
 #include "navigo_costmap_2d/costmap_2d_ros.hpp"
@@ -110,6 +114,36 @@ protected:
 
   using Action = nav2_msgs::action::FollowPath;
   using ActionServer = navigo_util::SimpleActionServer<Action>;
+
+  using EpochAction = navigo_epoch_msgs::action::FollowPathEpoch;
+  using EpochActionServer = navigo_util::SimpleActionServer<EpochAction>;
+  void computeEpochControl();
+  void installEpochPath(const EpochAction::Goal & goal);
+  bool epochReady(bool verify_tf = false);
+  void publishEpochExecution(const std::string & reason);
+  void invalidateEpoch(const std::string & reason);
+  void configureEpoch();
+  bool epoch_contract_{false};
+  navigo_core::epoch::Authority epoch_authority_;
+  std::mutex epoch_mutex_;
+  navigo_epoch_msgs::msg::NavigationToken installed_token_;
+  bool epoch_execution_active_{false};
+  geometry_msgs::msg::PoseStamped epoch_cycle_pose_;
+  navigo_epoch_msgs::msg::NavigationToken epoch_cycle_token_;
+  bool epoch_cycle_valid_{false};
+  bool preserve_progress_on_replan_{false};
+  std::string controller_session_{navigo_core::epoch::sessionId()};
+  uint64_t command_sequence_{0}, execution_sequence_{0};
+  uint64_t command_ttl_ns_{300000000};
+  double epoch_tf_position_tolerance_{1e-5}, epoch_tf_angle_tolerance_{1e-5};
+  std::unordered_map<std::string, uint64_t> installed_plan_highwater_;
+  std::unique_ptr<EpochActionServer> epoch_action_server_;
+  rclcpp_lifecycle::LifecyclePublisher<navigo_epoch_msgs::msg::EpochCommand>::SharedPtr epoch_cmd_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<navigo_epoch_msgs::msg::NavExecutionState>::SharedPtr epoch_execution_pub_;
+  rclcpp::Subscription<navigo_epoch_msgs::msg::LocalizationEpoch>::SharedPtr epoch_loc_sub_;
+  rclcpp::Subscription<navigo_epoch_msgs::msg::NavigationIntent>::SharedPtr epoch_intent_sub_;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr epoch_gate_sub_;
+  rclcpp::TimerBase::SharedPtr epoch_timer_;
 
   // Our action server implements the FollowPath action
   std::unique_ptr<ActionServer> action_server_;

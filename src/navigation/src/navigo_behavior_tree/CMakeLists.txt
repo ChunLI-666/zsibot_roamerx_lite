@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.5)
 project(navigo_behavior_tree CXX)
 
 find_package(ament_cmake REQUIRED)
+find_package(ament_index_cpp REQUIRED)
 find_package(nav2_common REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
@@ -17,6 +18,7 @@ find_package(tf2_geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(navigo_util REQUIRED)
+find_package(navigo_epoch_msgs REQUIRED)
 
 nav2_package()
 
@@ -32,6 +34,7 @@ include_directories(
 set(library_name ${PROJECT_NAME})
 
 set(dependencies
+  ament_index_cpp
   rclcpp
   rclcpp_action
   rclcpp_lifecycle
@@ -46,6 +49,7 @@ set(dependencies
   std_msgs
   std_srvs
   navigo_util
+  navigo_epoch_msgs
 )
 
 add_library(${library_name} SHARED
@@ -58,6 +62,10 @@ ament_target_dependencies(${library_name}
 
 add_library(navigo_compute_path_to_pose_action_bt_node SHARED plugins/action/compute_path_to_pose_action.cpp)
 list(APPEND plugin_libs navigo_compute_path_to_pose_action_bt_node)
+
+add_library(navigo_epoch_navigation_bt_node SHARED plugins/action/epoch_navigation.cpp)
+target_compile_features(navigo_epoch_navigation_bt_node PRIVATE cxx_std_17)
+list(APPEND plugin_libs navigo_epoch_navigation_bt_node)
 
 add_library(navigo_compute_path_through_poses_action_bt_node SHARED plugins/action/compute_path_through_poses_action.cpp)
 list(APPEND plugin_libs navigo_compute_path_through_poses_action_bt_node)
@@ -234,5 +242,25 @@ ament_export_libraries(
 )
 
 ament_export_dependencies(${dependencies})
+
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_epoch_bt_lineage test/test_epoch_bt_lineage.cpp TIMEOUT 60)
+  ament_target_dependencies(test_epoch_bt_lineage ${dependencies})
+  target_compile_features(test_epoch_bt_lineage PRIVATE cxx_std_17)
+  target_compile_definitions(test_epoch_bt_lineage PRIVATE
+    EPOCH_PLUGIN_PATH="$<TARGET_FILE:navigo_epoch_navigation_bt_node>")
+  add_dependencies(test_epoch_bt_lineage navigo_epoch_navigation_bt_node)
+  set_tests_properties(test_epoch_bt_lineage PROPERTIES
+    ENVIRONMENT "ROS_DOMAIN_ID=192;ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST"
+    RUN_SERIAL TRUE)
+  ament_add_gtest(test_bt_terminal_preempt test/test_bt_terminal_preempt.cpp TIMEOUT 30)
+  ament_target_dependencies(test_bt_terminal_preempt ${dependencies})
+  target_link_libraries(test_bt_terminal_preempt ${library_name})
+  target_compile_features(test_bt_terminal_preempt PRIVATE cxx_std_17)
+  set_tests_properties(test_bt_terminal_preempt PROPERTIES
+    ENVIRONMENT "ROS_DOMAIN_ID=193;ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST"
+    RUN_SERIAL TRUE)
+endif()
 
 ament_package()
