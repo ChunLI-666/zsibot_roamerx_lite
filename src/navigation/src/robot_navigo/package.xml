@@ -28,6 +28,9 @@
   <exec_depend>nav_msgs</exec_depend>
   <exec_depend>OpenCV</exec_depend>
   <exec_depend>yaml-cpp</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-scipy</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
   <exec_depend>navigo_behavior_tree</exec_depend>
   <exec_depend>navigo_bt_navigator</exec_depend>
   <exec_depend>navigo_core</exec_depend>
@@ -38,6 +41,10 @@
 
   <!-- Lightning Bridge dependencies -->
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>rosbag2_py</exec_depend>
+  <exec_depend>ros2bag</exec_depend>
+  <exec_depend>rosbag2_storage_mcap</exec_depend>
   <exec_depend>lifecycle_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>std_srvs</exec_depend>

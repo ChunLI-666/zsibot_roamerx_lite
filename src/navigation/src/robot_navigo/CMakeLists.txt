@@ -251,6 +251,11 @@ install(PROGRAMS
         scripts/matrix_localization_batch.py
         scripts/matrix_mapping_batch.py
         scripts/map_coverage.py
+        scripts/zsl1_envelope.py
+        scripts/zsl1_merge_params.py
+        scripts/prepare_localization_dropout_bag.py
+        scripts/run_localization_online_trial.py
+        scripts/zsl1_recording_inventory.py
         DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -332,6 +337,29 @@ if(BUILD_TESTING)
     target_include_directories(test_livox_scan_projection PRIVATE include)
     ament_add_gtest(test_motion_limits test/test_motion_limits.cpp)
     target_include_directories(test_motion_limits PRIVATE include)
+    add_test(
+            NAME test_nav_safety_gate
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_nav_safety_gate.py)
+    set_tests_properties(test_nav_safety_gate PROPERTIES
+            ENVIRONMENT "ROS_DOMAIN_ID=182;ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST"
+            RUN_SERIAL TRUE TIMEOUT 30)
+    add_test(
+            NAME test_zsl1_envelope
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/scripts/zsl1_test_envelope.py)
+    set_tests_properties(test_zsl1_envelope PROPERTIES TIMEOUT 120)
+    add_test(
+            NAME test_recorded_costmap
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_recorded_costmap.py)
+    add_test(
+            NAME test_localization_trial_tools
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_localization_trial_tools.py)
+    set_tests_properties(test_localization_trial_tools PROPERTIES
+            ENVIRONMENT "ROS_DOMAIN_ID=187;ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST"
+            RUN_SERIAL TRUE TIMEOUT 60)
     add_test(
             NAME test_navigation_contract
             COMMAND ${Python3_EXECUTABLE}

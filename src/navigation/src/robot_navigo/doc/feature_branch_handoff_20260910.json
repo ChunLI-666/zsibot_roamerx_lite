@@ -1,0 +1,166 @@
+{
+  "date": "2026-09-10",
+  "scope": "Feature branches retained in canonical checkouts, no worktrees, merge, push, or robot motion. This manifest freezes implementation review heads before the final navigation handoff documentation commit.",
+  "repositories": [
+    {
+      "repository": "navigation",
+      "path": "/home/charles/project/colcon_ws/src/zsibot/zsibot_roamerx_lite",
+      "branch": "feature/forward-aligned-navigation",
+      "feature_base_commit": "69429743ffc8a3f912eea02a4280e90cddd4431f",
+      "this_goal_iteration_base_commit": "5c4958710b749a01a3b154d17083c0e0d0a9e460",
+      "implementation_review_head": "c339d1c3281eb759b5aad9bb646bf3ad32791206",
+      "commits_since_feature_base": [
+        {
+          "commit": "62409554c726e8d97ffc748241d311e2828f7492",
+          "subject": "feat(navigation): add gated forward alignment and executable MPPI controls"
+        },
+        {
+          "commit": "403235859d5800076085daf830ee2f435fb81f1b",
+          "subject": "fix(navigation): preserve absolute speed limits across dynamic resets"
+        },
+        {
+          "commit": "c013562e42bc2ebe184666b1a490881791e69e48",
+          "subject": "test(navigation): add production controller feedback and recorded geometry trials"
+        },
+        {
+          "commit": "d2ed7f23c809a92a05c2334606bd4daba00465f0",
+          "subject": "fix(navigation): seed executable forward motion at minimum speed limits"
+        },
+        {
+          "commit": "8175c18223213c244e1f990ad0af563149e5f15c",
+          "subject": "test(navigation): record feedback validation and reject invalid success artifacts"
+        },
+        {
+          "commit": "b873e66fe0a8064b3b3dbe3235ed1bd7b99ed948",
+          "subject": "docs: record feature development split and map provenance audit"
+        },
+        {
+          "commit": "5c4958710b749a01a3b154d17083c0e0d0a9e460",
+          "subject": "docs: finalize feature replay and controller feedback review results"
+        },
+        {
+          "commit": "0d5e492eb27095071dc254128e0048e63bd11444",
+          "subject": "docs: define ZSL-1 phased localization and navigation goal"
+        },
+        {
+          "commit": "ca7a19243f6a7dbc83aa0e3e02fc748090805369",
+          "subject": "fix(navigation): stop immediately on localization loss with steady watchdogs"
+        },
+        {
+          "commit": "9391748effc54890a0b413d028230e492c4c0e56",
+          "subject": "test(navigation): reconstruct recorded local costmaps for reverse scenarios"
+        },
+        {
+          "commit": "658c2828b189af8c396330f8cb819931d66e852e",
+          "subject": "feat(navigation): derive reproducible ZSL-1 model footprint experiments"
+        },
+        {
+          "commit": "0632e26654080cb46eae5580c39e95581f2c892b",
+          "subject": "test(navigation): validate model footprints with controller feedback and independent SAT"
+        },
+        {
+          "commit": "931929a2527ba9fc639cb3fe68fcddf149c362d7",
+          "subject": "docs(navigation): reproduce controller experiments in fresh output directories"
+        },
+        {
+          "commit": "c339d1c3281eb759b5aad9bb646bf3ad32791206",
+          "subject": "fix(navigation): preserve isolated dropout trial evidence and reject premature node exit"
+        }
+      ],
+      "commits_this_iteration": [
+        "0d5e492eb27095071dc254128e0048e63bd11444",
+        "ca7a19243f6a7dbc83aa0e3e02fc748090805369",
+        "9391748effc54890a0b413d028230e492c4c0e56",
+        "658c2828b189af8c396330f8cb819931d66e852e",
+        "0632e26654080cb46eae5580c39e95581f2c892b",
+        "931929a2527ba9fc639cb3fe68fcddf149c362d7",
+        "c339d1c3281eb759b5aad9bb646bf3ad32791206"
+      ],
+      "diff_summary_since_feature_base": "57 files changed, 6961 insertions(+), 44 deletions(-)",
+      "diff_summary_this_iteration": "37 files changed, 5486 insertions(+), 55 deletions(-)",
+      "worktree_status_before_handoff_docs": "M src/navigation/src/robot_navigo/doc/project_goal_20260910.md\n?? src/navigation/src/robot_navigo/doc/goal_progress_20260910.md"
+    },
+    {
+      "repository": "relocalization",
+      "path": "/home/charles/project/colcon_ws/src/lightning-lm",
+      "branch": "feature/descriptor-relocalization-verification",
+      "feature_base_commit": "c19f20b4e450ce70f87985f9750d9d491cc84e76",
+      "this_goal_iteration_base_commit": "1e51919500959ba4bd3e2eb0d90f04d2ddfd2d94",
+      "implementation_review_head": "72532e8d7834ff2617bfc12ed6f285c3722e581d",
+      "commits_since_feature_base": [
+        {
+          "commit": "94748d6e0a8bb3c07b2c8a42e415ecf889659e17",
+          "subject": "chore: preserve existing batch relocalization evaluation baseline"
+        },
+        {
+          "commit": "8ffa50e2e7f65521e94c58ddd588e775156e3ec7",
+          "subject": "feat: verify and temporally cluster descriptor relocalization hypotheses"
+        },
+        {
+          "commit": "d752488981c91198c9632e226d281bc319ebdaeb",
+          "subject": "test: add geometry-first replay diagnostics and reject reference outages"
+        },
+        {
+          "commit": "82fbce104c86ad5ea9442c89b099a16cf8cb1763",
+          "subject": "fix: require verified map gauge before scoring recorded localization poses"
+        },
+        {
+          "commit": "26befa7a036df59ac681bdbe5fe9b20f879f6f6a",
+          "subject": "fix: preserve verified scan time and winning map target at initialization commit"
+        },
+        {
+          "commit": "aef739d085a38bfdf6fe53d89910e5bc906e75f3",
+          "subject": "test: score held-out replays against a mapping-only estimated reference gauge"
+        },
+        {
+          "commit": "a01f035510c9c0889bdcd848173aabf3c84c0a95",
+          "subject": "test: expose candidate ranks and map-generation assumptions in replay summaries"
+        },
+        {
+          "commit": "1e51919500959ba4bd3e2eb0d90f04d2ddfd2d94",
+          "subject": "docs: freeze relocalization replay matrix and review limitations"
+        },
+        {
+          "commit": "253a0f03f211ef7d26208d763b5d2e5f5687c4c8",
+          "subject": "feat(localization): enforce epoch-bound retrieval and recovery lifecycle"
+        },
+        {
+          "commit": "72532e8d7834ff2617bfc12ed6f285c3722e581d",
+          "subject": "fix(localization): reject failed numerical fusion without blocking valid LM retries"
+        }
+      ],
+      "commits_this_iteration": [
+        "253a0f03f211ef7d26208d763b5d2e5f5687c4c8",
+        "72532e8d7834ff2617bfc12ed6f285c3722e581d"
+      ],
+      "diff_summary_since_feature_base": "44 files changed, 4465 insertions(+), 56 deletions(-)",
+      "diff_summary_this_iteration": "27 files changed, 2101 insertions(+), 45 deletions(-)",
+      "worktree_status_before_handoff_docs": ""
+    }
+  ],
+  "baseline_note": "lightning-lm commit 94748d6 preserves pre-existing user evaluation changes; do not attribute that baseline wholesale to this iteration.",
+  "tests": {
+    "navigation": [
+      "robot_navigo build passed",
+      "Four prior CTest suites passed: safety gate, model envelope, recorded costmap, navigation contract",
+      "New localization trial tools suite: 10 tests passed without skips",
+      "Final two-footprint controller matrix: 459 trials; model reachable 42/42; recorded-context 9/9"
+    ],
+    "relocalization": [
+      "Final nine CTest suites passed, including five numerical failure/recovery cases",
+      "Six strict lifecycle evidence tests passed",
+      "Normal and injected dropout offline replay passed; held-out August short bag 18 accepts",
+      "Complete-library-snapshot isolated online replay: runner passed, strict lifecycle recovery passed; 37 source/binary files unchanged"
+    ]
+  },
+  "remaining_risks": [
+    "Model home posture only; physical gait, payload, frame alignment and door clearance remain unmeasured",
+    "No epoch-to-new-plan acknowledgement before navigation re-enablement",
+    "Frozen historical costmap/control feedback is not dynamic full-navigation-stack or robot validation",
+    "Independent localization truth, held-out route coverage and RK3588 timing/resource acceptance remain",
+    "Shared miao LM changed; complete SLAM/loop-closure datasets were not replayed; loop caller failure handling remains separate",
+    "Intermediate Cholesky retries persisted; numerical finite-result guard is not complete geometric convergence/degeneracy validation",
+    "Final online LOST-to-ACTIVE 19.807 seconds on one desktop; route latency target not proven",
+    "Codacy MCP unavailable, not run"
+  ]
+}

@@ -17,14 +17,42 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--workspace', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--footprint-file', type=Path, default=Path(__file__).with_name('legacy_footprint.yaml'))
+    parser.add_argument('--geometry-cases', action='store_true')
+    parser.add_argument('--recorded-costmap-dir', type=Path)
     args = parser.parse_args()
     root, out = args.workspace.resolve(), args.output.resolve()
     out.mkdir(parents=True, exist_ok=True)
+    footprint_file = args.footprint_file.resolve()
+    footprint_text = footprint_file.read_bytes()
+    footprint_config = yaml.safe_load(footprint_text)
+    if footprint_config['frame_id'] != 'base_link':
+        raise ValueError('Expected base_link footprint')
+    raw_polygon = np.asarray(footprint_config['footprint'], dtype=float)
+    padding = float(footprint_config['footprint_padding'])
+    if not np.isfinite(raw_polygon).all() or not np.isfinite(padding) or padding < 0:
+        raise ValueError('Invalid footprint configuration')
+    effective_polygon = raw_polygon + np.sign(raw_polygon)*padding
+    edges = np.roll(effective_polygon, -1, axis=0)-effective_polygon
+    inscribed_radius = float(np.min(np.abs(np.cross(edges, -effective_polygon))/np.linalg.norm(edges, axis=1)))
+    circumscribed_radius = float(np.max(np.linalg.norm(effective_polygon, axis=1)))
+    inflation_radius = float(footprint_config.get('inflation_radius', .4))
+    if inflation_radius < circumscribed_radius:
+        raise ValueError('Inflation support must cover the footprint circumradius')
+    footprint_metadata = dict(source_file=str(footprint_file), source_sha256=hashlib.sha256(footprint_text).hexdigest(),
+        raw_polygon=raw_polygon.tolist(), footprint_padding=padding, effective_polygon=effective_polygon.tolist(),
+        inscribed_radius=inscribed_radius, circumscribed_radius=circumscribed_radius, inflation_radius=inflation_radius,
+        envelope_kind=footprint_config.get('envelope_kind'), assumptions=footprint_config.get('assumptions', []))
     repo = root/'src/zsibot/zsibot_roamerx_lite'
     rel = 'src/navigation/src/robot_navigo/params/navigo_params.yaml'
     base = yaml.safe_load(subprocess.check_output(['git', '-C', str(repo), 'show', '6942974:'+rel]))
     # Keep controller settings from the 0829 branch baseline. Only test-time clock
     # and reproducible noise options differ for both variants.
+    for name in ('local_costmap', 'global_costmap'):
+        costmap = base[name][name]['ros__parameters']
+        costmap['footprint'] = json.dumps(footprint_config['footprint'])
+        costmap['footprint_padding'] = padding
+        costmap['inflation_layer']['inflation_radius'] = inflation_radius
     cp = base['controller_server']['ros__parameters']
     cp['use_sim_time'] = True
     cp['general_goal_checker'] = dict(plugin='navigo_path_controller::StoppedGoalChecker', stateful=False, xy_goal_tolerance=.25, yaw_goal_tolerance=.25, trans_stopped_velocity=.01, rot_stopped_velocity=.01)
@@ -48,8 +76,8 @@ def main():
     cost = np.where(free, 0, np.where(obstacle, 254, 255)).astype(np.uint8)
     # Frozen static occupancy and identical exponential inflation for both arms.
     distance = distance_transform_edt(np.pad(free, 1, constant_values=False))[1:-1,1:-1]*meta['resolution']
-    inflation = np.where(distance <= .16, 253, 252*np.exp(-3*(distance-.16)))
-    cost = np.where(free & (distance <= .4), np.maximum(cost, inflation), cost).astype(np.uint8)
+    inflation = np.where(distance <= inscribed_radius, 253, 252*np.exp(-3*(distance-inscribed_radius)))
+    cost = np.where(free & (distance <= inflation_radius), np.maximum(cost, inflation), cost).astype(np.uint8)
     np.flipud(cost).tofile(out/'warehouse.costmap')
     map_spec = dict(width=cost.shape[1], height=cost.shape[0], resolution=meta['resolution'],
                     origin_x=meta['origin'][0], origin_y=meta['origin'][1], data=str(out/'warehouse.costmap'))
@@ -66,7 +94,8 @@ def main():
     clearance, iy, ix = max(candidates)
     x = meta['origin'][0]+(ix+.5)*meta['resolution']
     y = meta['origin'][1]+(free.shape[0]-iy-.5)*meta['resolution']
-    common = dict(map=map_spec, dt=.1, steps=1800, deadband=True)
+    common = dict(map=map_spec, dt=.1, steps=1800, deadband=True,
+        footprint_file=str(footprint_file), footprint_sha256=footprint_metadata['source_sha256'])
     path = [[float(x+s), y, 0] for s in np.linspace(0, 2, 81)]
     cases = []
     for deg in (0, 45, 90, 135, 180):
@@ -108,15 +137,31 @@ def main():
         cases.append(dict(common,name='0829_'+name+'_shadow',initial=initial,path=p['poses'],map=geometry,
                           steps=len(rows),shadow_stamps=[r['stamp'] for r in rows],shadow=[[r['x'],r['y'],r['yaw'],*r['current_velocity']] for r in rows],
                           source_time=r['t'],historical_context='fixed_initial_path_historical_poses_no_recorded_costmap'))
+    if args.recorded_costmap_dir:
+        for label in ('reverse_10s','reverse_14s','reverse_20s'):
+            snapshot_file=args.recorded_costmap_dir/(label+'.json')
+            snapshot=json.loads(snapshot_file.read_text())
+            if snapshot['frame'] != 'odom':
+                raise ValueError('Recorded costmap frame must match recorded local path: odom')
+            if hashlib.sha256(Path(snapshot['map']['data']).read_bytes()).hexdigest() != snapshot['sha256']:
+                raise ValueError('Recorded costmap hash mismatch')
+            source=next(case for case in cases if case['name']=='0829_'+label)
+            cases.append(dict(source,name='recorded_context_'+label,map=snapshot['map'],
+                expected_behavior='recorded_context',recorded_costmap=snapshot,
+                historical_context='frozen recorded rolling costmap; historical inflation/self-clearing retained'))
+    if args.geometry_cases:
+        from geometry_cases import add_geometry_cases
+        add_geometry_cases(cases, common, out, effective_polygon)
     for case in cases:
         for seed in (42,43,44):
             target=out/f"{case['name']}_seed{seed}.yaml"
             target.write_text(yaml.safe_dump(dict(case,seed=seed)))
     (out/'manifest.json').write_text(json.dumps(dict(map=str(map_path),map_sha256=hashlib.sha256((map_path.parent/meta['image']).read_bytes()).hexdigest(),
         extracted_sha256=hashlib.sha256(extracted.read_bytes()).hexdigest(),base_commit='6942974',
+        footprint=footprint_metadata, map_resolution_m=meta['resolution'],
         segment=[x,y,x+2,y],minimum_segment_clearance=clearance,case_names=[c['name'] for c in cases],
         limitations=['ideal SE2 plant; no MuJoCo or real quadruped dynamics','frozen static map, no dynamic obstacles, perception, TF latency, global planner, BT or SDK',
-                     '0829 uses actual initial pose/path, but no reconstructed recorded costmap; closed-loop starts stationary',
+                     '0829 geometry-only cases use empty maps; separate recorded_context cases retain historical frozen inflation/self-clearing; all feedback starts stationary',
                      'shadow uses each recorded pose with fixed first local path; tests C++ decisions, not navigation success',
                      'real StoppedGoalChecker for both groups .25m/.25rad/.01m_s/.01rad_s, stateful=false; current command must also be stopped']),indent=2))
 

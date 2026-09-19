@@ -1,0 +1,151 @@
+schema_version: 1
+source:
+  kind: matrix_mjcf_home_keyframe
+  path: /home/charles/project/colcon_ws/src/zsibot/matrix/src/robot_mujoco/jszr_robots/xgb/xgb.xml
+  sha256: 719c1ec115da98adb2c516619ccd4a4b27314a0d701a51dd3ac21a4272d43bce
+  keyframe: home
+  qpos:
+  - 0.0
+  - 0.0
+  - 0.27
+  - 1.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.9
+  - -1.8
+  - 0.0
+  - 0.9
+  - -1.8
+  - 0.0
+  - 0.9
+  - -1.8
+  - 0.0
+  - 0.9
+  - -1.8
+  joint_mapping:
+  - matrix_joint: FAR_ABAD_JOINT
+    urdf_joint: FR_ABAD_JOINT
+    position_rad: 0.0
+  - matrix_joint: FAR_HIP_JOINT
+    urdf_joint: FR_HIP_JOINT
+    position_rad: 0.9
+  - matrix_joint: FAR_KNEE_JOINT
+    urdf_joint: FR_KNEE_JOINT
+    position_rad: -1.8
+  - matrix_joint: FBL_ABAD_JOINT
+    urdf_joint: FL_ABAD_JOINT
+    position_rad: 0.0
+  - matrix_joint: FBL_HIP_JOINT
+    urdf_joint: FL_HIP_JOINT
+    position_rad: 0.9
+  - matrix_joint: FBL_KNEE_JOINT
+    urdf_joint: FL_KNEE_JOINT
+    position_rad: -1.8
+  - matrix_joint: RAR_ABAD_JOINT
+    urdf_joint: RR_ABAD_JOINT
+    position_rad: 0.0
+  - matrix_joint: RAR_HIP_JOINT
+    urdf_joint: RR_HIP_JOINT
+    position_rad: 0.9
+  - matrix_joint: RAR_KNEE_JOINT
+    urdf_joint: RR_KNEE_JOINT
+    position_rad: -1.8
+  - matrix_joint: RBL_ABAD_JOINT
+    urdf_joint: RL_ABAD_JOINT
+    position_rad: 0.0
+  - matrix_joint: RBL_HIP_JOINT
+    urdf_joint: RL_HIP_JOINT
+    position_rad: 0.9
+  - matrix_joint: RBL_KNEE_JOINT
+    urdf_joint: RL_KNEE_JOINT
+    position_rad: -1.8
+  matching_assets:
+  - filename: BASE_LINK.STL
+    sha256: 0845e10816311dc00dbb5a0ed093e4a8cdc9d2daa0cf9a5d103354b04eaab874
+  - filename: FL_ABAD_LINK.STL
+    sha256: 85acafd444f4c1c5b35266d093a11700cbd80d4a9559f00901eff2b00a35366d
+  - filename: FL_HIP_LINK.STL
+    sha256: cc3036aada22acbfe56ebbd3930639f47880e6c986fe67d6f386e5d67e951721
+  - filename: FL_KNEE_LINK.STL
+    sha256: 0a2b3bbe4c3cec2eb15312b3ef036e52cde50e306d8ff493c34dedd410f4d15a
+  - filename: FL_FOOT_LINK.STL
+    sha256: 3a1da8fd732b6679cee143892e63d9dcf77092071f0558ffb807477e3db95dc1
+  - filename: FR_ABAD_LINK.STL
+    sha256: 7691e27794b177db4d018ab445456064c251e1b47e1cbc71f2791eb6fd1df844
+  - filename: FR_HIP_LINK.STL
+    sha256: 4c816659c647ea868f37edac10599aebfe9cbae7b137e0e16a4cfff71ee026fd
+  - filename: FR_KNEE_LINK.STL
+    sha256: 0a2b3bbe4c3cec2eb15312b3ef036e52cde50e306d8ff493c34dedd410f4d15a
+  - filename: FR_FOOT_LINK.STL
+    sha256: 3a1da8fd732b6679cee143892e63d9dcf77092071f0558ffb807477e3db95dc1
+  - filename: RR_ABAD_LINK.STL
+    sha256: 15538786381b8ca78ff1bdccb215f495d46f6ec20d1ec56d45208684f7d62e06
+  - filename: RR_HIP_LINK.STL
+    sha256: 4c816659c647ea868f37edac10599aebfe9cbae7b137e0e16a4cfff71ee026fd
+  - filename: RR_KNEE_LINK.STL
+    sha256: 0a2b3bbe4c3cec2eb15312b3ef036e52cde50e306d8ff493c34dedd410f4d15a
+  - filename: RR_FOOT_LINK.STL
+    sha256: 3a1da8fd732b6679cee143892e63d9dcf77092071f0558ffb807477e3db95dc1
+  - filename: RL_ABAD_LINK.STL
+    sha256: cff84d06b06b742d0f110e64bc545364c9849c2717c6c95b2cc756039938dc3e
+  - filename: RL_HIP_LINK.STL
+    sha256: cc3036aada22acbfe56ebbd3930639f47880e6c986fe67d6f386e5d67e951721
+  - filename: RL_KNEE_LINK.STL
+    sha256: 0a2b3bbe4c3cec2eb15312b3ef036e52cde50e306d8ff493c34dedd410f4d15a
+  - filename: RL_FOOT_LINK.STL
+    sha256: 3a1da8fd732b6679cee143892e63d9dcf77092071f0558ffb807477e3db95dc1
+root_frame: BASE_LINK
+frame_id: base_link
+navigation_from_root:
+  xyz:
+  - 0
+  - 0
+  - 0
+  rpy:
+  - 0
+  - 0
+  - 0
+  evidence: Matching Matrix base_link / URDF BASE_LINK mesh and kinematic origins;
+    model-only identity convention
+  hardware_verified: false
+footprint_padding: 0.01
+padding_reason: Existing controller experiment costmap padding, not a measured gait
+  allowance
+payloads: []
+payloads_verified: false
+motion_envelope_verified: false
+supported_samples:
+- static_matrix_home
+excluded_modes:
+- physical_stance_variation
+- forward_gait
+- turning_gait
+- lateral_gait
+- recovery_gait
+samples:
+- name: matrix_home
+  joints:
+    FR_ABAD_JOINT: 0.0
+    FR_HIP_JOINT: 0.9
+    FR_KNEE_JOINT: -1.8
+    FL_ABAD_JOINT: 0.0
+    FL_HIP_JOINT: 0.9
+    FL_KNEE_JOINT: -1.8
+    RR_ABAD_JOINT: 0.0
+    RR_HIP_JOINT: 0.9
+    RR_KNEE_JOINT: -1.8
+    RL_ABAD_JOINT: 0.0
+    RL_HIP_JOINT: 0.9
+    RL_KNEE_JOINT: -1.8
+  root_rpy:
+  - 0
+  - 0
+  - 0
+  source_timestamp: null
+assumptions:
+- No sensor or payload envelope is present in this URDF.
+- The Matrix home keyframe is model evidence, not recorded physical robot joint feedback.
+- Navigation frame identity and level root are model conventions; verify physical
+  TF and mounting before deployment.

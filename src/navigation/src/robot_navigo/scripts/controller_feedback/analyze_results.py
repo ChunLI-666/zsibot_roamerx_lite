@@ -11,7 +11,9 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 
-def kind(name):
+def kind(name, row=None):
+    if row and row.get("expected_behavior"):
+        return row["expected_behavior"]
     if 'shadow' in name:
         return 'shadow'
     if 'blocked_rotation' in name or 'tiny_limit' in name:
@@ -28,11 +30,18 @@ def main():
     for group, rows in groups.items():
         if set(rows) != expected:
             raise SystemExit(f'{group}: incomplete case matrix; wait for runner completion')
-    result={}
+        if any(row.get('error') for row in rows.values()):
+            raise SystemExit(f'{group}: runner errors; matrix is invalid, inspect summary.json')
+    manifest=json.loads((root/'cases/manifest.json').read_text())
+    expected_hash=manifest['footprint']['source_sha256']
+    for group, rows in groups.items():
+        if not all(row.get('footprint_verified') and row['footprint']['source_sha256']==expected_hash for row in rows.values()):
+            raise SystemExit(f'{group}: footprint provenance mismatch')
+    result={'footprint':manifest['footprint']}
     for name,rows in groups.items():
         result[name]={}
-        for category in ('reachable_feedback','shadow','intentional_hold'):
-            picked={k:v for k,v in rows.items() if kind(k)==category}
+        for category in ('reachable_feedback','shadow','intentional_hold','blocked_geometry','invalid_initial_state','recorded_context','clearance_limited'):
+            picked={k:v for k,v in rows.items() if kind(k,v)==category}
             result[name][category]=dict(trials=len(picked),successful_endpoints=sum(v['success'] for v in picked.values()),
                 negative_raw_vx_samples=sum(v['negative_raw_vx_samples'] for v in picked.values()),
                 samples=sum(v['samples'] for v in picked.values()),collisions=sum(v['collisions'] for v in picked.values()),
@@ -77,10 +86,17 @@ def main():
     checks={}
     for case in root.glob('candidate/*.csv'):
         rows=list(csv.DictReader(case.open()))
+        expected_behavior=groups['candidate'][case.stem]['expected_behavior']
         checks[case.stem]=dict(nonnegative_vx=all(float(r['raw_vx'])>=-1e-6 for r in rows),
             zero_lateral=all(abs(float(r['raw_vy']))<=1e-6 for r in rows),
             executable_yaw=all(abs(float(r['raw_wz']))<=1e-6 or abs(float(r['raw_wz']))>=.02-1e-6 for r in rows),
-            no_collision=all(r['collision']=='0' for r in rows))
+            no_collision=all(r['collision']=='0' for r in rows) if expected_behavior!='invalid_initial_state' and not groups['candidate'][case.stem]['footprint'].get('initial_pose_collision') else
+                len(rows)==1 and all(abs(float(rows[0][axis]))<=1e-6 for axis in ('raw_vx','raw_vy','raw_wz')),
+            footprint_verified=groups['candidate'][case.stem]['footprint_verified'])
+        if expected_behavior == 'reachable_feedback':
+            checks[case.stem]['endpoint_success']=groups['candidate'][case.stem]['success']
+        elif expected_behavior in ('blocked_geometry', 'invalid_initial_state'):
+            checks[case.stem]['not_false_success']=not groups['candidate'][case.stem]['success']
         if 'speed_limit' in case.stem or 'absolute_limit' in case.stem:
             post=[r for r in rows if int(r['step'])>=30]
             vx,wz=(.05,.2*.05/.3) if 'absolute_limit' in case.stem else (.075,.05)

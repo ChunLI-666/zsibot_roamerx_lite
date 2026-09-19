@@ -1,0 +1,990 @@
+schema_version: 1
+frame_id: base_link
+footprint:
+- - -0.3597869945979023
+  - -0.188144226321578
+- - 0.28218671679496765
+  - -0.188144226321578
+- - 0.28218671679496765
+  - 0.18816181053173542
+- - -0.3597869945979023
+  - 0.18816181053173542
+footprint_padding: 0.01
+footprint_shape: rectangle
+convex_hull:
+- - -0.3597869945979023
+  - 0.15941200370564668
+- - -0.3597869945979023
+  - -0.1593999962943533
+- - -0.35966363192492556
+  - -0.16570512461066245
+- - -0.35906209625184826
+  - -0.16684349882006644
+- - -0.35804081782391856
+  - -0.16762309777140616
+- - -0.33914576229659577
+  - -0.17412309604287146
+- - -0.33700330565180153
+  - -0.17439998103827237
+- - -0.16430338122222635
+  - -0.18802731553614138
+- - -0.16064725326961302
+  - -0.188144226321578
+- - 0.188332746730387
+  - -0.18814322632157804
+- - 0.1887739953872288
+  - -0.18814201932752134
+- - 0.1924149534149029
+  - -0.1877869265189171
+- - 0.19598090261324075
+  - -0.18696564715707303
+- - 0.20064318752352459
+  - -0.185696589763999
+- - 0.2006658374465939
+  - -0.18568908144140245
+- - 0.20373729071682112
+  - -0.18457102496528627
+- - 0.2040808487468039
+  - -0.18438275065624715
+- - 0.204637147280981
+  - -0.18407608848416807
+- - 0.20685606468861267
+  - -0.18238938693308832
+- - 0.20940395247263405
+  - -0.1799925537815094
+- - 0.211655237679847
+  - -0.17731519695723058
+- - 0.21307648896338616
+  - -0.17523192521536352
+- - 0.21309840573736716
+  - -0.17519739922487737
+- - 0.26849955320358276
+  - -0.08550352603197098
+- - 0.26904645562171936
+  - -0.08461443334817886
+- - 0.2696875035762787
+  - -0.08346866816282272
+- - 0.27004414796829224
+  - -0.08276800066232681
+- - 0.2708844840526581
+  - -0.0809384137392044
+- - 0.27136480808258057
+  - -0.07971081882715225
+- - 0.2722051739692688
+  - -0.07703687250614166
+- - 0.27278369665145874
+  - -0.07480733096599579
+- - 0.2736546993255615
+  - -0.07131029665470123
+- - 0.27532973885536194
+  - -0.06401669979095459
+- - 0.2770179808139801
+  - -0.055658746510744095
+- - 0.2778940498828888
+  - -0.0507587306201458
+- - 0.278613418340683
+  - -0.04610539227724075
+- - 0.2795743942260742
+  - -0.03965212032198906
+- - 0.27984851598739624
+  - -0.0375211127102375
+- - 0.27995845675468445
+  - -0.03663286566734314
+- - 0.2808462679386139
+  - -0.02805018424987793
+- - 0.28120508790016174
+  - -0.024336859583854675
+- - 0.28136757016181946
+  - -0.02223534695804119
+- - 0.2816041111946106
+  - -0.01875481940805912
+- - 0.2819387912750244
+  - -0.01223647128790617
+- - 0.2819819450378418
+  - -0.011119617149233818
+- - 0.28218671679496765
+  - 4.292262019589543e-06
+- - 0.28218671679496765
+  - 5.515363682206953e-06
+- - 0.2821756899356842
+  - 0.0025879312306642532
+- - 0.2819387912750244
+  - 0.012245100922882557
+- - 0.28179341554641724
+  - 0.015421167947351933
+- - 0.2816041111946106
+  - 0.018763480708003044
+- - 0.28136757016181946
+  - 0.022244030609726906
+- - 0.2808668911457062
+  - 0.028223467990756035
+- - 0.2799587845802307
+  - 0.0366399772465229
+- - 0.2795743942260742
+  - 0.039660971611738205
+- - 0.2794589102268219
+  - 0.040525127202272415
+- - 0.278613418340683
+  - 0.0461142361164093
+- - 0.2775958776473999
+  - 0.052490051835775375
+- - 0.2770180106163025
+  - 0.05566774681210518
+- - 0.27525943517684937
+  - 0.06435137987136841
+- - 0.2736546993255615
+  - 0.07131968438625336
+- - 0.27278369665145874
+  - 0.0748167484998703
+- - 0.2722051739692688
+  - 0.07704713195562363
+- - 0.2712911069393158
+  - 0.07989834249019623
+- - 0.2710299491882324
+  - 0.08059322834014893
+- - 0.27090418338775635
+  - 0.08090057224035263
+- - 0.27004414796829224
+  - 0.08277764171361923
+- - 0.26927581429481506
+  - 0.08422841131687164
+- - 0.2691996097564697
+  - 0.0843609869480133
+- - 0.26849955320358276
+  - 0.08551322668790817
+- - 0.21306964904589465
+  - 0.17526337099027633
+- - 0.21164209154863
+  - 0.17735152472507953
+- - 0.20938884390562496
+  - 0.180027229383111
+- - 0.20683919941328113
+  - 0.18242219243896007
+- - 0.20461904618177146
+  - 0.1841072660381794
+- - 0.2040625229523438
+  - 0.18441408467245102
+- - 0.20357119058849013
+  - 0.1846542485500574
+- - 0.2006538491525693
+  - 0.18571759168756008
+- - 0.19596068449023676
+  - 0.1869902085955143
+- - 0.19239413339343817
+  - 0.18780912798595428
+- - 0.18875291649114934
+  - 0.18816181053173542
+- - -0.16022708350885068
+  - 0.18816181053173542
+- - -0.16066833227423988
+  - 0.18816060353767872
+- - -0.16432437366899677
+  - 0.18804125827503204
+- - -0.33590283062731896
+  - 0.17441199966472387
+- - -0.338038786051588
+  - 0.17413511839461326
+- - -0.3580520225130515
+  - 0.16763510522198677
+- - -0.35907485486403506
+  - 0.16685550627064705
+- - -0.3596773303269398
+  - 0.16571713206124306
+padded_footprint:
+- - -0.3697869945979023
+  - -0.19814422632157802
+- - 0.29218671679496766
+  - -0.19814422632157802
+- - 0.29218671679496766
+  - 0.19816181053173543
+- - -0.3697869945979023
+  - 0.19816181053173543
+costmap_resolution: 0.05
+inflation_radius: 0.5
+inflation_reason: Rounded up to one 0.05 m grid cell beyond the padded circumscribed
+  radius for the MPPI center-cost gate
+rectangle:
+- - -0.3597869945979023
+  - -0.188144226321578
+- - 0.28218671679496765
+  - -0.188144226321578
+- - 0.28218671679496765
+  - 0.18816181053173542
+- - -0.3597869945979023
+  - 0.18816181053173542
+bounds:
+  minimum_xy:
+  - -0.3597869945979023
+  - -0.188144226321578
+  maximum_xy:
+  - 0.28218671679496765
+  - 0.18816181053173542
+  length_m: 0.64197371139287
+  width_m: 0.37630603685331343
+  unpadded_circumscribed_radius_m: 0.40601914785434895
+  padded_circumscribed_radius_m: 0.41953608250895946
+envelope_kind: model_posture_union
+motion_envelope_verified: false
+hardware_deployment_ready: false
+supported_samples:
+- static_matrix_home
+excluded_modes:
+- physical_stance_variation
+- forward_gait
+- turning_gait
+- lateral_gait
+- recovery_gait
+assumptions:
+- No sensor or payload envelope is present in this URDF.
+- The Matrix home keyframe is model evidence, not recorded physical robot joint feedback.
+- Navigation frame identity and level root are model conventions; verify physical
+  TF and mounting before deployment.
+metadata:
+  urdf_sha256: 992c91921be1099794554295f731064d108d096a5bb6068a9cdc35eb903e0c76
+  official_repository: https://github.com/zsibot/genisom_model
+  official_commit: e6aa98e22d38ae3fdf4d448f79820295e78e83a5
+  official_manifest_sha256: de094bc7ac6bae9a1e742d60f69a18ce3de886ac389fc7e6160c50d10b6fb4a1
+  posture_file_sha256: 1dcda5cad228172ee1810c0c339c68e3b111b67c5040cd656ae2c806d7f82694
+  generator_sha256: 61f63eb1d21f4decbf3451e7a09400746d3f269f481f40b90418cbbe0de957ce
+  mesh_count: 17
+  meshes:
+  - link: BASE_LINK
+    collision_index: 0
+    filename: ../meshes/BASE_LINK.STL
+    sha256: 0845e10816311dc00dbb5a0ed093e4a8cdc9d2daa0cf9a5d103354b04eaab874
+    bytes: 3519384
+    triangle_count: 70386
+    scale:
+    - 1.0
+    - 1.0
+    - 1.0
+    collision_origin:
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+  - link: FL_ABAD_LINK
+    collision_index: 0
+    filename: ../meshes/FL_ABAD_LINK.STL
+    sha256: 85acafd444f4c1c5b35266d093a11700cbd80d4a9559f00901eff2b00a35366d
+    bytes: 427284
+    triangle_count: 8544
+    scale:
+    - 1.0
+    - 1.0
+    - 1.0
+    collision_origin:
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+  - link: FL_HIP_LINK
+    collision_index: 0
+    filename: ../meshes/FL_HIP_LINK.STL
+    sha256: cc3036aada22acbfe56ebbd3930639f47880e6c986fe67d6f386e5d67e951721
+    bytes: 56584
+    triangle_count: 1130
+    scale:
+    - 1.0
+    - 1.0
+    - 1.0
+    collision_origin:
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+  - link: FL_KNEE_LINK
+    collision_index: 0
+    filename: ../meshes/FL_KNEE_LINK.STL
+    sha256: 0a2b3bbe4c3cec2eb15312b3ef036e52cde50e306d8ff493c34dedd410f4d15a
+    bytes: 650684
+    triangle_count: 13012
+    scale:
+    - 1.0
+    - 1.0
+    - 1.0
+    collision_origin:
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+  - link: FL_FOOT_LINK
+    collision_index: 0
+    filename: ../meshes/FL_FOOT_LINK.STL
+    sha256: 3a1da8fd732b6679cee143892e63d9dcf77092071f0558ffb807477e3db95dc1
+    bytes: 1057084
+    triangle_count: 21140
+    scale:
+    - 1.0
+    - 1.0
+    - 1.0
+    collision_origin:
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+  - link: FR_ABAD_LINK
+    collision_index: 0
+    filename: ../meshes/FR_ABAD_LINK.STL
+    sha256: 7691e27794b177db4d018ab445456064c251e1b47e1cbc71f2791eb6fd1df844
+    bytes: 427284
+    triangle_count: 8544
+    scale:
+    - 1.0
+    - 1.0
+    - 1.0
+    collision_origin:
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+  - link: FR_HIP_LINK
+    collision_index: 0
+    filename: ../meshes/FR_HIP_LINK.STL
+    sha256: 4c816659c647ea868f37edac10599aebfe9cbae7b137e0e16a4cfff71ee026fd
+    bytes: 56584
+    triangle_count: 1130
+    scale:
+    - 1.0
+    - 1.0
+    - 1.0
+    collision_origin:
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+  - link: FR_KNEE_LINK
+    collision_index: 0
+    filename: ../meshes/FR_KNEE_LINK.STL
+    sha256: 0a2b3bbe4c3cec2eb15312b3ef036e52cde50e306d8ff493c34dedd410f4d15a
+    bytes: 650684
+    triangle_count: 13012
+    scale:
+    - 1.0
+    - 1.0
+    - 1.0
+    collision_origin:
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+  - link: FR_FOOT_LINK
+    collision_index: 0
+    filename: ../meshes/FR_FOOT_LINK.STL
+    sha256: 3a1da8fd732b6679cee143892e63d9dcf77092071f0558ffb807477e3db95dc1
+    bytes: 1057084
+    triangle_count: 21140
+    scale:
+    - 1.0
+    - 1.0
+    - 1.0
+    collision_origin:
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+  - link: RR_ABAD_LINK
+    collision_index: 0
+    filename: ../meshes/RR_ABAD_LINK.STL
+    sha256: 15538786381b8ca78ff1bdccb215f495d46f6ec20d1ec56d45208684f7d62e06
+    bytes: 427284
+    triangle_count: 8544
+    scale:
+    - 1.0
+    - 1.0
+    - 1.0
+    collision_origin:
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+  - link: RR_HIP_LINK
+    collision_index: 0
+    filename: ../meshes/RR_HIP_LINK.STL
+    sha256: 4c816659c647ea868f37edac10599aebfe9cbae7b137e0e16a4cfff71ee026fd
+    bytes: 56584
+    triangle_count: 1130
+    scale:
+    - 1.0
+    - 1.0
+    - 1.0
+    collision_origin:
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+  - link: RR_KNEE_LINK
+    collision_index: 0
+    filename: ../meshes/RR_KNEE_LINK.STL
+    sha256: 0a2b3bbe4c3cec2eb15312b3ef036e52cde50e306d8ff493c34dedd410f4d15a
+    bytes: 650684
+    triangle_count: 13012
+    scale:
+    - 1.0
+    - 1.0
+    - 1.0
+    collision_origin:
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+  - link: RR_FOOT_LINK
+    collision_index: 0
+    filename: ../meshes/RR_FOOT_LINK.STL
+    sha256: 3a1da8fd732b6679cee143892e63d9dcf77092071f0558ffb807477e3db95dc1
+    bytes: 1057084
+    triangle_count: 21140
+    scale:
+    - 1.0
+    - 1.0
+    - 1.0
+    collision_origin:
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+  - link: RL_ABAD_LINK
+    collision_index: 0
+    filename: ../meshes/RL_ABAD_LINK.STL
+    sha256: cff84d06b06b742d0f110e64bc545364c9849c2717c6c95b2cc756039938dc3e
+    bytes: 427284
+    triangle_count: 8544
+    scale:
+    - 1.0
+    - 1.0
+    - 1.0
+    collision_origin:
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+  - link: RL_HIP_LINK
+    collision_index: 0
+    filename: ../meshes/RL_HIP_LINK.STL
+    sha256: cc3036aada22acbfe56ebbd3930639f47880e6c986fe67d6f386e5d67e951721
+    bytes: 56584
+    triangle_count: 1130
+    scale:
+    - 1.0
+    - 1.0
+    - 1.0
+    collision_origin:
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+  - link: RL_KNEE_LINK
+    collision_index: 0
+    filename: ../meshes/RL_KNEE_LINK.STL
+    sha256: 0a2b3bbe4c3cec2eb15312b3ef036e52cde50e306d8ff493c34dedd410f4d15a
+    bytes: 650684
+    triangle_count: 13012
+    scale:
+    - 1.0
+    - 1.0
+    - 1.0
+    collision_origin:
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+  - link: RL_FOOT_LINK
+    collision_index: 0
+    filename: ../meshes/RL_FOOT_LINK.STL
+    sha256: 3a1da8fd732b6679cee143892e63d9dcf77092071f0558ffb807477e3db95dc1
+    bytes: 1057084
+    triangle_count: 21140
+    scale:
+    - 1.0
+    - 1.0
+    - 1.0
+    collision_origin:
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+  navigation_from_root:
+    xyz:
+    - 0
+    - 0
+    - 0
+    rpy:
+    - 0
+    - 0
+    - 0
+    evidence: Matching Matrix base_link / URDF BASE_LINK mesh and kinematic origins;
+      model-only identity convention
+    hardware_verified: false
+  posture_source:
+    kind: matrix_mjcf_home_keyframe
+    path: /home/charles/project/colcon_ws/src/zsibot/matrix/src/robot_mujoco/jszr_robots/xgb/xgb.xml
+    sha256: 719c1ec115da98adb2c516619ccd4a4b27314a0d701a51dd3ac21a4272d43bce
+    keyframe: home
+    qpos:
+    - 0.0
+    - 0.0
+    - 0.27
+    - 1.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.9
+    - -1.8
+    - 0.0
+    - 0.9
+    - -1.8
+    - 0.0
+    - 0.9
+    - -1.8
+    - 0.0
+    - 0.9
+    - -1.8
+    joint_mapping:
+    - matrix_joint: FAR_ABAD_JOINT
+      urdf_joint: FR_ABAD_JOINT
+      position_rad: 0.0
+    - matrix_joint: FAR_HIP_JOINT
+      urdf_joint: FR_HIP_JOINT
+      position_rad: 0.9
+    - matrix_joint: FAR_KNEE_JOINT
+      urdf_joint: FR_KNEE_JOINT
+      position_rad: -1.8
+    - matrix_joint: FBL_ABAD_JOINT
+      urdf_joint: FL_ABAD_JOINT
+      position_rad: 0.0
+    - matrix_joint: FBL_HIP_JOINT
+      urdf_joint: FL_HIP_JOINT
+      position_rad: 0.9
+    - matrix_joint: FBL_KNEE_JOINT
+      urdf_joint: FL_KNEE_JOINT
+      position_rad: -1.8
+    - matrix_joint: RAR_ABAD_JOINT
+      urdf_joint: RR_ABAD_JOINT
+      position_rad: 0.0
+    - matrix_joint: RAR_HIP_JOINT
+      urdf_joint: RR_HIP_JOINT
+      position_rad: 0.9
+    - matrix_joint: RAR_KNEE_JOINT
+      urdf_joint: RR_KNEE_JOINT
+      position_rad: -1.8
+    - matrix_joint: RBL_ABAD_JOINT
+      urdf_joint: RL_ABAD_JOINT
+      position_rad: 0.0
+    - matrix_joint: RBL_HIP_JOINT
+      urdf_joint: RL_HIP_JOINT
+      position_rad: 0.9
+    - matrix_joint: RBL_KNEE_JOINT
+      urdf_joint: RL_KNEE_JOINT
+      position_rad: -1.8
+    matching_assets:
+    - filename: BASE_LINK.STL
+      sha256: 0845e10816311dc00dbb5a0ed093e4a8cdc9d2daa0cf9a5d103354b04eaab874
+    - filename: FL_ABAD_LINK.STL
+      sha256: 85acafd444f4c1c5b35266d093a11700cbd80d4a9559f00901eff2b00a35366d
+    - filename: FL_HIP_LINK.STL
+      sha256: cc3036aada22acbfe56ebbd3930639f47880e6c986fe67d6f386e5d67e951721
+    - filename: FL_KNEE_LINK.STL
+      sha256: 0a2b3bbe4c3cec2eb15312b3ef036e52cde50e306d8ff493c34dedd410f4d15a
+    - filename: FL_FOOT_LINK.STL
+      sha256: 3a1da8fd732b6679cee143892e63d9dcf77092071f0558ffb807477e3db95dc1
+    - filename: FR_ABAD_LINK.STL
+      sha256: 7691e27794b177db4d018ab445456064c251e1b47e1cbc71f2791eb6fd1df844
+    - filename: FR_HIP_LINK.STL
+      sha256: 4c816659c647ea868f37edac10599aebfe9cbae7b137e0e16a4cfff71ee026fd
+    - filename: FR_KNEE_LINK.STL
+      sha256: 0a2b3bbe4c3cec2eb15312b3ef036e52cde50e306d8ff493c34dedd410f4d15a
+    - filename: FR_FOOT_LINK.STL
+      sha256: 3a1da8fd732b6679cee143892e63d9dcf77092071f0558ffb807477e3db95dc1
+    - filename: RR_ABAD_LINK.STL
+      sha256: 15538786381b8ca78ff1bdccb215f495d46f6ec20d1ec56d45208684f7d62e06
+    - filename: RR_HIP_LINK.STL
+      sha256: 4c816659c647ea868f37edac10599aebfe9cbae7b137e0e16a4cfff71ee026fd
+    - filename: RR_KNEE_LINK.STL
+      sha256: 0a2b3bbe4c3cec2eb15312b3ef036e52cde50e306d8ff493c34dedd410f4d15a
+    - filename: RR_FOOT_LINK.STL
+      sha256: 3a1da8fd732b6679cee143892e63d9dcf77092071f0558ffb807477e3db95dc1
+    - filename: RL_ABAD_LINK.STL
+      sha256: cff84d06b06b742d0f110e64bc545364c9849c2717c6c95b2cc756039938dc3e
+    - filename: RL_HIP_LINK.STL
+      sha256: cc3036aada22acbfe56ebbd3930639f47880e6c986fe67d6f386e5d67e951721
+    - filename: RL_KNEE_LINK.STL
+      sha256: 0a2b3bbe4c3cec2eb15312b3ef036e52cde50e306d8ff493c34dedd410f4d15a
+    - filename: RL_FOOT_LINK.STL
+      sha256: 3a1da8fd732b6679cee143892e63d9dcf77092071f0558ffb807477e3db95dc1
+  samples:
+  - name: matrix_home
+    vertices: 737070
+    minimum_xyz:
+    - -0.3597869945979023
+    - -0.188144226321578
+    - -0.2924378224145204
+    maximum_xyz:
+    - 0.28218671679496765
+    - 0.18816181053173542
+    - 0.09035183489322662
+    link_bounds:
+      BASE_LINK:0:
+        minimum:
+        - -0.2733030617237091
+        - -0.1113831177353859
+        - -0.04700876772403717
+        maximum:
+        - 0.28218671679496765
+        - 0.11138587445020676
+        - 0.09035183489322662
+      FL_ABAD_LINK:0:
+        minimum:
+        - 0.09649980335474015
+        - 0.015061528503894805
+        - -0.03849729523062706
+        maximum:
+        - 0.21298831968545914
+        - 0.09202515994012356
+        - 0.03848205506801605
+      FL_HIP_LINK:0:
+        minimum:
+        - 0.0004222728165461931
+        - 0.006412047564506529
+        - -0.13854687069475466
+        maximum:
+        - 0.21154029689868134
+        - 0.17441199966472387
+        - 0.03713737194524016
+      FL_KNEE_LINK:0:
+        minimum:
+        - -0.010806994597902325
+        - 0.13841199096989631
+        - -0.25731973356251653
+        maximum:
+        - 0.20129683162788312
+        - 0.18041200157952308
+        - -0.0957752334892949
+      FL_FOOT_LINK:0:
+        minimum:
+        - 0.15810814624623687
+        - 0.13066777367842197
+        - -0.2924378224145204
+        maximum:
+        - 0.2174250597790799
+        - 0.18816181053173542
+        - -0.23379980769894937
+      FR_ABAD_LINK:0:
+        minimum:
+        - 0.09649980335474015
+        - -0.09202515994012356
+        - -0.03848205506801605
+        maximum:
+        - 0.21298831968545914
+        - -0.015061528503894805
+        - 0.03849729523062706
+      FR_HIP_LINK:0:
+        minimum:
+        - -0.0005722286994669645
+        - -0.1743991645088196
+        - -0.13716750898820956
+        maximum:
+        - 0.21152345516629362
+        - -0.006406378935813917
+        - 0.037132233735050944
+      FR_KNEE_LINK:0:
+        minimum:
+        - -0.010806994597902325
+        - -0.1803990090301037
+        - -0.25731973356251653
+        maximum:
+        - 0.20129683162788312
+        - -0.13839899842047693
+        - -0.0957752334892949
+      FR_FOOT_LINK:0:
+        minimum:
+        - 0.15810814624623687
+        - -0.18814322632157804
+        - -0.2924378224145204
+        maximum:
+        - 0.2174250597790799
+        - -0.1306491894682646
+        - -0.23379980769894937
+      RR_ABAD_LINK:0:
+        minimum:
+        - -0.21298831968545914
+        - -0.09202515994012356
+        - -0.03849729523062706
+        maximum:
+        - -0.09649980335474015
+        - -0.015061528503894805
+        - 0.03848205506801605
+      RR_HIP_LINK:0:
+        minimum:
+        - -0.349552228699467
+        - -0.17440016450881957
+        - -0.13716750898820956
+        maximum:
+        - -0.1374565448337064
+        - -0.00640737893581389
+        - 0.037132233735050944
+      RR_KNEE_LINK:0:
+        minimum:
+        - -0.3597869945979023
+        - -0.18040000903010367
+        - -0.25731973356251653
+        maximum:
+        - -0.1476831683721169
+        - -0.1383999984204769
+        - -0.0957752334892949
+      RR_FOOT_LINK:0:
+        minimum:
+        - -0.19087185375376314
+        - -0.188144226321578
+        - -0.2924378224145204
+        maximum:
+        - -0.13155494022092012
+        - -0.13065018946826457
+        - -0.23379980769894937
+      RL_ABAD_LINK:0:
+        minimum:
+        - -0.21298831968545914
+        - 0.015061528503894805
+        - -0.03848205506801605
+        maximum:
+        - -0.09649980335474015
+        - 0.09202515994012356
+        - 0.03849729523062706
+      RL_HIP_LINK:0:
+        minimum:
+        - -0.3485577271834538
+        - 0.006412047564506529
+        - -0.13854687069475466
+        maximum:
+        - -0.13743970310131867
+        - 0.17441199966472387
+        - 0.03713737194524016
+      RL_KNEE_LINK:0:
+        minimum:
+        - -0.3597869945979023
+        - 0.13841199096989631
+        - -0.25731973356251653
+        maximum:
+        - -0.1476831683721169
+        - 0.18041200157952308
+        - -0.0957752334892949
+      RL_FOOT_LINK:0:
+        minimum:
+        - -0.19087185375376314
+        - 0.13066777367842197
+        - -0.2924378224145204
+        maximum:
+        - -0.13155494022092012
+        - 0.18816181053173542
+        - -0.23379980769894937
+  coverage:
+    vertices: 737070
+    triangles: 245690
+    outside_vertices: 0
+    maximum_numerical_violation_m: 0.0
+    tolerance_m: 1.0e-09
+    method: all triangle vertices against convex hull halfplanes

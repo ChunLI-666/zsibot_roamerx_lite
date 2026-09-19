@@ -19,7 +19,10 @@ Policy:
   Watchdog timeout: output zero velocity if loc_status not received within timeout
 """
 
+import math
+
 import rclpy
+from rclpy.clock import Clock, ClockType
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from geometry_msgs.msg import Twist
@@ -34,6 +37,7 @@ class NavSafetyGate(Node):
     LOC_LOST = 3
     GATE_EMERGENCY_STOP = 4
     GATE_CMD_TIMEOUT = 5
+    GATE_INVALID_CMD = 6
 
     def __init__(self):
         super().__init__('nav_safety_gate')
@@ -50,6 +54,10 @@ class NavSafetyGate(Node):
         self.cmd_timeout_sec = self.get_parameter('cmd_timeout_ms').value / 1000.0
         stop_publish_period_sec = (
             self.get_parameter('stop_publish_period_ms').value / 1000.0)
+        if not all(math.isfinite(value) and value > 0 for value in (
+                self.watchdog_timeout_sec, self.cmd_timeout_sec,
+                stop_publish_period_sec)):
+            raise ValueError('Safety gate timeouts and timer period must be positive and finite')
         cmd_vel_in = self.get_parameter('cmd_vel_input_topic').value
         cmd_vel_out = self.get_parameter('cmd_vel_output_topic').value
         loc_status_topic = self.get_parameter('loc_status_topic').value
@@ -59,15 +67,19 @@ class NavSafetyGate(Node):
         self.emergency_stop_active = False
         self.last_status_time = None
         self.last_cmd_time = None
+        self.invalid_cmd = False
+        # These are receipt-time actuator watchdogs. A paused or rewound ROS
+        # /clock must not keep the last motion command alive.
+        self.safety_clock = Clock(clock_type=ClockType.STEADY_TIME)
 
         qos_reliable = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
             durability=DurabilityPolicy.VOLATILE,
-            depth=10
+            depth=1
         )
 
         self.cmd_vel_sub = self.create_subscription(
-            Twist, cmd_vel_in, self.cmd_vel_callback, 10)
+            Twist, cmd_vel_in, self.cmd_vel_callback, 1)
 
         self.loc_status_sub = self.create_subscription(
             UInt8, loc_status_topic, self.loc_status_callback, qos_reliable)
@@ -78,7 +90,8 @@ class NavSafetyGate(Node):
         self.cmd_vel_pub = self.create_publisher(Twist, cmd_vel_out, 10)
         self.gate_status_pub = self.create_publisher(UInt8, '~/gate_status', 1)
         self.watchdog_timer = self.create_timer(
-            max(0.02, stop_publish_period_sec), self.watchdog_callback)
+            max(0.02, stop_publish_period_sec), self.watchdog_callback,
+            clock=self.safety_clock)
 
         self.get_logger().info(
             f'NavSafetyGate started: {cmd_vel_in} -> {cmd_vel_out}, '
@@ -90,10 +103,14 @@ class NavSafetyGate(Node):
     def loc_status_callback(self, msg: UInt8):
         prev = self.current_status
         self.current_status = msg.data
-        self.last_status_time = self.get_clock().now()
+        self.last_status_time = self.safety_clock.now()
         if prev != self.current_status:
             self.get_logger().info(
                 f'Loc status changed: {prev} -> {self.current_status}')
+        # Stop at the loss notification, not at the next command/timeout.
+        # Returning to NORMAL does not replay a cached pre-loss command.
+        if self.current_status != self.LOC_NORMAL:
+            self.publish_zero(self._status_gate())
 
     def emergency_stop_callback(self, msg: Bool):
         prev = self.emergency_stop_active
@@ -105,8 +122,11 @@ class NavSafetyGate(Node):
                 self.publish_zero(self.GATE_EMERGENCY_STOP)
 
     def cmd_vel_callback(self, msg: Twist):
-        now = self.get_clock().now()
+        now = self.safety_clock.now()
         self.last_cmd_time = now
+        self.invalid_cmd = not all(math.isfinite(value) for value in (
+            msg.linear.x, msg.linear.y, msg.linear.z,
+            msg.angular.x, msg.angular.y, msg.angular.z))
         safe_cmd = Twist()
         gate_status = self.LOC_UNKNOWN
 
@@ -116,11 +136,13 @@ class NavSafetyGate(Node):
             gate_status = self.GATE_EMERGENCY_STOP
         elif timed_out:
             gate_status = self.LOC_LOST
+        elif self.current_status != self.LOC_NORMAL:
+            gate_status = self._status_gate()
+        elif self.invalid_cmd:
+            gate_status = self.GATE_INVALID_CMD
         elif self.current_status == self.LOC_NORMAL:
             safe_cmd = msg
             gate_status = self.LOC_NORMAL
-        elif self.current_status == self.LOC_DEGRADED:
-            gate_status = self.LOC_DEGRADED
         # else: UNKNOWN or LOST -> zero velocity (already default)
         # DEGRADED also outputs zero velocity for safety
 
@@ -128,13 +150,24 @@ class NavSafetyGate(Node):
 
     def watchdog_callback(self):
         """Continuously enforce stop when either heartbeat becomes stale."""
-        now = self.get_clock().now()
+        now = self.safety_clock.now()
         if self.emergency_stop_active:
             self.publish_zero(self.GATE_EMERGENCY_STOP)
         elif self._is_timed_out(now):
             self.publish_zero(self.LOC_LOST)
+        elif self.current_status != self.LOC_NORMAL:
+            self.publish_zero(self._status_gate())
+        elif self.invalid_cmd:
+            self.publish_zero(self.GATE_INVALID_CMD)
         elif self._is_cmd_timed_out(now):
             self.publish_zero(self.GATE_CMD_TIMEOUT)
+
+    def _status_gate(self):
+        if self.emergency_stop_active:
+            return self.GATE_EMERGENCY_STOP
+        if self.current_status in (self.LOC_UNKNOWN, self.LOC_DEGRADED, self.LOC_LOST):
+            return self.current_status
+        return self.LOC_UNKNOWN
 
     def publish_zero(self, gate_status: int):
         self.publish_cmd(Twist(), gate_status)
