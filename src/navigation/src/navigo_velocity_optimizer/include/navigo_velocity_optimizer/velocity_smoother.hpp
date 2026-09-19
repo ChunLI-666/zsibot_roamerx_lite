@@ -24,6 +24,7 @@
 
 #include "navigo_util/lifecycle_node.hpp"
 #include "navigo_core/epoch_contract.hpp"
+#include "navigo_velocity_optimizer/motion_phase.hpp"
 #include "std_msgs/msg/string.hpp"
 #include <mutex>
 #include <unordered_map>
@@ -140,6 +141,7 @@ protected:
   uint64_t epoch_command_ttl_ns_{300000000};
   std::string relay_session_{navigo_core::epoch::sessionId()};
   uint64_t relay_sequence_{0};
+  phase::Transition phase_transition_;
   navigo_epoch_msgs::msg::EpochCommand::ConstSharedPtr epoch_command_;
   std::unordered_map<std::string, std::pair<uint64_t, uint64_t>> source_highwater_;
   rclcpp_lifecycle::LifecyclePublisher<navigo_epoch_msgs::msg::EpochCommand>::SharedPtr epoch_pub_;

@@ -1,0 +1,238 @@
+{
+  "development_base": "25ecf4f",
+  "scope": "Read-only interval re-audit of frozen traces; no production or plant changes",
+  "hardware": false,
+  "wire_matching_window_ms": 50,
+  "source_ttl_ms": {
+    "execution": 300,
+    "intent": 400,
+    "command": "original max_age_ms"
+  },
+  "runs": [
+    {
+      "name": "navigation_serial_final_slow_decel90",
+      "assessment": "PASS",
+      "definite": 0,
+      "unscorable": 0,
+      "old_failures": 1,
+      "trace_sha256": "807142ccac5288c233556de675523fee76d6176f04b16eefb6a706bc69619443",
+      "source_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_geometry_20260910/serial_final_slow_decel90",
+      "new_result": "/home/charles/project/colcon_ws/analysis_outputs/epoch_interval_audit_20260911/navigation_serial_final_slow_decel90.json"
+    },
+    {
+      "name": "navigation_serial_final_open90",
+      "assessment": "PASS",
+      "definite": 0,
+      "unscorable": 0,
+      "old_failures": 1,
+      "trace_sha256": "66158cf7c1302ee16c9df6af6aaa24fff510beb902a9b0c47f03b756259ef4d4",
+      "source_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_geometry_20260910/serial_final_open90",
+      "new_result": "/home/charles/project/colcon_ws/analysis_outputs/epoch_interval_audit_20260911/navigation_serial_final_open90.json"
+    },
+    {
+      "name": "backup_blocked_final",
+      "assessment": "PASS",
+      "definite": 0,
+      "unscorable": 0,
+      "old_failures": 1,
+      "trace_sha256": "b1b6e236a5b8a31b5661e9315fdd72b086564995282467343a8742623dc34da0",
+      "source_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_backup_20260911/budget_v2/blocked_final",
+      "new_result": "/home/charles/project/colcon_ws/analysis_outputs/epoch_interval_audit_20260911/backup_blocked_final.json"
+    },
+    {
+      "name": "backup_cancel_final",
+      "assessment": "PASS",
+      "definite": 0,
+      "unscorable": 0,
+      "old_failures": 1,
+      "trace_sha256": "8fae6b757487303ba3497705f95136cfde608e3db653096ae87a6bb939e7eca6",
+      "source_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_backup_20260911/budget_v2/cancel_final",
+      "new_result": "/home/charles/project/colcon_ws/analysis_outputs/epoch_interval_audit_20260911/backup_cancel_final.json"
+    },
+    {
+      "name": "backup_deadline_final",
+      "assessment": "PASS",
+      "definite": 0,
+      "unscorable": 0,
+      "old_failures": 1,
+      "trace_sha256": "ac8e77fadb14325c34e997dff3fb8653c9c1b6479271bab98bc6a9752cbb9e17",
+      "source_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_backup_20260911/budget_v2/deadline_final",
+      "new_result": "/home/charles/project/colcon_ws/analysis_outputs/epoch_interval_audit_20260911/backup_deadline_final.json"
+    },
+    {
+      "name": "backup_delayed_final_1",
+      "assessment": "PASS",
+      "definite": 0,
+      "unscorable": 0,
+      "old_failures": 1,
+      "trace_sha256": "d9162e62f85916cb3616cfbd678793d9c8e8ea9929ebc9cb887344b4d8a6316d",
+      "source_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_backup_20260911/budget_v2/delayed_final_1",
+      "new_result": "/home/charles/project/colcon_ws/analysis_outputs/epoch_interval_audit_20260911/backup_delayed_final_1.json"
+    },
+    {
+      "name": "backup_delayed_final_2",
+      "assessment": "PASS",
+      "definite": 0,
+      "unscorable": 0,
+      "old_failures": 1,
+      "trace_sha256": "353f789473dc3f1531db6ffe97022afcad0e7f855949999751483770ddf6e6fc",
+      "source_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_backup_20260911/budget_v2/delayed_final_2",
+      "new_result": "/home/charles/project/colcon_ws/analysis_outputs/epoch_interval_audit_20260911/backup_delayed_final_2.json"
+    },
+    {
+      "name": "backup_delayed_final_3",
+      "assessment": "PASS",
+      "definite": 0,
+      "unscorable": 0,
+      "old_failures": 1,
+      "trace_sha256": "ef7f2dd80a1e8bafd71471616933ae1188543c44e4e6d53f9128d4ec04f60c2c",
+      "source_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_backup_20260911/budget_v2/delayed_final_3",
+      "new_result": "/home/charles/project/colcon_ws/analysis_outputs/epoch_interval_audit_20260911/backup_delayed_final_3.json"
+    },
+    {
+      "name": "backup_epoch_final",
+      "assessment": "PASS",
+      "definite": 0,
+      "unscorable": 0,
+      "old_failures": 1,
+      "trace_sha256": "08645237d235886dba5ad8b8e9cf80711794ac38e31defa556e91048da97c2fb",
+      "source_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_backup_20260911/budget_v2/epoch_final",
+      "new_result": "/home/charles/project/colcon_ws/analysis_outputs/epoch_interval_audit_20260911/backup_epoch_final.json"
+    },
+    {
+      "name": "backup_free_final",
+      "assessment": "PASS",
+      "definite": 0,
+      "unscorable": 0,
+      "old_failures": 1,
+      "trace_sha256": "5632a3a2cfcd8e6fcfcf974ea40dbe7109ed31240b2b1045758653095869a5c7",
+      "source_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_backup_20260911/budget_v2/free_final",
+      "new_result": "/home/charles/project/colcon_ws/analysis_outputs/epoch_interval_audit_20260911/backup_free_final.json"
+    },
+    {
+      "name": "backup_invalid_final",
+      "assessment": "PASS",
+      "definite": 0,
+      "unscorable": 0,
+      "old_failures": 1,
+      "trace_sha256": "bbb377b5b9b8532c36990a9e3d429012907b56ce1908c27b529eb34e20b6b9da",
+      "source_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_backup_20260911/budget_v2/invalid_final",
+      "new_result": "/home/charles/project/colcon_ws/analysis_outputs/epoch_interval_audit_20260911/backup_invalid_final.json"
+    },
+    {
+      "name": "backup_loss_final",
+      "assessment": "PASS",
+      "definite": 0,
+      "unscorable": 0,
+      "old_failures": 2,
+      "trace_sha256": "7a0d1947efcf37aa95e9c3e9acce639de8a64282e2a349a11972e4951e7a3e95",
+      "source_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_backup_20260911/budget_v2/loss_final",
+      "new_result": "/home/charles/project/colcon_ws/analysis_outputs/epoch_interval_audit_20260911/backup_loss_final.json"
+    },
+    {
+      "name": "backup_moving_feedback_final",
+      "assessment": "PASS",
+      "definite": 0,
+      "unscorable": 0,
+      "old_failures": 1,
+      "trace_sha256": "5087857643d66e61422dc2173dc5202c25797752389cc98e2b53eac793d73418",
+      "source_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_backup_20260911/budget_v2/moving_feedback_final",
+      "new_result": "/home/charles/project/colcon_ws/analysis_outputs/epoch_interval_audit_20260911/backup_moving_feedback_final.json"
+    },
+    {
+      "name": "backup_no_effective_final",
+      "assessment": "PASS",
+      "definite": 0,
+      "unscorable": 0,
+      "old_failures": 1,
+      "trace_sha256": "01af841507e116a6fb9c899bbf01f7f04619c46651e1f108f9fecd26bffa2330",
+      "source_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_backup_20260911/budget_v2/no_effective_final",
+      "new_result": "/home/charles/project/colcon_ws/analysis_outputs/epoch_interval_audit_20260911/backup_no_effective_final.json"
+    },
+    {
+      "name": "backup_odom_freeze_final",
+      "assessment": "PASS",
+      "definite": 0,
+      "unscorable": 0,
+      "old_failures": 1,
+      "trace_sha256": "2aafca2a1778eeb08ae93772fef220e0f16f35ef9c375b4637b27d402c93f774",
+      "source_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_backup_20260911/budget_v2/odom_freeze_final",
+      "new_result": "/home/charles/project/colcon_ws/analysis_outputs/epoch_interval_audit_20260911/backup_odom_freeze_final.json"
+    },
+    {
+      "name": "backup_recorded_map_final",
+      "assessment": "PASS",
+      "definite": 0,
+      "unscorable": 0,
+      "old_failures": 0,
+      "trace_sha256": "16df0096c2497feafccb2797378f791f2fbdd9364a09ebd56463dc10c9f36c65",
+      "source_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_backup_20260911/budget_v2/recorded_map_final",
+      "new_result": "/home/charles/project/colcon_ws/analysis_outputs/epoch_interval_audit_20260911/backup_recorded_map_final.json"
+    },
+    {
+      "name": "backup_replan_final",
+      "assessment": "PASS",
+      "definite": 0,
+      "unscorable": 0,
+      "old_failures": 1,
+      "trace_sha256": "6728d408a00b944285821d7165c7ff912e18cae2430fba7cd0135b7c22b28ff0",
+      "source_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_backup_20260911/budget_v2/replan_final",
+      "new_result": "/home/charles/project/colcon_ws/analysis_outputs/epoch_interval_audit_20260911/backup_replan_final.json"
+    },
+    {
+      "name": "backup_slow_controller_final",
+      "assessment": "PASS",
+      "definite": 0,
+      "unscorable": 0,
+      "old_failures": 0,
+      "trace_sha256": "6facef853a170eba436566756a68729678fd0467472433510e55078a2b1364c2",
+      "source_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_backup_20260911/budget_v2/slow_controller_final",
+      "new_result": "/home/charles/project/colcon_ws/analysis_outputs/epoch_interval_audit_20260911/backup_slow_controller_final.json"
+    },
+    {
+      "name": "backup_slow_gate_final",
+      "assessment": "PASS",
+      "definite": 0,
+      "unscorable": 0,
+      "old_failures": 1,
+      "trace_sha256": "b0fe5e0a3bfbb76517c816bc568d3e8214a2215d4d67d3c4e7e66625930716e2",
+      "source_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_backup_20260911/budget_v2/slow_gate_final",
+      "new_result": "/home/charles/project/colcon_ws/analysis_outputs/epoch_interval_audit_20260911/backup_slow_gate_final.json"
+    },
+    {
+      "name": "backup_slow_relay_final",
+      "assessment": "PASS",
+      "definite": 0,
+      "unscorable": 0,
+      "old_failures": 1,
+      "trace_sha256": "07e24d67ad46524c9f54c920a35d047817d7b774162370e10e8fccc0c441a740",
+      "source_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_backup_20260911/budget_v2/slow_relay_final",
+      "new_result": "/home/charles/project/colcon_ws/analysis_outputs/epoch_interval_audit_20260911/backup_slow_relay_final.json"
+    },
+    {
+      "name": "backup_small_budget_final",
+      "assessment": "PASS",
+      "definite": 0,
+      "unscorable": 0,
+      "old_failures": 1,
+      "trace_sha256": "ece2e094bf54bf3d379a06a391a2f66a82a55525c5f08ee9924a835d45b26f1f",
+      "source_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_backup_20260911/budget_v2/small_budget_final",
+      "new_result": "/home/charles/project/colcon_ws/analysis_outputs/epoch_interval_audit_20260911/backup_small_budget_final.json"
+    }
+  ],
+  "source_sha256": {
+    "scripts/epoch_navigation_validation/publication_clock.py": "d215b4389820cf11d347d6804f19391c4bbfa1f21a59030f4e9ab4214f1040b6",
+    "scripts/epoch_navigation_validation/audit_events.py": "2a77a35e00fd7dd3d291766c3b7bbe04af7a6f6cba4283fc581677ed2e57dccc",
+    "scripts/epoch_navigation_validation/execution_audit.py": "43b5f67d20870f3faba968f96185118bb881ade6336901d0f2a41afd43d53872"
+  },
+  "tests": {
+    "unittest_count": 45,
+    "log": "/home/charles/project/colcon_ws/analysis_outputs/epoch_interval_audit_20260911/unit_tests.log"
+  },
+  "limitations": [
+    "Gate receipt times not observed",
+    "Clock model constrained by finite callback samples",
+    "Old bounded plant dynamics unchanged",
+    "Existing recorded-map action failure unchanged"
+  ]
+}

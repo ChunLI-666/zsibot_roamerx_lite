@@ -82,6 +82,7 @@ public:
   std::string getDefaultBTFilepath(rclcpp_lifecycle::LifecycleNode::WeakPtr node) override;
 
 protected:
+  void configureEpochTree(rclcpp_lifecycle::LifecycleNode::SharedPtr node);
   bool enable_epoch_contract_{false};
   std::string strict_bt_path_;
   /**

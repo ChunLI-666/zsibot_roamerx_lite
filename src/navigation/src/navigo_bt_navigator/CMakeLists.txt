@@ -99,6 +99,10 @@ install(DIRECTORY include/
 install(DIRECTORY behavior_trees DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_epoch_bt_selection test/test_epoch_bt_selection.cpp)
+  target_link_libraries(test_epoch_bt_selection ${library_name})
+  ament_target_dependencies(test_epoch_bt_selection ${dependencies})
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
 endif()

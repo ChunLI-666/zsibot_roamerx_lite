@@ -13,6 +13,7 @@
 #include "behaviortree_cpp_v3/decorator_node.h"
 #include "navigo_behavior_tree/bt_conversions.hpp"
 #include "navigo_epoch_msgs/action/follow_path_epoch.hpp"
+#include "navigo_epoch_msgs/action/back_up_epoch.hpp"
 #include "navigo_epoch_msgs/msg/epoch_path.hpp"
 #include "navigo_epoch_msgs/msg/localization_epoch.hpp"
 #include "navigo_epoch_msgs/msg/navigation_intent.hpp"
@@ -309,7 +310,7 @@ public:
     std::string action_name = endpoint;
     getInput("server_name", action_name);
     client_ = rclcpp_action::create_client<Action>(node_, action_name, group_);
-    context_->attach(this, [this] {executor_.spin_some();});
+    context_->attach(this, [this] {pumpAction();});
   }
   ~ActionNode() override {cancel(); context_->detach(this);}
   static BT::PortsList basicPorts()
@@ -319,11 +320,13 @@ public:
   }
   BT::NodeStatus tick() override
   {
-    executor_.spin_some();
+    pumpAction();
     if (!context_->currentTask()) {halt(); return BT::NodeStatus::FAILURE;}
     // A newer path uses action preemption. Sending a cancellation immediately
     // before its replacement can cancel the server's pending new goal as well.
-    if (request_ && shouldReplace()) {cancel(false);}
+    // A terminal failure must reach the enclosing RecoveryNode even if a newer
+    // path arrives on this tick. Replacement may only preempt a live request.
+    if (request_ && !request_->result && !request_->rejected && shouldReplace()) {cancel(false);}
     if (!request_) {
       if (!client_->action_server_is_ready()) {
         if (server_wait_ == Time{}) {server_wait_ = Clock::now();}
@@ -338,6 +341,7 @@ public:
     }
     setStatus(BT::NodeStatus::RUNNING);
     if (!context_->current(request_->path.token) || request_->rejected) {
+      RCLCPP_WARN(node_->get_logger(), "%s request invalid: current=%d rejected=%d", name().c_str(), context_->current(request_->path.token), request_->rejected);
       halt(); return BT::NodeStatus::FAILURE;
     }
     double timeout = 5.0;
@@ -345,6 +349,7 @@ public:
     if (!std::isfinite(timeout) || timeout <= 0 ||
       (!request_->handle && age(request_->sent) > 2.0) ||
       (boundedDuration() && age(request_->sent) > timeout)) {
+      RCLCPP_WARN(node_->get_logger(), "%s request timeout: handle=%d age=%.3f timeout=%.3f", name().c_str(), bool(request_->handle), age(request_->sent), timeout);
       halt(); return BT::NodeStatus::FAILURE;
     }
     whileRunning();
@@ -378,6 +383,14 @@ protected:
   std::shared_ptr<Context> context_;
   std::shared_ptr<Request> request_;
 private:
+  void pumpAction()
+  {
+    // Jazzy action waitables select feedback before goal/result/cancel replies.
+    // Recollect ready entities with a positive wall budget so a 20 Hz feedback
+    // stream cannot starve replies at the 10 Hz BT rate. This is not an
+    // unbounded drain; every action contributes at most this budget per pump.
+    executor_.spin_all(std::chrono::milliseconds(1));
+  }
   void send(const typename Action::Goal & goal, const Path & lineage)
   {
     auto request = std::make_shared<Request>();
@@ -499,6 +512,41 @@ protected:
   }
 };
 
+class BackUp : public ActionNode<navigo_epoch_msgs::action::BackUpEpoch>
+{
+  using Action = navigo_epoch_msgs::action::BackUpEpoch;
+public:
+  BackUp(const std::string & name, const BT::NodeConfiguration & config)
+  : ActionNode(name, config, "back_up_epoch") {}
+  static BT::PortsList providedPorts()
+  {
+    auto ports = basicPorts();
+    ports.insert(BT::InputPort<double>("distance", .2, "Travel budget, 0.03 to 0.3 m"));
+    ports.insert(BT::InputPort<double>("speed", .08, "Speed, 0.05 to 0.1 m/s"));
+    ports.insert(BT::InputPort<double>("duration", 5., "Immutable steady deadline, maximum 5 s"));
+    return ports;
+  }
+protected:
+  bool makeGoal(Action::Goal & goal, Path & lineage) override
+  {
+    double duration = 0.;
+    if (!getInput("distance", goal.distance) || !getInput("speed", goal.speed) || !getInput("duration", duration) ||
+      !std::isfinite(goal.distance) || goal.distance < .03 || goal.distance > .3 ||
+      !std::isfinite(goal.speed) || goal.speed < .05 || goal.speed > .1 ||
+      !std::isfinite(duration) || duration <= 0. || duration > 5.) {return false;}
+    lineage = context_->request();
+    lineage.token.execution_kind = Token::BACKUP;
+    lineage.token.backup_max_speed = goal.speed;
+    lineage.token.execution_deadline_ns = steadyNs() + static_cast<uint64_t>(duration*1e9);
+    goal.token = lineage.token; goal.start = lineage.planning_start;
+    goal.localization_heartbeat_sequence = lineage.planning_heartbeat_sequence;
+    context_->authorize(lineage.token); return true;
+  }
+  void whileRunning() override {context_->authorize(request_->path.token);}
+  void finished() override {context_->revoke();}
+  BT::NodeStatus acceptResult(const Action::Result &, const Path &) override {return BT::NodeStatus::SUCCESS;}
+};
+
 class Follow : public ActionNode<navigo_epoch_msgs::action::FollowPathEpoch>
 {
   using Action = navigo_epoch_msgs::action::FollowPathEpoch;
@@ -543,6 +591,7 @@ BT_REGISTER_NODES(factory)
 {
   using namespace navigo_behavior_tree::epoch;
   factory.registerNodeType<Guard>("EpochGuard");
+  factory.registerNodeType<BackUp>("EpochBackUp");
   factory.registerNodeType<Compute<nav2_msgs::action::ComputePathToPose, false>>("EpochComputePathToPose");
   factory.registerNodeType<Compute<nav2_msgs::action::ComputePathThroughPoses, true>>("EpochComputePathThroughPoses");
   factory.registerNodeType<Smooth>("EpochSmoothPath");

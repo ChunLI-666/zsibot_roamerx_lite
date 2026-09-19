@@ -20,10 +20,11 @@ def merge(base, patch):
         else: base[key]=copy.deepcopy(value)
 
 
-def prepare(workspace, output, scenario="normal"):
+def prepare(workspace, output, scenario="normal", overlays=()):
     repo=workspace/'src/zsibot/zsibot_roamerx_lite/src/navigation/src'
     robot=repo/'robot_navigo'
     inputs=[robot/'params'/name for name in ('navigo_params.yaml','forward_alignment_experiment.yaml','zsl1_model_footprint_overlay.yaml','epoch_navigation_experiment.yaml')]
+    inputs.extend(Path(path).resolve() for path in overlays)
     config={}
     for path in inputs:
         if not path.exists(): raise RuntimeError(f'Production input is not ready: {path}')
@@ -87,6 +88,10 @@ def runtime_manifest(workspace, output, label="runtime_manifest"):
         'navigo_util/include/navigo_util/simple_action_server.hpp')]
     sources+=list((navigation/'navigo_epoch_msgs/msg').glob('*.msg'))+list((navigation/'navigo_epoch_msgs/action').glob('*.action'))
     sources+=list(Path(__file__).parent.glob('*.py'))
+    sources+=list((navigation/'navigo_mppi_controller/src').rglob('*.cpp'))
+    sources+=list((navigation/'navigo_mppi_controller/include').rglob('*.hpp'))
+    sources+=list((navigation/'navigo_velocity_optimizer/include').rglob('*.hpp'))
+    sources+=[Path(path) for path in json.loads((output/'inputs.json').read_text()).get('immutable_files',[])]
     for package in ('navigo_path_controller','navigo_velocity_optimizer','navigo_behavior_tree','navigo_bt_navigator','navigo_core','navigo_util'):
         sources+=list((navigation/package/'include').rglob('*.hpp'))
     sources+=list((navigation/'navigo_bt_navigator/behavior_trees').glob('*with_epoch.xml'))
@@ -143,6 +148,22 @@ class Trial:
                 self.fixture.record('stack_ready',dict(nodes=sorted(active)));return
             self.spin_for(.1)
         raise TimeoutError('Lifecycle readiness failed: '+str(set(clients)-active))
+
+    def verify_loaded_footprints(self):
+        import numpy as np
+        from geometry_audit import load_footprint,transform
+        polygon,metadata=load_footprint(self.args.footprint)
+        topics=('/global_costmap/published_footprint','/local_costmap/published_footprint')
+        self.spin_until(lambda:all(topic in self.fixture.latest for topic in topics),10,'Actual published footprint from both costmaps')
+        for topic in topics:
+            data=self.fixture.latest[topic]['data'];frame=data['header']['frame_id']
+            if frame not in ('map','odom'):raise AssertionError('Unexpected actual footprint frame '+frame)
+            pose=self.fixture.current_map_pose() if frame=='map' else self.fixture.pose
+            expected=transform(polygon,pose)
+            actual=np.asarray([[point['x'],point['y']] for point in data['polygon']['points']])
+            if actual.shape!=expected.shape or not np.allclose(actual,expected,atol=1e-5,rtol=0):
+                raise AssertionError(f'Actual loaded footprint mismatch/fallback at {topic}: {actual.tolist()} versus {expected.tolist()}')
+            self.fixture.record('loaded_footprint_verified',dict(topic=topic,frame=frame,actual_world_polygon=actual.tolist(),expected_world_polygon=expected.tolist(),metadata=metadata))
 
     def goal(self, position):
         self.last_goal=position
@@ -265,6 +286,7 @@ class Trial:
         gate=args.workspace/'src/zsibot/zsibot_roamerx_lite/src/navigation/src/robot_navigo/scripts/nav_safety_gate.py'
         self.start('gate',[sys.executable,str(gate),'--ros-args','-p','use_sim_time:=true','-p','enable_epoch_contract:=true'])
         self.lifecycle_ready()
+        if args.geometry:self.verify_loaded_footprints()
         if args.scenario in ('pending_planner','pending_smoother'):
             kind='planner' if args.scenario=='pending_planner' else 'smoother'
             self.start('action_proxy',[sys.executable,str(Path(__file__).with_name('action_delay_proxy.py')),'--kind',kind])
@@ -272,7 +294,7 @@ class Trial:
         if args.scenario=='through_poses':
             handle,result=self.through_goal([[args.initial[0]+.7,args.initial[1],0.],[args.initial[0]+2.,args.initial[1],0.]])
         else:
-            handle,result=self.goal([args.initial[0]+2.,args.initial[1],0.])
+            handle,result=self.goal(args.goal or [args.initial[0]+2.,args.initial[1],0.])
         if args.scenario in ('pending_planner','pending_smoother'):
             from navigo_epoch_msgs.msg import LocalizationEpoch
             from std_msgs.msg import String
@@ -295,7 +317,16 @@ class Trial:
             if not any('TF' in reason or 'tf_mismatch' in reason for reason in reasons):
                 raise AssertionError('No actual controller source-TF rejection observed')
             fixture.typed_pose_bias=0.;fixture.record('typed_pose_bias_removed',{})
-        self.spin_until(self.moving,25,'First authorized safe motion')
+        if args.expected=='blocked':
+            self.spin_for(args.observe_seconds)
+            terminal=result.done()
+            if terminal and result.result().status==4:raise AssertionError('Geometrically blocked route unexpectedly succeeded')
+            fixture.record('blocked_route_observed',dict(duration=args.observe_seconds,action_terminal=terminal,status=result.result().status if terminal else None))
+            if not terminal:self.cancel(handle,result)
+            else:
+                fixture.record('action_terminal',dict(status=result.result().status));self.assert_stopped(time.monotonic_ns())
+            return
+        self.spin_until(self.moving,45,'First authorized safe motion')
         self.spin_for(.5)
         if args.scenario=='stuck_replan':
             fixture.freeze_motion=True;after=time.monotonic_ns();fixture.record('plant_motion_blocked',{})
@@ -385,7 +416,7 @@ class Trial:
             raw=fixture.latest.get('/cmd_vel_epoch_raw',{}).get('data',{})
             if raw.get('token',{}).get('localization',{}).get('epoch')!=fixture.epoch:
                 raise AssertionError('Recovered motion does not reference the new localization epoch')
-        self.spin_until(result.done,90,'Real NavigateToPose completion')
+        self.spin_until(result.done,args.timeout,'Real NavigateToPose completion')
         status=result.result().status;fixture.record('action_terminal',dict(status=status))
         if status!=4:raise AssertionError(f'Expected SUCCEEDED action status 4, got {status}')
         if args.scenario=='through_poses':
@@ -403,18 +434,29 @@ class Trial:
         self.assert_stopped(time.monotonic_ns())
 
     def close(self):
-        for pid in self.suspended:
-            try:os.kill(pid,signal.SIGCONT)
-            except ProcessLookupError:pass
-        for process in reversed(self.processes):
-            if process.poll() is None:
-                os.killpg(process.pid,signal.SIGINT)
-                try:process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid,signal.SIGTERM)
-                    try:process.wait(timeout=3)
-                    except subprocess.TimeoutExpired:os.killpg(process.pid,signal.SIGKILL);process.wait()
-        for stream in self.streams:stream.close()
+        try:
+            for pid in self.suspended:
+                try:os.kill(pid,signal.SIGCONT)
+                except ProcessLookupError:pass
+            for process in reversed(self.processes):
+                if process.poll() is None:
+                    try:os.killpg(process.pid,signal.SIGINT)
+                    except ProcessLookupError:continue
+                    try:process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        try:os.killpg(process.pid,signal.SIGTERM)
+                        except ProcessLookupError:continue
+                        try:process.wait(timeout=3)
+                        except subprocess.TimeoutExpired:
+                            try:os.killpg(process.pid,signal.SIGKILL)
+                            except ProcessLookupError:pass
+                            process.wait()
+        finally:
+            try:
+                for stream in self.streams:stream.close()
+            finally:
+                # Settle shutdown/watchdog motion before every final pose and audit.
+                self.fixture.finish()
 
 
 def main():
@@ -423,23 +465,34 @@ def main():
     parser.add_argument('--map',type=Path);parser.add_argument('--domain',type=int,choices=range(188,192),default=188)
     parser.add_argument('--scenario',choices=['normal','loss_recovery','clock_pause','controller_silence','cancel','pending_planner','pending_smoother','bare_recovery','gate_restart','command_reorder','preempt','localization_session','pose_mismatch','future_tf','stuck_replan','through_poses'],default='normal')
     parser.add_argument('--initial',type=float,nargs=3,default=[2.817459926495081,.8539874986700582,0.])
+    parser.add_argument('--goal',type=float,nargs=3)
+    parser.add_argument('--geometry',action='store_true')
+    parser.add_argument('--parameter-overlay',type=Path,action='append',default=[])
+    parser.add_argument('--footprint',type=Path)
+    parser.add_argument('--expected',choices=['arrive','blocked'],default='arrive')
+    parser.add_argument('--observe-seconds',type=float,default=45.)
+    parser.add_argument('--timeout',type=float,default=150.)
     parser.add_argument('--prepare-only',action='store_true')
     args=parser.parse_args();args.workspace=args.workspace.resolve();args.output=args.output.resolve()
+    args.footprint=(args.footprint or args.workspace/'src/zsibot/zsibot_roamerx_lite/src/navigation/src/robot_navigo/params/zsl1_model_envelope.yaml').resolve()
     args.map=(args.map or args.workspace/'artifacts/matrix_scene_terrain_wh_gt_filtered_20260827/map.yaml').resolve()
     args.output.mkdir(parents=True,exist_ok=False);(args.output/'COLCON_IGNORE').touch()
-    params=prepare(args.workspace,args.output,args.scenario)
+    params=prepare(args.workspace,args.output,args.scenario,args.parameter_overlay)
     if args.prepare_only: print(params);return
+    inputs=json.loads((args.output/'inputs.json').read_text())
+    inputs['immutable_files']=[str(path) for path in (params,args.map,(args.map.parent/yaml.safe_load(args.map.read_text())['image']).resolve(),args.footprint)]
+    (args.output/'inputs.json').write_text(json.dumps(inputs,indent=2))
     os.environ.update(ROS_DOMAIN_ID=str(args.domain),ROS_LOCALHOST_ONLY='1',ROS_AUTOMATIC_DISCOVERY_RANGE='LOCALHOST')
     before_manifest=runtime_manifest(args.workspace,args.output)
     import rclpy
     from fixture import Fixture
-    rclpy.init();fixture=Fixture(args.map,args.initial,args.output)
+    rclpy.init();fixture=Fixture(args.map,args.initial,args.output,geometry_enabled=args.geometry)
     if args.scenario in ('loss_recovery','pending_planner','pending_smoother'):
         fixture.map_offset[0]=-.30
         fixture.record('initial_localization_bias',dict(map_to_odom_x=-.30,physical_odom_continuous=True))
     if args.scenario=='pose_mismatch':fixture.typed_pose_bias=.0001
     trial=Trial(args,fixture)
-    result=dict(scenario=args.scenario,domain=args.domain,success=False)
+    result=dict(scenario=args.scenario,domain=args.domain,success=False,geometry_enabled=args.geometry,expected=args.expected)
     started=time.monotonic()
     try:
         trial.execute(params);result['success']=True
@@ -450,6 +503,7 @@ def main():
         import math
         final=fixture.current_map_pose();target=getattr(trial,'last_goal',None)
         result.update(final_map_pose=final,final_odom_pose=fixture.pose,final_safe_velocity=fixture.safe,
+            final_executed_velocity=fixture._executed_velocity.copy(),plant_finished=fixture._finished,
             goal=target,xy_error_m=math.hypot(final[0]-target[0],final[1]-target[1]) if target else None,
             yaw_error_rad=abs(math.atan2(math.sin(final[2]-target[2]),math.cos(final[2]-target[2]))) if target else None,
             accepted_goals=[row['data'] for row in fixture.events if row['event']=='goal_accepted'],
@@ -463,11 +517,22 @@ def main():
         if not result['runtime_inputs_unchanged']:
             result['success']=False;result['error']='Runtime code or binary changed during this trial; results invalid'
         from audit_events import audit
-        wire_audit=audit(fixture.events)
+        wire_audit=audit(fixture.events,require_motion=args.expected!='blocked')
         (args.output/'wire_audit.json').write_text(json.dumps(wire_audit,indent=2))
         result['wire_audit_failures']=len(wire_audit['failures'])
         if result['success'] and wire_audit['failures']:
             result['success']=False;result['error']='Independent wire audit failed; inspect wire_audit.json'
+        if args.geometry:
+            from geometry_audit import load_footprint,audit_geometry
+            from execution_audit import audit_execution
+            polygon,metadata=load_footprint(args.footprint)
+            geometry=audit_geometry(fixture.events,fixture.scene,polygon);geometry['footprint']=metadata
+            execution=audit_execution(fixture.events)
+            (args.output/'geometry_audit.json').write_text(json.dumps(geometry,indent=2))
+            (args.output/'execution_audit.json').write_text(json.dumps(execution,indent=2))
+            result['geometry_pass']=geometry['geometry_pass'];result['execution_pass']=execution['execution_pass']
+            if not geometry['geometry_pass'] or not execution['execution_pass']:
+                result['success']=False;result['error']='Independent geometry/execution audit failed; inspect separate classifications'
         (args.output/'result.json').write_text(json.dumps(result,indent=2))
         fixture.close();rclpy.shutdown()
     print(json.dumps(result))

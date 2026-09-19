@@ -7,6 +7,7 @@
 #include <limits>
 #include <vector>
 #include "geometry_msgs/msg/pose.hpp"
+#include "navigo_costmap_2d/footprint_sweep.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "navigo_costmap_2d/costmap_2d.hpp"
 #include "navigo_costmap_2d/cost_values.hpp"
@@ -62,61 +63,7 @@ inline double pathHeading(
   return std::atan2(p.y - pose.position.y, p.x - pose.position.x);
 }
 
-// Rasterize the full convex padded footprint, including its interior. One cell
-// guard covers raster rounding and the sub-cell motion between sweep samples.
-// Unknown/out-of-map cells are rejected. Caller holds the costmap mutex.
-inline bool footprintFree(
-  navigo_costmap_2d::Costmap2D & map,
-  const std::vector<geometry_msgs::msg::Point> & footprint,
-  double x, double y, double yaw)
-{
-  if (footprint.size() < 3 || !std::isfinite(x) || !std::isfinite(y) ||
-    !std::isfinite(yaw)) {return false;}
-  std::vector<navigo_costmap_2d::MapLocation> polygon;
-  for (const auto & p : footprint) {
-    unsigned int mx, my;
-    if (!map.worldToMap(x + p.x * std::cos(yaw) - p.y * std::sin(yaw),
-      y + p.x * std::sin(yaw) + p.y * std::cos(yaw), mx, my)) {return false;}
-    polygon.push_back({mx, my});
-  }
-  std::vector<navigo_costmap_2d::MapLocation> cells;
-  map.convexFillCells(polygon, cells);
-  if (cells.empty()) {return false;}
-  for (const auto & cell : cells) {
-    for (int dx = -1; dx <= 1; ++dx) {
-      for (int dy = -1; dy <= 1; ++dy) {
-        const int mx = static_cast<int>(cell.x) + dx;
-        const int my = static_cast<int>(cell.y) + dy;
-        if (mx < 0 || my < 0 || mx >= static_cast<int>(map.getSizeInCellsX()) ||
-          my >= static_cast<int>(map.getSizeInCellsY()) ||
-          map.getCost(mx, my) >= navigo_costmap_2d::LETHAL_OBSTACLE) {return false;}
-      }
-    }
-  }
-  return true;
-}
-
-inline bool sweepFree(
-  navigo_costmap_2d::Costmap2D & map,
-  const std::vector<geometry_msgs::msg::Point> & footprint,
-  double x0, double y0, double yaw0, double x1, double y1, double yaw1,
-  double max_angle_step = 0.02)
-{
-  if (!std::isfinite(x0) || !std::isfinite(y0) || !std::isfinite(yaw0) ||
-    !std::isfinite(x1) || !std::isfinite(y1) || !std::isfinite(yaw1) ||
-    !(max_angle_step > 0.0) || !(map.getResolution() > 0.0)) {return false;}
-  double radius = 0.0;
-  for (const auto & p : footprint) {radius = std::max(radius, std::hypot(p.x, p.y));}
-  const double dyaw = normalize(yaw1 - yaw0);
-  const double motion = std::hypot(x1 - x0, y1 - y0) + radius * std::abs(dyaw);
-  const int steps = std::max(1, static_cast<int>(std::ceil(std::max(
-    motion / (0.5 * map.getResolution()), std::abs(dyaw) / max_angle_step))));
-  for (int i = 0; i <= steps; ++i) {
-    const double ratio = static_cast<double>(i) / steps;
-    if (!footprintFree(map, footprint, x0 + ratio * (x1 - x0),
-      y0 + ratio * (y1 - y0), yaw0 + ratio * dyaw)) {return false;}
-  }
-  return true;
-}
+using navigo_costmap_2d::sweep::footprintFree;
+using navigo_costmap_2d::sweep::sweepFree;
 }  // namespace mppi::forward_alignment
 #endif  // NAVIGO_MPPI_CONTROLLER__TOOLS__FORWARD_ALIGNMENT_HPP_

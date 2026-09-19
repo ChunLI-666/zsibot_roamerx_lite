@@ -68,4 +68,14 @@ class AuditTest(unittest.TestCase):
         self.assertTrue(audit(rows)['failures'])
 
 
+
+
+
+class BlockedCoverageTests(unittest.TestCase):
+    def test_stop_only_needs_explicit_blocked_protocol(self):
+        rows=[dict(event='/cmd_vel_safe',monotonic_ns=10,data=dict(velocity=[0.,0.,0.]))]
+        self.assertTrue(audit(rows)['failures'])
+        self.assertFalse(audit(rows,require_motion=False)['failures'])
+        self.assertTrue(audit([],require_motion=False)['failures'])
+
 if __name__=='__main__':unittest.main()

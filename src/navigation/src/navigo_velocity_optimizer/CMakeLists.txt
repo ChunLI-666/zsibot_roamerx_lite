@@ -74,4 +74,11 @@ install(DIRECTORY include/
 ament_export_include_directories(include)
 ament_export_libraries(${library_name})
 ament_export_dependencies(${dependencies})
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_motion_phase test/test_motion_phase.cpp)
+  target_link_libraries(test_motion_phase ${library_name})
+  ament_target_dependencies(test_motion_phase ${dependencies})
+endif()
+
 ament_package()

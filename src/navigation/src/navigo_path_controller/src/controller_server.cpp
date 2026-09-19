@@ -24,6 +24,8 @@
 #include "angles/angles.h"
 #include "lifecycle_msgs/msg/state.hpp"
 #include "navigo_core/exceptions.hpp"
+#include "navigo_core/backup_limits.hpp"
+#include "navigo_costmap_2d/footprint_sweep.hpp"
 #include "nav_2d_utils/conversions.hpp"
 #include "nav_2d_utils/tf_help.hpp"
 #include "navigo_util/node_utils.hpp"
@@ -242,6 +244,7 @@ ControllerServer::on_activate(const rclcpp_lifecycle::State & /*state*/)
   if (epoch_action_server_) {
     epoch_cmd_pub_->on_activate(); epoch_execution_pub_->on_activate();
     epoch_action_server_->activate();
+    if (backup_action_server_) {backup_action_server_->activate();}
   }
 
   auto node = shared_from_this();
@@ -262,6 +265,7 @@ ControllerServer::on_deactivate(const rclcpp_lifecycle::State & /*state*/)
 
   if (action_server_) {action_server_->deactivate();}
   if (epoch_action_server_) {
+    if (backup_action_server_) {backup_action_server_->deactivate();}
     epoch_action_server_->deactivate();
     invalidateEpoch("deactivated");
     epoch_cmd_pub_->on_deactivate(); epoch_execution_pub_->on_deactivate();
@@ -310,6 +314,7 @@ ControllerServer::on_cleanup(const rclcpp_lifecycle::State & /*state*/)
 
   // Release any allocated resources
   epoch_timer_.reset();
+  backup_action_server_.reset(); execution_odom_sub_.reset();
   epoch_action_server_.reset();
   epoch_loc_sub_.reset(); epoch_intent_sub_.reset(); epoch_gate_sub_.reset();
   epoch_cmd_pub_.reset(); epoch_execution_pub_.reset();
@@ -427,6 +432,23 @@ void ControllerServer::configureEpoch()
       if (!epoch_authority_.permits(installed_token_, navigo_core::epoch::steadyNow())) {epoch_execution_active_ = false;}
       publishEpochExecution(epoch_execution_active_ ? "installed" : "not_authorized");
     });
+  navigo_util::declare_parameter_if_not_declared(shared_from_this(), "enable_epoch_backup", rclcpp::ParameterValue(false));
+  execution_odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(get_parameter("odom_topic").as_string(), 10,
+      [this](nav_msgs::msg::Odometry::ConstSharedPtr msg) {
+        std::lock_guard<std::mutex> lock(epoch_mutex_);
+        const auto ns = navigo_core::epoch::steadyNow();
+        const int64_t source = static_cast<int64_t>(msg->header.stamp.sec)*1000000000LL + msg->header.stamp.nanosec;
+        if (source > execution_odom_stamp_) {execution_odom_stamp_ = source; execution_odom_advanced_ = ns;}
+        else if (source > 0 && source < execution_odom_stamp_) {execution_odom_regressed_ = true;}
+        execution_odom_ = *msg; execution_odom_received_ = ns;
+      });
+  if (get_parameter("enable_epoch_backup").as_bool()) {
+    backup_minimum_speed_ = parameter("epoch_backup_minimum_speed", .05);
+    backup_control_frequency_ = parameter("epoch_backup_control_frequency", 20.);
+    if (backup_minimum_speed_ > navigo_core::backup::maxSpeed) {throw std::runtime_error("Backup minimum speed exceeds hard speed cap");}
+    backup_action_server_ = std::make_unique<BackupActionServer>(shared_from_this(), "back_up_epoch",
+      std::bind(&ControllerServer::computeEpochBackup, this), nullptr, std::chrono::milliseconds(500), true);
+  }
   epoch_action_server_ = std::make_unique<EpochActionServer>(shared_from_this(), "follow_path_epoch",
     std::bind(&ControllerServer::computeEpochControl, this), nullptr, std::chrono::milliseconds(500), true);
 }
@@ -491,6 +513,7 @@ bool ControllerServer::epochReady(bool verify_tf)
 void ControllerServer::installEpochPath(const EpochAction::Goal & goal)
 {
   const auto & ep = goal.epoch_path;
+  if (ep.token.execution_kind != ep.token.TRACK) {throw std::runtime_error("FollowPath requires TRACK authority");}
   const auto intent_deadline = navigo_core::epoch::steadyNow() + epoch_authority_.intent_ttl_ns;
   while (true) {
     {
@@ -543,8 +566,186 @@ void ControllerServer::installEpochPath(const EpochAction::Goal & goal)
   publishEpochExecution("installed");
 }
 
+nav_msgs::msg::Odometry ControllerServer::executionOdom()
+{
+  std::lock_guard<std::mutex> lock(epoch_mutex_);
+  const auto ns = navigo_core::epoch::steadyNow();
+  geometry_msgs::msg::PoseStamped pose;
+  pose.header = execution_odom_.header; pose.pose = execution_odom_.pose.pose;
+  const auto & v = execution_odom_.twist.twist;
+  const auto & source_stamp = epoch_authority_.localization.output_pose.header.stamp;
+  const int64_t loc_source = static_cast<int64_t>(source_stamp.sec)*1000000000LL + source_stamp.nanosec;
+  if (std::abs(loc_source-execution_odom_stamp_) > 300000000 || execution_odom_regressed_ || !navigo_core::epoch::fresh(execution_odom_received_, ns, 300000000) ||
+    !navigo_core::epoch::fresh(execution_odom_advanced_, ns, 300000000) ||
+    !navigo_core::epoch::finitePose(pose) || pose.header.frame_id != costmap_ros_->getGlobalFrameID() ||
+    execution_odom_.child_frame_id != costmap_ros_->getBaseFrameID() ||
+    !std::isfinite(v.linear.x) || !std::isfinite(v.linear.y) || !std::isfinite(v.angular.z)) {
+    throw std::runtime_error("Execution odometry unavailable/stale/invalid");
+  }
+  return execution_odom_;
+}
+
+void ControllerServer::computeEpochBackup()
+{
+  // One command producer and one execution lease for both typed actions.
+  std::unique_lock<std::mutex> owner(epoch_action_mutex_, std::try_to_lock);
+  if (!owner.owns_lock()) {
+    auto result = std::make_shared<BackupAction::Result>();
+    result->error_code = BackupAction::Result::INVALID_REQUEST;
+    result->error_msg = "Another motion action still owns execution";
+    backup_action_server_->terminate_current(result); return;
+  }
+  std::lock_guard<std::mutex> settings(dynamic_params_lock_);
+  auto result = std::make_shared<BackupAction::Result>();
+  bool installed = false;
+  double traveled = 0., accumulated = 0.;
+  try {
+    auto goal = backup_action_server_->get_current_goal();
+    const auto now_ns = navigo_core::epoch::steadyNow();
+    if (!std::isfinite(backup_control_frequency_) || backup_control_frequency_ < 20.) {throw std::runtime_error("Backup requires epoch_backup_control_frequency >=20 Hz");}
+    const double reaction = navigo_core::backup::reactionTime(command_ttl_ns_);
+    if (!goal || goal->token.execution_kind != goal->token.BACKUP ||
+      !navigo_core::backup::valid(goal->distance, goal->speed, goal->token.execution_deadline_ns, now_ns) ||
+      goal->speed < backup_minimum_speed_ || goal->speed != goal->token.backup_max_speed || !navigo_core::epoch::finitePose(goal->start)) {
+      throw std::runtime_error("Invalid bounded BackUp request");
+    }
+    const auto intent_deadline = std::min(goal->token.execution_deadline_ns, now_ns + epoch_authority_.intent_ttl_ns);
+    while (true) {
+      bool permitted = false;
+      {
+        std::lock_guard<std::mutex> guard(epoch_mutex_);
+        permitted = epoch_authority_.permits(goal->token, navigo_core::epoch::steadyNow());
+      }
+      if (permitted) {break;}
+      if (navigo_core::epoch::steadyNow() >= intent_deadline || !backup_action_server_->is_server_active() ||
+        backup_action_server_->is_cancel_requested()) {throw std::runtime_error("Backup intent absent or canceled");}
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    {
+      std::lock_guard<std::mutex> guard(epoch_mutex_);
+      const auto & loc = epoch_authority_.localization;
+      const auto key = goal->token.navigation_session_id + ":" + std::to_string(goal->token.task_sequence);
+      if (!epoch_authority_.permits(goal->token, navigo_core::epoch::steadyNow()) ||
+        !goal->localization_heartbeat_sequence || goal->localization_heartbeat_sequence > loc.heartbeat_sequence ||
+        goal->start.header.frame_id != loc.output_pose.header.frame_id ||
+        goal->token.plan_sequence <= installed_plan_highwater_[key]) {throw std::runtime_error("Invalid/replayed backup identity");}
+      installed_token_ = goal->token;
+      installed_plan_highwater_[key] = goal->token.plan_sequence;
+      epoch_execution_active_ = true; installed = true;
+    }
+    if (!epochReady(true)) {throw std::runtime_error("Backup source TF unavailable");}
+    // Bind the request snapshot to its original source-stamped TF. Execution
+    // distance nevertheless starts at the fresh installed odometry pose.
+    const auto request_tf = costmap_ros_->getTfBuffer()->lookupTransform(goal->start.header.frame_id,
+      costmap_ros_->getBaseFrameID(), rclcpp::Time(goal->start.header.stamp), rclcpp::Duration::from_seconds(.02));
+    const auto & rp = goal->start.pose.position; const auto & rq = goal->start.pose.orientation;
+    const auto & rt = request_tf.transform.translation; const auto & rr = request_tf.transform.rotation;
+    const double request_error = std::sqrt((rp.x-rt.x)*(rp.x-rt.x)+(rp.y-rt.y)*(rp.y-rt.y)+(rp.z-rt.z)*(rp.z-rt.z));
+    const double request_angle = 2.*std::acos(std::clamp(std::abs(rq.x*rr.x+rq.y*rr.y+rq.z*rr.z+rq.w*rr.w),0.,1.));
+    if (!std::isfinite(request_error) || request_error > epoch_tf_position_tolerance_ ||
+      !std::isfinite(request_angle) || request_angle > epoch_tf_angle_tolerance_) {
+      throw std::runtime_error("Backup request source TF mismatch");
+    }
+    RCLCPP_INFO(get_logger(), "BackUp distance budget=%.3f m speed cap=%.3f m/s configured minimum=%.3f m/s reaction=%.3f s",
+      goal->distance, goal->speed, backup_minimum_speed_, reaction);
+    const auto initial_odom = executionOdom();
+    if (std::hypot(initial_odom.twist.twist.linear.x, initial_odom.twist.twist.linear.y) > .02 ||
+      std::abs(initial_odom.twist.twist.angular.z) > .02) {throw std::runtime_error("Backup must begin stopped");}
+    geometry_msgs::msg::PoseStamped start;
+    start.header = initial_odom.header; start.pose = initial_odom.pose.pose;
+    result->executed_start = start; result->configured_minimum_speed = backup_minimum_speed_;
+    const double x0 = start.pose.position.x, y0 = start.pose.position.y, yaw0 = tf2::getYaw(start.pose.orientation);
+    auto last = start;
+    bool stopping = false; uint64_t stopped_since = 0;
+    {
+      std::lock_guard<std::mutex> guard(epoch_mutex_); publishEpochExecution("backup_installed");
+    }
+    rclcpp::WallRate rate(backup_control_frequency_);
+    while (rclcpp::ok() && backup_action_server_->is_server_active()) {
+      if (backup_action_server_->is_cancel_requested() || backup_action_server_->is_preempt_requested()) {
+        throw std::runtime_error("Backup canceled/preempted");
+      }
+      const auto ns = navigo_core::epoch::steadyNow();
+      if (ns >= goal->token.execution_deadline_ns) {throw std::runtime_error("Backup time bound");}
+      if (!epochReady(true) || !costmap_ros_->isCurrent()) {throw std::runtime_error("Backup authority/TF/costmap unavailable");}
+      const auto odom = executionOdom();
+      geometry_msgs::msg::PoseStamped pose;
+      pose.header = odom.header; pose.pose = odom.pose.pose;
+      const double x = pose.pose.position.x, y = pose.pose.position.y, yaw = tf2::getYaw(pose.pose.orientation);
+      traveled = navigo_core::backup::progress(x0, y0, yaw0, x, y);
+      const double step = std::hypot(x-last.pose.position.x, y-last.pose.position.y);
+      if (step > .025) {throw std::runtime_error("Backup pose discontinuity");}
+      accumulated += step; last = pose;
+      if (!std::isfinite(traveled) || accumulated > goal->distance || traveled < -.02 ||
+        std::abs(navigo_core::backup::lateral(x0,y0,yaw0,x,y)) > .04 ||
+        std::abs(navigo_core::backup::angle(yaw-yaw0)) > .1) {throw std::runtime_error("Backup motion bound/deviation");}
+      const double remaining = goal->distance-std::max(traveled, accumulated);
+      const double speed = navigo_core::backup::velocity(goal->speed, remaining, reaction);
+      // distance is a maximum travel budget. Do not promote a braking cap below
+      // the robot's executable minimum speed back up to that minimum.
+      stopping = stopping || remaining <= .005 || std::abs(speed) < backup_minimum_speed_;
+      if (stopping) {
+        const auto & v = odom.twist.twist;
+        const double measured = std::hypot(v.linear.x, v.linear.y);
+        const double stopping_distance = navigo_core::backup::stopDistance(measured, reaction);
+        const double ca = tf2::getYaw(epoch_cycle_pose_.pose.orientation);
+        const double cx = epoch_cycle_pose_.pose.position.x, cy = epoch_cycle_pose_.pose.position.y;
+        const double direction = measured > 1e-6 ? ca + std::atan2(v.linear.y,v.linear.x) : ca+M_PI;
+        const double yaw_stop = ca + reaction*v.angular.z + v.angular.z*std::abs(v.angular.z)/(2.*.2);
+        auto * map = costmap_ros_->getCostmap();
+        const auto footprint = costmap_ros_->getRobotFootprint();
+        {
+          std::unique_lock<navigo_costmap_2d::Costmap2D::mutex_t> lock(*map->getMutex());
+          if (!navigo_costmap_2d::sweep::sweepFree(*map,footprint,cx,cy,ca,
+            cx+stopping_distance*std::cos(direction),cy+stopping_distance*std::sin(direction),yaw_stop)) {
+            throw std::runtime_error("Backup stopping footprint sweep blocked");
+          }
+        }
+        publishZeroVelocity();
+        const bool stopped = std::hypot(odom.twist.twist.linear.x, odom.twist.twist.linear.y) <= .005 &&
+          std::abs(odom.twist.twist.angular.z) <= .005;
+        if (!stopped) {stopped_since = 0;}
+        else if (stopped_since == 0) {stopped_since = ns;}
+        else if (ns-stopped_since >= 200000000) {
+          result->error_code = traveled >= .01 ? BackupAction::Result::NONE : BackupAction::Result::STOPPED;
+          result->error_msg = traveled >= .01 ? "stopped_within_distance_budget" : "no_effective_retreat"; break;
+        }
+        rate.sleep(); continue;
+      }
+      auto * map = costmap_ros_->getCostmap();
+      const auto footprint = costmap_ros_->getRobotFootprint();
+      const double swept = std::max(remaining, navigo_core::backup::stopDistance(speed, reaction));
+      const double cx = epoch_cycle_pose_.pose.position.x, cy = epoch_cycle_pose_.pose.position.y;
+      const double ca = tf2::getYaw(epoch_cycle_pose_.pose.orientation);
+      {
+        std::unique_lock<navigo_costmap_2d::Costmap2D::mutex_t> lock(*map->getMutex());
+        if (!navigo_costmap_2d::sweep::sweepFree(*map, footprint, cx,cy,ca,
+          cx-swept*std::cos(ca), cy-swept*std::sin(ca), ca)) {throw std::runtime_error("Backup rear footprint sweep blocked");}
+      }
+      if (navigo_core::epoch::steadyNow()-ns > 50000000) {throw std::runtime_error("Backup control cycle exceeds reaction budget");}
+      geometry_msgs::msg::TwistStamped command; command.twist.linear.x = speed;
+      publishVelocity(command);
+      auto feedback = std::make_shared<BackupAction::Feedback>();
+      feedback->distance_traveled = traveled;
+      feedback->remaining_time = (goal->token.execution_deadline_ns-ns)*1e-9;
+      backup_action_server_->publish_feedback(feedback);
+      rate.sleep();
+    }
+    if (!rclcpp::ok() || !backup_action_server_->is_server_active()) {throw std::runtime_error("Backup server inactive");}
+  } catch (const std::exception & error) {
+    result->error_code = installed ? BackupAction::Result::STOPPED : BackupAction::Result::INVALID_REQUEST;
+    result->error_msg = error.what();
+  }
+  result->distance_traveled = traveled; result->path_length = accumulated;
+  if (installed) {publishZeroVelocity(); invalidateEpoch("backup_finished"); epoch_cycle_valid_ = false;}
+  if (!result->error_code) {backup_action_server_->succeeded_current(result);}
+  else {backup_action_server_->terminate_current(result);}
+}
+
 void ControllerServer::computeEpochControl()
 {
+  std::unique_lock<std::mutex> owner(epoch_action_mutex_, std::try_to_lock);
+  if (!owner.owns_lock()) {epoch_action_server_->terminate_current(); return;}
   std::lock_guard<std::mutex> lock(dynamic_params_lock_);
   try {
     auto initial_goal = epoch_action_server_->get_current_goal();
@@ -727,10 +928,20 @@ void ControllerServer::computeAndPublishVelocity()
   }
 
   if (!progress_checker_->check(pose)) {
+    if (epoch_contract_) {
+      // Recoverable execution termination seals this token without invalidating
+      // the mission identity needed by the explicit recovery BT.
+      publishZeroVelocity();
+      invalidateEpoch("progress_failed");
+    }
     throw navigo_core::PlannerException("Failed to make progress");
   }
 
-  nav_2d_msgs::msg::Twist2D twist = getThresholdedTwist(odom_sub_->getTwist());
+  nav_2d_msgs::msg::Twist2D twist;
+  if (epoch_contract_) {
+    const auto odom = executionOdom();
+    twist.x = odom.twist.twist.linear.x; twist.y = odom.twist.twist.linear.y; twist.theta = odom.twist.twist.angular.z;
+  } else {twist = getThresholdedTwist(odom_sub_->getTwist());}
 
   geometry_msgs::msg::TwistStamped cmd_vel_2d;
 
@@ -849,6 +1060,9 @@ void ControllerServer::publishVelocity(const geometry_msgs::msg::TwistStamped & 
     if (!epoch_execution_active_ || !epoch_cycle_valid_ || epoch_cycle_token_ != installed_token_ ||
       !epoch_authority_.permits(installed_token_, now_ns)) {return;}
     if (!epoch_cmd_pub_->is_activated()) {return;}
+    if (!navigo_core::epoch::motionCommandValid(installed_token_, velocity.twist, now_ns)) {
+      epoch_execution_active_ = false; publishEpochExecution("invalid_motion_command"); return;
+    }
     navigo_epoch_msgs::msg::EpochCommand command;
     command.token = installed_token_;
     command.controller_session_id = controller_session_;
@@ -857,6 +1071,11 @@ void ControllerServer::publishVelocity(const geometry_msgs::msg::TwistStamped & 
     command.source_steady_time_ns = now_ns;
     command.max_age_ms = command_ttl_ns_ / 1000000;
     command.velocity = velocity.twist;
+    if (installed_token_.execution_kind == installed_token_.BACKUP) {
+      command.source_motion_phase = velocity.twist.linear.x == 0. ? command.PHASE_HOLD : command.PHASE_TRANSLATE;
+    } else if (controllers_.count(current_controller_)) {
+      command.source_motion_phase = controllers_[current_controller_]->getExecutionMotionPhase();
+    }
     epoch_cmd_pub_->publish(command);
     return;
   }
@@ -1081,7 +1300,11 @@ bool ControllerServer::isGoalReached()
     return false;
   }
 
-  nav_2d_msgs::msg::Twist2D twist = getThresholdedTwist(odom_sub_->getTwist());
+  nav_2d_msgs::msg::Twist2D twist;
+  if (epoch_contract_) {
+    const auto odom = executionOdom();
+    twist.x = odom.twist.twist.linear.x; twist.y = odom.twist.twist.linear.y; twist.theta = odom.twist.twist.angular.z;
+  } else {twist = getThresholdedTwist(odom_sub_->getTwist());}
   geometry_msgs::msg::Twist velocity = nav_2d_utils::twist2Dto3D(twist);
 
   geometry_msgs::msg::PoseStamped stamped_end_pose = end_pose_;

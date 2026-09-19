@@ -122,6 +122,7 @@ void MPPIController::deactivate()
 
 void MPPIController::reset()
 {
+  source_motion_phase_ = last_nonzero_motion_phase_ = 1;
   motion_mode_ = forward_alignment::Mode::TRACK;
   optimizer_.reset();
 }
@@ -149,10 +150,13 @@ geometry_msgs::msg::TwistStamped MPPIController::computeVelocityCommands(
   navigo_costmap_2d::Costmap2D * costmap = costmap_ros_->getCostmap();
   std::unique_lock<navigo_costmap_2d::Costmap2D::mutex_t> costmap_lock(*(costmap->getMutex()));
 
+  source_motion_phase_ = 1;  // Any exception or zero result remains HOLD.
   geometry_msgs::msg::TwistStamped cmd;
   if (forward_alignment_enabled_ &&
     alignmentCommand(robot_pose, robot_speed, transformed_plan, goal, goal_checker, cmd, dt))
   {
+    source_motion_phase_ = cmd.twist.angular.z != 0.0 ? 3 : 1;
+    if (source_motion_phase_ != 1) {last_nonzero_motion_phase_ = source_motion_phase_;}
     return cmd;
   }
   try {
@@ -160,6 +164,36 @@ geometry_msgs::msg::TwistStamped MPPIController::computeVelocityCommands(
   } catch (const std::exception &) {
     publishMode("HOLD", "optimizer_or_collision_rejected", 0.0, robot_pose.header.stamp);
     throw;
+  }
+
+  if (forward_alignment_enabled_) {
+    const bool translation = cmd.twist.linear.x != 0.0 || cmd.twist.linear.y != 0.0;
+    const bool rotation = cmd.twist.angular.z != 0.0;
+    // A small measured residual is not a command to snap an axis to zero:
+    // the phase-aware relay must still brake its exact command state to zero.
+    geometry_msgs::msg::Pose pose_tolerance;
+    geometry_msgs::msg::Twist stop_tolerance;
+    if (!goal_checker || !goal_checker->getTolerances(pose_tolerance, stop_tolerance) ||
+      !std::isfinite(stop_tolerance.angular.z) || stop_tolerance.angular.z <= 0.0)
+    {
+      throw std::runtime_error("Forward tracking requires a finite stopped angular tolerance");
+    }
+    if (translation && last_nonzero_motion_phase_ == 3 &&
+      std::abs(robot_speed.angular.z) > stop_tolerance.angular.z) {
+      optimizer_.reset();
+      publishMode("HOLD", "waiting_rotation_stop", robot_speed.angular.z, robot_pose.header.stamp);
+      cmd.twist = geometry_msgs::msg::Twist();
+    } else if (!translation && rotation && last_nonzero_motion_phase_ == 4 &&
+      std::hypot(robot_speed.linear.x, robot_speed.linear.y) > stopped_linear_velocity_)
+    {
+      optimizer_.reset();
+      publishMode("HOLD", "waiting_translation_stop", 0.0, robot_pose.header.stamp);
+      cmd.twist = geometry_msgs::msg::Twist();
+    } else {
+      // TRACK preserves the optimizer's explicitly predicted curved movement.
+      source_motion_phase_ = translation ? 4 : (rotation ? 3 : 1);
+      if (source_motion_phase_ != 1) {last_nonzero_motion_phase_ = source_motion_phase_;}
+    }
   }
 
 #ifdef BENCHMARK_TESTING
@@ -265,6 +299,16 @@ bool MPPIController::alignmentCommand(
   if (motion_mode_ != forward_alignment::Mode::FINAL && !std::isfinite(heading)) {
     publishMode("HOLD", "invalid_path_heading", 0.0, pose.header.stamp);
     throw std::runtime_error("No geometric path heading outside final alignment");
+  }
+  if (motion_mode_ == forward_alignment::Mode::TRACK && old_mode != motion_mode_) {
+    if (!std::isfinite(velocity_tolerance.angular.z) || velocity_tolerance.angular.z <= 0.0) {
+      throw std::runtime_error("Alignment transition requires a stopped angular tolerance");
+    }
+    if (std::abs(speed.angular.z) > velocity_tolerance.angular.z) {
+      motion_mode_ = old_mode;
+      publishMode("HOLD", "waiting_rotation_stop", speed.angular.z, pose.header.stamp);
+      return true;
+    }
   }
   if (old_mode != motion_mode_) {optimizer_.reset();}
   if (motion_mode_ == forward_alignment::Mode::TRACK) {

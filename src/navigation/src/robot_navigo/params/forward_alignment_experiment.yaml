@@ -20,7 +20,7 @@ controller_server:
       forward_alignment:
         enabled: true
         entry_angle: 0.70
-        exit_angle: 0.20
+        exit_angle: 0.05
         lookahead_distance: 0.5
         max_angular_velocity: 0.1
         min_angular_velocity: 0.02

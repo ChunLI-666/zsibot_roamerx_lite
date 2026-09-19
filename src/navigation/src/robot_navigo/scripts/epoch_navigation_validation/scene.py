@@ -13,7 +13,12 @@ class Scene:
         pixels = np.asarray(Image.open(self.path.parent/self.metadata['image']))
         if pixels.ndim == 3:
             pixels = pixels[:, :, :3].mean(axis=2)
-        self.free = np.flipud(pixels > 255*(1-self.metadata.get('free_thresh', .196)))
+        occupancy_probability=(255-pixels.astype(float))/255
+        if self.metadata.get('negate',0):occupancy_probability=1-occupancy_probability
+        free=occupancy_probability<self.metadata.get('free_thresh',.196)
+        occupied=occupancy_probability>self.metadata.get('occupied_thresh',.65)
+        self.occupancy=np.flipud(np.where(free,0,np.where(occupied,1,2))).astype(np.uint8)
+        self.free=self.occupancy==0
         self.resolution = float(self.metadata['resolution'])
         self.origin = np.asarray(self.metadata['origin'][:2], dtype=float)
         if abs(self.metadata['origin'][2]) > 1e-9:
@@ -35,7 +40,10 @@ class Scene:
 
 def integrate(pose, command, dt):
     x,y,yaw = pose; vx,vy,wz = command
-    midpoint = yaw+wz*dt*.5
-    return [x+(math.cos(midpoint)*vx-math.sin(midpoint)*vy)*dt,
-            y+(math.sin(midpoint)*vx+math.cos(midpoint)*vy)*dt,
+    half_angle = wz*dt*.5
+    # Exact constant body twist; stable at zero angular velocity.
+    scale = dt*(math.sin(half_angle)/half_angle if abs(half_angle)>1e-8 else 1.-half_angle*half_angle/6.)
+    midpoint = yaw+half_angle
+    return [x+(math.cos(midpoint)*vx-math.sin(midpoint)*vy)*scale,
+            y+(math.sin(midpoint)*vx+math.cos(midpoint)*vy)*scale,
             math.atan2(math.sin(yaw+wz*dt),math.cos(yaw+wz*dt))]

@@ -43,9 +43,24 @@ inline bool finitePose(const geometry_msgs::msg::PoseStamped & pose)
     std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z) && std::isfinite(norm) &&
     std::abs(norm - 1.) < 1e-3;
 }
+inline bool motionTokenValid(const navigo_epoch_msgs::msg::NavigationToken & t)
+{
+  return (t.execution_kind == t.TRACK && t.backup_max_speed == 0. && t.execution_deadline_ns == 0) ||
+    (t.execution_kind == t.BACKUP && std::isfinite(t.backup_max_speed) && t.backup_max_speed >= .05 &&
+    t.backup_max_speed <= .1 && t.execution_deadline_ns > 0);
+}
+inline bool motionCommandValid(const navigo_epoch_msgs::msg::NavigationToken & t,
+  const geometry_msgs::msg::Twist & v, uint64_t now)
+{
+  if (!motionTokenValid(t)) {return false;}
+  if (t.execution_kind == t.TRACK) {return std::isfinite(v.linear.x) && v.linear.x >= 0.;}
+  return now < t.execution_deadline_ns && std::isfinite(v.linear.x) &&
+    v.linear.x <= 0. && v.linear.x >= -t.backup_max_speed &&
+    v.linear.y == 0. && v.linear.z == 0. && v.angular.x == 0. && v.angular.y == 0. && v.angular.z == 0.;
+}
 inline bool validToken(const navigo_epoch_msgs::msg::NavigationToken & t)
 {
-  return !t.localization.process_session_id.empty() && !t.localization.map_loaded_instance.empty() &&
+  return motionTokenValid(t) && !t.localization.process_session_id.empty() && !t.localization.map_loaded_instance.empty() &&
     t.localization.epoch > 0 && t.localization.commits > 0 && !t.navigation_session_id.empty() &&
     t.task_sequence > 0 && t.plan_sequence > 0 && !t.gate_session_id.empty();
 }
@@ -118,7 +133,8 @@ public:
       value.token.localization != localization.identity || value.token.gate_session_id != gate_session ||
       !fresh(value.source_steady_time_ns, now, intent_ttl_ns)) {return;}
     if (session == intent.token.navigation_session_id) {
-      if (value.heartbeat_sequence <= intent.heartbeat_sequence ||
+      if ((value.token.task_sequence == intent.token.task_sequence && value.token.plan_sequence == intent.token.plan_sequence && value.token != intent.token) ||
+        value.heartbeat_sequence <= intent.heartbeat_sequence ||
         value.token.task_sequence < intent.token.task_sequence ||
         (value.token.task_sequence == intent.token.task_sequence && value.token.plan_sequence < intent.token.plan_sequence)) {return;}
     } else if (!intent.token.navigation_session_id.empty()) {
@@ -137,7 +153,7 @@ public:
   }
   bool permits(const navigo_epoch_msgs::msg::NavigationToken & token, uint64_t now) const
   {
-    return validToken(token) && localizationReady(now) && token.localization == localization.identity &&
+    return validToken(token) && (token.execution_kind != token.BACKUP || now < token.execution_deadline_ns) && localizationReady(now) && token.localization == localization.identity &&
       token.gate_session_id == gate_session && intent.active && token == intent.token &&
       fresh(intent_received, now, intent_ttl_ns) && fresh(intent.source_steady_time_ns, now, intent_ttl_ns);
   }

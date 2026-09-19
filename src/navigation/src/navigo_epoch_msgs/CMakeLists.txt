@@ -15,6 +15,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/NavExecutionState.msg"
   "msg/EpochCommand.msg"
   "action/FollowPathEpoch.action"
+  "action/BackUpEpoch.action"
   DEPENDENCIES std_msgs geometry_msgs nav_msgs builtin_interfaces)
 ament_export_dependencies(rosidl_default_runtime)
 ament_package()

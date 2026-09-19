@@ -225,10 +225,104 @@ class NodeRevocationTest(unittest.TestCase):
             replay.relay_sequence += 1
             self.node.epoch_command_callback(replay)
             self.assertEqual(self.outputs[-1][0], Twist())
-        with mock.patch.object(MODULE.time, 'monotonic_ns', return_value=NOW + 1_000_000_000):
-            self.node.enforce_epoch()
+        self.node.enforce_epoch()
         self.assertEqual(previous, self.node.epoch_policy.gate_session)
         self.assertFalse(self.node.epoch_armed)
+
+    def test_progress_failure_seals_old_token_and_allows_fresh_same_task_backup(self):
+        previous=self.node.epoch_policy.gate_session
+        loc,intent,execution,command=copy.deepcopy(self.bundle)
+        execution.heartbeat_sequence+=1;execution.active=False;execution.reason='progress_failed'
+        self.node.epoch_authority_callback('execution_state',execution)
+        self.assertEqual(self.outputs[-1][0],Twist())
+        self.assertEqual(previous,self.node.epoch_policy.gate_session)
+        # The BT consumes FAILURE and revokes intent while clearing/waiting.
+        intent.heartbeat_sequence+=1;intent.active=False
+        self.node.epoch_authority_callback('navigation_intent',intent)
+        self.node.enforce_epoch()
+        self.assertEqual(previous,self.node.epoch_policy.gate_session)
+        # Neither a reactivated execution nor an old raw/relay command revives it.
+        execution.heartbeat_sequence+=1;execution.active=True;execution.reason='installed'
+        self.node.epoch_authority_callback('execution_state',execution)
+        intent.heartbeat_sequence+=1;intent.active=True
+        self.node.epoch_authority_callback('navigation_intent',intent)
+        command.command_sequence+=1;command.relay_sequence+=1
+        self.node.epoch_command_callback(command)
+        self.assertEqual(self.outputs[-1][0],Twist())
+        raw=Twist();raw.linear.x=-.08;self.node.cmd_vel_callback(raw)
+        self.assertEqual(self.outputs[-1][0],Twist())
+        # A new BACKUP request still needs full normal admission and installation.
+        intent.heartbeat_sequence+=1;intent.token.plan_sequence+=1
+        intent.token.execution_kind=1;intent.token.backup_max_speed=.08
+        intent.token.execution_deadline_ns=NOW+5_000_000_000
+        self.node.epoch_authority_callback('navigation_intent',intent)
+        command.token=copy.deepcopy(intent.token);command.command_sequence+=1;command.relay_sequence+=1
+        command.source_steady_time_ns+=1
+        command.velocity.linear.x=-.08;command.source_motion_phase=command.PHASE_TRANSLATE
+        self.node.epoch_command_callback(command)
+        self.assertEqual(self.outputs[-1][0],Twist())
+        execution.token=copy.deepcopy(intent.token);execution.heartbeat_sequence+=1
+        self.node.epoch_authority_callback('execution_state',execution)
+        with mock.patch.object(MODULE.time,'monotonic_ns',return_value=NOW+1):
+            self.node.epoch_command_callback(command)
+        self.assertEqual(self.outputs[-1][0].linear.x,-.08)
+        self.assertEqual(self.node.epoch_policy.intent.token.task_sequence,1)
+        self.assertEqual(previous,self.node.epoch_policy.gate_session)
+
+    def test_sealed_progress_failure_does_not_mask_localization_loss_or_timeout(self):
+        for failure in ('lost', 'timeout', 'estop'):
+            with self.subTest(failure=failure):
+                policy=MODULE.EpochGatePolicy('gate','boot');bundle=prime(policy)
+                self.node.epoch_policy=policy;self.node.epoch_armed=True
+                ended=copy.deepcopy(bundle[2]);ended.heartbeat_sequence+=1
+                ended.active=False;ended.reason='progress_failed'
+                self.node.epoch_authority_callback('execution_state',ended)
+                self.assertEqual(policy.gate_session,'gate')
+                if failure=='lost':
+                    lost=copy.deepcopy(bundle[0]);lost.heartbeat_sequence+=1;lost.health=3
+                    self.node.epoch_authority_callback('localization',lost)
+                elif failure=='timeout':
+                    with mock.patch.object(MODULE.time,'monotonic_ns',return_value=NOW+500_000_000):
+                        self.node.enforce_epoch()
+                else:
+                    self.node.emergency_stop_callback(Bool(data=True))
+                    self.node.emergency_stop_callback(Bool(data=False))
+                self.assertNotEqual(policy.gate_session,'gate')
+                new=copy.deepcopy(bundle[1]);new.heartbeat_sequence+=1;new.token.plan_sequence+=1
+                new.token.execution_kind=1;new.token.backup_max_speed=.08
+                new.token.execution_deadline_ns=NOW+5_000_000_000
+                self.node.epoch_authority_callback('navigation_intent',new)
+                self.assertNotEqual(policy.intent.token,new.token)
+                self.assertEqual(self.outputs[-1][0],Twist())
+
+    def test_terminal_requires_same_identity_challenge_and_fresh_inactive_intent(self):
+        for failure in ('epoch','gate','intent_timeout'):
+            policy=MODULE.EpochGatePolicy('gate','boot');loc,intent,execution,_=prime(policy)
+            execution=copy.deepcopy(execution);execution.heartbeat_sequence+=1
+            execution.active=False;execution.reason='progress_failed';policy.execution_state(execution,NOW)
+            if failure=='epoch':
+                loc=copy.deepcopy(loc);loc.heartbeat_sequence+=1;loc.identity.epoch+=1
+                policy.localization(loc,NOW)
+            elif failure=='gate':policy.gate_session='new-gate'
+            else:
+                loc=copy.deepcopy(loc);loc.heartbeat_sequence+=1;loc.output_pose.header.stamp.sec+=1
+                policy.localization(loc,NOW+500_000_000)
+            now=NOW+500_000_000 if failure=='intent_timeout' else NOW
+            self.assertEqual(policy.authority_reason(now),'intent_not_ready')
+            self.assertEqual(policy.revocation_reason(now),'intent_not_ready')
+
+    def test_nonprogress_revocations_do_not_receive_terminal_exception(self):
+        for reason in ('Epoch authority or source TF revoked','Execution odometry unavailable/stale/invalid','Costmap observations stale'):
+            with self.subTest(reason=reason):
+                policy=MODULE.EpochGatePolicy('gate','boot');bundle=prime(policy)
+                ended=copy.deepcopy(bundle[2]);ended.heartbeat_sequence+=1
+                ended.active=False;ended.reason=reason;policy.execution_state(ended,NOW)
+                self.assertFalse(policy.terminal_current())
+                self.assertEqual(policy.revocation_reason(NOW),'path_not_installed')
+        expired=copy.deepcopy(self.bundle[2]);expired.active=False;expired.reason='progress_failed'
+        expired.heartbeat_sequence+=1;expired.source_steady_time_ns=NOW-400_000_000
+        self.node.epoch_authority_callback('execution_state',expired)
+        self.assertFalse(self.node.epoch_policy.terminal_current())
 
     def test_new_task_can_install_after_terminal(self):
         terminal = copy.deepcopy(self.bundle[2])
@@ -268,5 +362,107 @@ class NodeRevocationTest(unittest.TestCase):
         for _ in range(3): self.node.enforce_epoch()
         self.assertEqual(previous, self.node.epoch_policy.gate_session)
 
+
+
+class BackupPolicyTest(unittest.TestCase):
+    def bundle(self):
+        policy = MODULE.EpochGatePolicy('gate','boot')
+        loc,intent,execution,command = messages()
+        intent.token.execution_kind = 1
+        intent.token.backup_max_speed = .1
+        intent.token.execution_deadline_ns = NOW + 200_000_000
+        execution.token = copy.deepcopy(intent.token)
+        command.token = copy.deepcopy(intent.token)
+        command.velocity.linear.x = -.08
+        command.source_motion_phase = 2
+        prime(policy,(loc,intent,execution,command))
+        return policy,loc,intent,execution,command
+
+    def test_slow_watchdog_does_not_admit_backup(self):
+        policy,loc,intent,execution,command=self.bundle()
+        slow=MODULE.EpochGatePolicy('gate','boot');slow.backup_watchdog_period_ns=100_000_000
+        slow.localization(loc,NOW);slow.navigation_intent(intent,NOW)
+        self.assertIsNone(slow.intent)
+        normal=messages();slow.navigation_intent(normal[1],NOW)
+        self.assertIsNotNone(slow.intent)
+
+    def test_reverse_requires_explicit_backup(self):
+        policy = MODULE.EpochGatePolicy('gate','boot')
+        _,_,_,command = prime(policy)
+        command.velocity.linear.x = -.01
+        self.assertEqual(policy.accept_command(command,NOW),'tracking_reverse_forbidden')
+        policy,_,_,_,command = self.bundle()
+        self.assertIsNone(policy.accept_command(command,NOW))
+
+    def test_backup_limits_and_phase(self):
+        for axis,value in [('x',-.101),('y',.01)]:
+            policy,_,_,_,command = self.bundle()
+            setattr(command.velocity.linear,axis,value)
+            self.assertEqual(policy.accept_command(command,NOW),'backup_velocity_bound')
+        policy,_,_,_,command = self.bundle()
+        command.velocity.angular.z=.01
+        self.assertEqual(policy.accept_command(command,NOW),'mixed_motion_axes')
+
+    def test_deadline_cannot_be_renewed_with_same_sequence(self):
+        policy,_,intent,_,command = self.bundle()
+        modified = copy.deepcopy(intent)
+        modified.heartbeat_sequence += 1
+        modified.token.execution_deadline_ns += 100_000_000
+        policy.navigation_intent(modified,NOW+1)
+        self.assertEqual(policy.intent.token.execution_deadline_ns,intent.token.execution_deadline_ns)
+        self.assertEqual(policy.accept_command(command,NOW+200_000_000),'backup_deadline')
+
+    def test_completion_seals_backup_token(self):
+        policy,_,_,execution,command = self.bundle()
+        execution.active=False;execution.reason='backup_finished';execution.heartbeat_sequence+=1
+        policy.execution_state(execution,NOW+1)
+        self.assertTrue(policy.terminal_current())
+        self.assertEqual(policy.accept_command(command,NOW+2),'task_completed')
+
+    def test_localization_loss_cancels_backup(self):
+        policy,loc,_,_,command = self.bundle()
+        loc.heartbeat_sequence+=1;loc.health=3;loc.output_ready=False
+        policy.localization(loc,NOW+1)
+        self.assertEqual(policy.accept_command(command,NOW+2),'localization_not_ready')
+
+class MotionPhaseGateTest(unittest.TestCase):
+    def test_curve_tracking_can_brake_before_rotation(self):
+        policy=MODULE.EpochGatePolicy('gate','boot')
+        _,_,_,old=prime(policy)
+        old.source_motion_phase=4;old.velocity.angular.z=.1
+        self.assertIsNone(policy.accept_command(old,NOW))
+        braking=copy.deepcopy(old)
+        braking.command_sequence=2;braking.source_steady_time_ns=NOW+1;braking.relay_sequence=2
+        braking.source_motion_phase=3;braking.transition_braking=True;braking.braking_from_phase=4
+        braking.velocity.linear.x=.05;braking.velocity.angular.z=.05
+        self.assertIsNone(policy.accept_command(braking,NOW+1))
+
+    def test_braking_cannot_be_interrupted_before_zero(self):
+        policy=MODULE.EpochGatePolicy('gate','boot')
+        _,_,_,old=prime(policy);old.source_motion_phase=3;old.velocity.linear.x=0.;old.velocity.angular.z=.1
+        self.assertIsNone(policy.accept_command(old,NOW))
+        braking=copy.deepcopy(old);braking.relay_sequence=2;braking.source_motion_phase=1
+        braking.transition_braking=True;braking.braking_from_phase=3;braking.velocity.angular.z=.05
+        self.assertIsNone(policy.accept_command(braking,NOW+1))
+        resume=copy.deepcopy(old);resume.relay_sequence=3
+        self.assertEqual(policy.accept_command(resume,NOW+2),'braking_zero_handoff_required')
+        braking.relay_sequence=3;braking.velocity.angular.z=0.
+        self.assertIsNone(policy.accept_command(braking,NOW+3))
+        resume.relay_sequence=4
+        self.assertIsNone(policy.accept_command(resume,NOW+4))
+
+    def test_braking_rejects_forged_source_amplification_and_sign(self):
+        for field in ('source','amplitude','sign'):
+            policy=MODULE.EpochGatePolicy('gate','boot')
+            _,_,_,old=prime(policy);old.source_motion_phase=3;old.velocity.linear.x=0.;old.velocity.angular.z=.1
+            self.assertIsNone(policy.accept_command(old,NOW))
+            braking=copy.deepcopy(old);braking.relay_sequence=2
+            braking.source_motion_phase=1;braking.transition_braking=True;braking.braking_from_phase=3
+            braking.velocity.angular.z=.05
+            if field=='source':braking.braking_from_phase=4
+            if field=='amplitude':braking.velocity.angular.z=.11
+            if field=='sign':braking.velocity.angular.z=-.01
+            expected='braking_source_mismatch' if field=='source' else 'braking_amplitude_or_sign'
+            self.assertEqual(policy.accept_command(braking,NOW+1),expected)
 
 if __name__ == '__main__': unittest.main()

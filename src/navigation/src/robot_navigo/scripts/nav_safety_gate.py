@@ -54,6 +54,7 @@ class EpochGatePolicy:
         self.relay_session = None
         self.retired_relays = set()
         self.completed_tokens = set()
+        self.backup_watchdog_period_ns = 50_000_000
 
     @staticmethod
     def fresh(stamp, now, ttl):
@@ -62,15 +63,22 @@ class EpochGatePolicy:
     @staticmethod
     def token_valid(token):
         identity = token.localization
-        return (identity.process_session_id and identity.map_loaded_instance and identity.epoch > 0 and
+        motion_valid = ((token.execution_kind == 0 and token.backup_max_speed == 0 and token.execution_deadline_ns == 0) or
+                        (token.execution_kind == 1 and math.isfinite(token.backup_max_speed) and
+                         .05 <= token.backup_max_speed <= .1 and token.execution_deadline_ns > 0))
+        return (motion_valid and identity.process_session_id and identity.map_loaded_instance and identity.epoch > 0 and
                 identity.commits > 0 and token.navigation_session_id and token.task_sequence > 0 and
                 token.plan_sequence > 0 and token.gate_session_id)
 
     @staticmethod
     def token_key(token):
         identity = token.localization
-        return (identity.process_session_id, identity.map_loaded_instance, identity.epoch, identity.commits,
-                token.navigation_session_id, token.task_sequence, token.plan_sequence, token.gate_session_id)
+        motion_valid = ((token.execution_kind == 0 and token.backup_max_speed == 0 and token.execution_deadline_ns == 0) or
+                        (token.execution_kind == 1 and math.isfinite(token.backup_max_speed) and
+                         .05 <= token.backup_max_speed <= .1 and token.execution_deadline_ns > 0))
+        return (motion_valid and identity.process_session_id, identity.map_loaded_instance, identity.epoch, identity.commits,
+                token.navigation_session_id, token.task_sequence, token.plan_sequence, token.gate_session_id,
+                token.execution_kind, token.backup_max_speed, token.execution_deadline_ns)
 
     def terminal_current(self):
         return self.intent is not None and self.token_key(self.intent.token) in self.completed_tokens
@@ -119,6 +127,8 @@ class EpochGatePolicy:
 
     def navigation_intent(self, message, now):
         token = message.token
+        if token.execution_kind == 1 and self.backup_watchdog_period_ns > 50_000_000:
+            return
         session = token.navigation_session_id
         if (not self.token_valid(token) or not self.loc or token.localization != self.loc.identity or
                 token.gate_session_id != self.gate_session or message.boot_id != self.boot_id or
@@ -126,7 +136,8 @@ class EpochGatePolicy:
             return
         if self.intent and session == self.intent.token.navigation_session_id:
             previous = self.intent.token
-            if (message.heartbeat_sequence <= self.intent.heartbeat_sequence or token.task_sequence < previous.task_sequence or
+            if ((token.task_sequence == previous.task_sequence and token.plan_sequence == previous.plan_sequence and token != previous) or
+                    message.heartbeat_sequence <= self.intent.heartbeat_sequence or token.task_sequence < previous.task_sequence or
                     (token.task_sequence == previous.task_sequence and token.plan_sequence < previous.plan_sequence)):
                 return
         elif self.intent:
@@ -143,9 +154,10 @@ class EpochGatePolicy:
                 return
         elif self.execution:
             self.retired_controllers.add(self.execution.controller_session_id)
-        # Normal completion must survive the following controller_idle heartbeat.
+        # Normal completion or explicit progress failure must survive controller_idle.
+        # Sealing a token does not authorize any new execution or keep motion alive.
         # Only the controller that actually installed this token may seal it.
-        if (not message.active and message.reason == 'goal_reached' and self.execution and
+        if (not message.active and message.reason in ('goal_reached', 'backup_finished', 'progress_failed') and self.execution and
                 self.execution.active and self.execution.token == message.token and
                 self.execution.controller_session_id == session):
             self.completed_tokens.add(self.token_key(message.token))
@@ -153,8 +165,6 @@ class EpochGatePolicy:
         self.execution, self.execution_receipt = copy.deepcopy(message), now
 
     def authority_reason(self, now):
-        if self.terminal_current():
-            return 'task_completed'
         loc = self.loc
         if (not loc or self.map_changed or self.output_regressed or loc.schema_version != 1 or
                 not loc.lifecycle_enabled or not loc.fusion_ready or not loc.output_ready or loc.health != 1 or
@@ -162,12 +172,21 @@ class EpochGatePolicy:
                 not self.fresh(self.loc_receipt, now, self.loc_ttl) or
                 not self.fresh(self.output_advanced, now, self.loc_ttl)):
             return 'localization_not_ready'
+        if self.terminal_current():
+            intent = self.intent
+            if (intent.token.localization != loc.identity or intent.token.gate_session_id != self.gate_session or
+                    not self.fresh(self.intent_receipt, now, self.intent_ttl) or
+                    not self.fresh(intent.source_steady_time_ns, now, self.intent_ttl)):
+                return 'intent_not_ready'
+            return 'task_completed'
         intent = self.intent
         if (not intent or not intent.active or intent.token.localization != loc.identity or
                 intent.token.gate_session_id != self.gate_session or
                 not self.fresh(self.intent_receipt, now, self.intent_ttl) or
                 not self.fresh(intent.source_steady_time_ns, now, self.intent_ttl)):
             return 'intent_not_ready'
+        if intent.token.execution_kind == 1 and now >= intent.token.execution_deadline_ns:
+            return 'backup_deadline'
         execution = self.execution
         if (not execution or not execution.active or execution.token != intent.token or
                 not self.fresh(self.execution_receipt, now, self.execution_ttl) or
@@ -200,12 +219,54 @@ class EpochGatePolicy:
         if not all(math.isfinite(v) for vector in (message.velocity.linear, message.velocity.angular)
                    for v in (vector.x, vector.y, vector.z)):
             return 'nonfinite_command'
+        velocity, token = message.velocity, message.token
+        phase = message.source_motion_phase
+        translating = velocity.linear.x != 0 or velocity.linear.y != 0
+        rotating = velocity.angular.z != 0
+        if phase not in (0, 1, 2, 3, 4):
+            return 'invalid_motion_phase'
+        mixed_allowed = ((phase == 4 and not message.transition_braking) or
+                         (message.transition_braking and message.braking_from_phase == 4))
+        if phase and not mixed_allowed and (translating and rotating):
+            return 'mixed_motion_axes'
+        if phase and not message.transition_braking and (
+                (phase == 1 and (translating or rotating)) or
+                (phase == 2 and rotating) or (phase == 3 and translating)):
+            return 'motion_phase_mismatch'
+        if token.execution_kind == 0 and velocity.linear.x < 0:
+            return 'tracking_reverse_forbidden'
+        if token.execution_kind == 1 and not (
+                -token.backup_max_speed <= velocity.linear.x <= 0 and
+                velocity.linear.y == velocity.linear.z == velocity.angular.x == velocity.angular.y == velocity.angular.z == 0):
+            return 'backup_velocity_bound'
         return None
 
     def accept_command(self, message, now):
         reason = self.command_reason(message, now)
         if reason:
             return reason
+        previous_output = self.command
+        if (previous_output is not None and previous_output.token == message.token and
+                previous_output.transition_braking and not message.transition_braking and
+                any(value != 0 for vector in (previous_output.velocity.linear,previous_output.velocity.angular)
+                    for value in (vector.x,vector.y,vector.z)) and
+                any(value != 0 for vector in (message.velocity.linear,message.velocity.angular)
+                    for value in (vector.x,vector.y,vector.z))):
+            return 'braking_zero_handoff_required'
+        if message.transition_braking:
+            old = self.command
+            values = (message.velocity.linear.x, message.velocity.linear.y, message.velocity.angular.z)
+            if any(value != 0 for value in values):
+                if old is None:
+                    return 'braking_without_previous_command'
+                phase = old.braking_from_phase if old.transition_braking else old.source_motion_phase
+                if message.braking_from_phase != phase or phase not in (1, 2, 3, 4):
+                    return 'braking_source_mismatch'
+                prior = (old.velocity.linear.x, old.velocity.linear.y, old.velocity.angular.z)
+                if any(abs(value) > abs(before)+1e-9 or value*before < 0 for value,before in zip(values,prior)):
+                    return 'braking_amplitude_or_sign'
+        elif message.braking_from_phase != 0:
+            return 'unexpected_braking_source'
         previous = self.source_highwater.get(message.controller_session_id)
         if previous and (message.command_sequence < previous[0] or
                 (message.command_sequence == previous[0] and
@@ -294,6 +355,8 @@ class NavSafetyGate(Node):
         self.gate_status_pub = self.create_publisher(UInt8, '~/gate_status', 1)
         if self.epoch_contract:
             self.configure_epoch()
+        if self.epoch_contract:
+            self.epoch_policy.backup_watchdog_period_ns = round(max(0.02,stop_publish_period_sec)*1e9)
         self.watchdog_timer = self.create_timer(
             max(0.02, stop_publish_period_sec), self.watchdog_callback,
             clock=self.safety_clock)
@@ -333,7 +396,9 @@ class NavSafetyGate(Node):
         self.enforce_epoch()
 
     def revoke_epoch(self):
-        if not self.epoch_armed:
+        terminal_challenge = (self.epoch_policy.terminal_current() and
+                              self.epoch_policy.intent.token.gate_session_id == self.epoch_policy.gate_session)
+        if not self.epoch_armed and not terminal_challenge:
             return
         from std_msgs.msg import String
         self.epoch_armed = False
@@ -343,7 +408,7 @@ class NavSafetyGate(Node):
 
     def enforce_epoch(self):
         now = time.monotonic_ns()
-        if self.epoch_policy.terminal_current():
+        if not self.emergency_stop_active and self.epoch_policy.authority_reason(now) == 'task_completed':
             # Keep the challenge stable until the BT consumes the action result.
             # The sealed token cannot regain authority, even after active replay.
             self.epoch_armed = False

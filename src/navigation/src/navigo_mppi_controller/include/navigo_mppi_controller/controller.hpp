@@ -77,7 +77,9 @@ public:
   /**
     * @brief Reset the controller state between tasks
     */
-  void reset();
+  void reset() override;
+  uint8_t getExecutionMotionPhase() const override
+  {return forward_alignment_enabled_ ? source_motion_phase_ : 0;}
 
   /**
     * @brief Main method to compute velocities using the optimizer
@@ -117,6 +119,8 @@ protected:
     const geometry_msgs::msg::Pose & goal, navigo_core::GoalChecker * checker,
     geometry_msgs::msg::TwistStamped & command, double dt);
 
+  uint8_t source_motion_phase_{1};
+  uint8_t last_nonzero_motion_phase_{1};
   bool forward_alignment_enabled_{false};
   forward_alignment::Mode motion_mode_{forward_alignment::Mode::TRACK};
   double entry_angle_, exit_angle_, lookahead_distance_, max_angular_velocity_;

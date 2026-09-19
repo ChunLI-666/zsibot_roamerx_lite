@@ -1,0 +1,14 @@
+# Research-only overlay. Deliberate opt-in; not loaded by production launch.
+controller_server:
+  ros__parameters:
+    enable_epoch_contract: true
+    enable_epoch_backup: true
+    # Independent action rate; ordinary TRACK keeps controller_frequency unchanged.
+    epoch_backup_control_frequency: 20.0
+    # Must match the configured downstream vx deadband; not a measured gait limit.
+    epoch_backup_minimum_speed: 0.05
+
+bt_navigator:
+  ros__parameters:
+    enable_epoch_contract: true
+    enable_epoch_backup_recovery: true

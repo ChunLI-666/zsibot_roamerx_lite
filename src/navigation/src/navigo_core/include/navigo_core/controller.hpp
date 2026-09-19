@@ -36,6 +36,7 @@
 #ifndef NAVIGO_CORE__CONTROLLER_HPP_
 #define NAVIGO_CORE__CONTROLLER_HPP_
 
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -68,6 +69,11 @@ public:
    */
   // Discard prediction/history when a localization epoch revokes a path.
   virtual void reset() {}
+
+  // Source intent for the last computed command: 0 legacy, 1 HOLD,
+  // 2 TRANSLATE, 3 ROTATE, 4 TRACK (EpochCommand wire constants). This describes
+  // intent, while the relay may still be braking the preceding axis.
+  virtual uint8_t getExecutionMotionPhase() const {return 0;}
 
   virtual ~Controller() {}
 

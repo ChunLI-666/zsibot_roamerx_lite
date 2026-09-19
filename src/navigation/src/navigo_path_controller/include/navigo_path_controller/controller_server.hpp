@@ -25,6 +25,8 @@
 #include "navigo_core/controller.hpp"
 #include "navigo_core/epoch_contract.hpp"
 #include "navigo_epoch_msgs/action/follow_path_epoch.hpp"
+#include "navigo_epoch_msgs/action/back_up_epoch.hpp"
+#include "nav_msgs/msg/odometry.hpp"
 #include "navigo_epoch_msgs/msg/nav_execution_state.hpp"
 #include "std_msgs/msg/string.hpp"
 #include "navigo_core/progress_checker.hpp"
@@ -117,6 +119,19 @@ protected:
 
   using EpochAction = navigo_epoch_msgs::action::FollowPathEpoch;
   using EpochActionServer = navigo_util::SimpleActionServer<EpochAction>;
+  using BackupAction = navigo_epoch_msgs::action::BackUpEpoch;
+  using BackupActionServer = navigo_util::SimpleActionServer<BackupAction>;
+  std::unique_ptr<BackupActionServer> backup_action_server_;
+  std::mutex epoch_action_mutex_;
+  double backup_minimum_speed_{.05};
+  double backup_control_frequency_{20.};
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr execution_odom_sub_;
+  nav_msgs::msg::Odometry execution_odom_;
+  uint64_t execution_odom_received_{0}, execution_odom_advanced_{0};
+  int64_t execution_odom_stamp_{0};
+  bool execution_odom_regressed_{false};
+  nav_msgs::msg::Odometry executionOdom();
+  void computeEpochBackup();
   void computeEpochControl();
   void installEpochPath(const EpochAction::Goal & goal);
   bool epochReady(bool verify_tf = false);

@@ -1,0 +1,1599 @@
+{
+  "base": "e826d6f",
+  "branch": "feature/forward-aligned-navigation",
+  "matrix_version": "phase fix before final BackUp reaction-budget correction and before DDS timestamp observation",
+  "hardware": false,
+  "plant": "bounded SE2 safe-command feedback; dt=min(wall_delta,0.1); watchdog evaluated at current callback",
+  "cases": [
+    {
+      "name": "open90",
+      "success": true,
+      "duration_sec": 53.63888434501132,
+      "xy_error_m": 0.19645681303303877,
+      "yaw_error_rad": 0.2465942689943725,
+      "geometry_pass": true,
+      "confirmed_collisions": 0,
+      "sweep_uncertainties": 0,
+      "maximum_sweep_bound_m": 0.0009371376770004302,
+      "execution_pass": true,
+      "phase_violations": 0,
+      "braking_samples": 5,
+      "coupled_commands": {},
+      "wire_failures": 0,
+      "runtime_inputs_unchanged": true,
+      "source_pose_checks": 456,
+      "max_source_pose_position_error_m": 0.0,
+      "loaded_footprint_verifications": 2,
+      "events_sha256": "5fb75dd8f97143d624810a26bb1be66f58b659984066384cb1757383f997064b",
+      "artifact_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_geometry_20260910/matrix_final/open90_run",
+      "plant_time_model": {
+        "maximum_integrated_dt_sec": 0.07238522998522967,
+        "clipped_100ms_steps": 0,
+        "watchdog": "Evaluated at callback end, not split at expiry within a long scheduling gap"
+      }
+    },
+    {
+      "name": "slow_decel90",
+      "success": false,
+      "duration_sec": 57.18393028603168,
+      "xy_error_m": 0.19100459545425416,
+      "yaw_error_rad": 0.2361806783207581,
+      "geometry_pass": true,
+      "confirmed_collisions": 0,
+      "sweep_uncertainties": 0,
+      "maximum_sweep_bound_m": 0.0009890237417538408,
+      "execution_pass": true,
+      "phase_violations": 0,
+      "braking_samples": 20,
+      "coupled_commands": {},
+      "wire_failures": 11,
+      "runtime_inputs_unchanged": true,
+      "source_pose_checks": 480,
+      "max_source_pose_position_error_m": 0.0,
+      "loaded_footprint_verifications": 2,
+      "events_sha256": "a3f0273061e0d7f2fb4637bc756ed3d614a061352d23772e211784e4dc0cda77",
+      "artifact_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_geometry_20260910/matrix_final/slow_decel90_run",
+      "plant_time_model": {
+        "maximum_integrated_dt_sec": 0.1,
+        "clipped_100ms_steps": 1,
+        "watchdog": "Evaluated at callback end, not split at expiry within a long scheduling gap"
+      }
+    },
+    {
+      "name": "open180",
+      "success": true,
+      "duration_sec": 63.21309988904977,
+      "xy_error_m": 0.1961856775197673,
+      "yaw_error_rad": 0.04637495298936126,
+      "geometry_pass": true,
+      "confirmed_collisions": 0,
+      "sweep_uncertainties": 0,
+      "maximum_sweep_bound_m": 0.0009766756344409726,
+      "execution_pass": true,
+      "phase_violations": 0,
+      "braking_samples": 3,
+      "coupled_commands": {},
+      "wire_failures": 0,
+      "runtime_inputs_unchanged": true,
+      "source_pose_checks": 543,
+      "max_source_pose_position_error_m": 0.0,
+      "loaded_footprint_verifications": 2,
+      "events_sha256": "7e1f4e148430ac0e0c281712c60fc2653be6c6093c6f754598c7afc482c41ba3",
+      "artifact_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_geometry_20260910/matrix_final/open180_run",
+      "plant_time_model": {
+        "maximum_integrated_dt_sec": 0.1,
+        "clipped_100ms_steps": 1,
+        "watchdog": "Evaluated at callback end, not split at expiry within a long scheduling gap"
+      }
+    },
+    {
+      "name": "final90",
+      "success": true,
+      "duration_sec": 45.79683195101097,
+      "xy_error_m": 0.19720477322308838,
+      "yaw_error_rad": 0.24509225028466597,
+      "geometry_pass": true,
+      "confirmed_collisions": 0,
+      "sweep_uncertainties": 0,
+      "maximum_sweep_bound_m": 0.0009624897797574817,
+      "execution_pass": true,
+      "phase_violations": 0,
+      "braking_samples": 1,
+      "coupled_commands": {},
+      "wire_failures": 0,
+      "runtime_inputs_unchanged": true,
+      "source_pose_checks": 366,
+      "max_source_pose_position_error_m": 0.0,
+      "loaded_footprint_verifications": 2,
+      "events_sha256": "89f7a0e145490df082c80ab4fddd6d45fc70dda428f70e9d29f231ce2f575214",
+      "artifact_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_geometry_20260910/matrix_final/final90_run",
+      "plant_time_model": {
+        "maximum_integrated_dt_sec": 0.051970647007692605,
+        "clipped_100ms_steps": 0,
+        "watchdog": "Evaluated at callback end, not split at expiry within a long scheduling gap"
+      }
+    },
+    {
+      "name": "door080",
+      "success": true,
+      "duration_sec": 52.46249433502089,
+      "xy_error_m": 0.23459964740204656,
+      "yaw_error_rad": 0.02532029756655397,
+      "geometry_pass": true,
+      "confirmed_collisions": 0,
+      "sweep_uncertainties": 0,
+      "maximum_sweep_bound_m": 0.0009855252480068868,
+      "execution_pass": true,
+      "phase_violations": 0,
+      "braking_samples": 1,
+      "coupled_commands": {
+        "/cmd_vel_epoch_raw": 7,
+        "/cmd_vel_epoch": 6,
+        "/cmd_vel_safe": 6
+      },
+      "wire_failures": 0,
+      "runtime_inputs_unchanged": true,
+      "source_pose_checks": 433,
+      "max_source_pose_position_error_m": 0.0,
+      "loaded_footprint_verifications": 2,
+      "events_sha256": "22c5abc229be02234ad68b38b4dbd3a8f6c17dea2f184f76d73795e5f34f934c",
+      "artifact_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_geometry_20260910/matrix_final/door080_run",
+      "plant_time_model": {
+        "maximum_integrated_dt_sec": 0.1,
+        "clipped_100ms_steps": 1,
+        "watchdog": "Evaluated at callback end, not split at expiry within a long scheduling gap"
+      }
+    },
+    {
+      "name": "door035",
+      "success": true,
+      "duration_sec": 42.6836090409779,
+      "xy_error_m": 2.3,
+      "yaw_error_rad": 0.0,
+      "geometry_pass": true,
+      "confirmed_collisions": 0,
+      "sweep_uncertainties": 0,
+      "maximum_sweep_bound_m": 0.0,
+      "execution_pass": true,
+      "phase_violations": 0,
+      "braking_samples": 0,
+      "coupled_commands": {},
+      "wire_failures": 0,
+      "runtime_inputs_unchanged": true,
+      "source_pose_checks": 0,
+      "max_source_pose_position_error_m": null,
+      "loaded_footprint_verifications": 2,
+      "events_sha256": "8b4eeef1a168242a4dbb81d3f6fa1f1441128af4fd8b02eb859963a44dbe5e4d",
+      "artifact_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_geometry_20260910/matrix_final/door035_run",
+      "plant_time_model": {
+        "maximum_integrated_dt_sec": 0.055286907008849084,
+        "clipped_100ms_steps": 0,
+        "watchdog": "Evaluated at callback end, not split at expiry within a long scheduling gap"
+      }
+    },
+    {
+      "name": "loss90",
+      "success": true,
+      "duration_sec": 49.05698797700461,
+      "xy_error_m": 0.1946764644113028,
+      "yaw_error_rad": 0.04615442722531362,
+      "geometry_pass": true,
+      "confirmed_collisions": 0,
+      "sweep_uncertainties": 0,
+      "maximum_sweep_bound_m": 0.0009736292314286505,
+      "execution_pass": true,
+      "phase_violations": 0,
+      "braking_samples": 2,
+      "coupled_commands": {},
+      "wire_failures": 0,
+      "runtime_inputs_unchanged": true,
+      "source_pose_checks": 398,
+      "max_source_pose_position_error_m": 0.0,
+      "loaded_footprint_verifications": 2,
+      "events_sha256": "947488c85ad0f9605dd626a5002ba20310c57b16cd015fc71393a1dca9277bc8",
+      "artifact_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_geometry_20260910/matrix_final/loss90_run",
+      "plant_time_model": {
+        "maximum_integrated_dt_sec": 0.1,
+        "clipped_100ms_steps": 1,
+        "watchdog": "Evaluated at callback end, not split at expiry within a long scheduling gap"
+      }
+    },
+    {
+      "name": "curved_track",
+      "success": true,
+      "duration_sec": 46.536084778024815,
+      "xy_error_m": 0.19972043044750964,
+      "yaw_error_rad": 0.24790134763048582,
+      "geometry_pass": true,
+      "confirmed_collisions": 0,
+      "sweep_uncertainties": 0,
+      "maximum_sweep_bound_m": 0.0008972566927570772,
+      "execution_pass": true,
+      "phase_violations": 0,
+      "braking_samples": 5,
+      "coupled_commands": {},
+      "wire_failures": 0,
+      "runtime_inputs_unchanged": true,
+      "source_pose_checks": 377,
+      "max_source_pose_position_error_m": 0.0,
+      "loaded_footprint_verifications": 2,
+      "events_sha256": "17e0230d3a7ef65f8bf513c2b293b7288e763d383c02e88934612413e917e638",
+      "artifact_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_geometry_20260910/matrix_final/curved_track_run",
+      "plant_time_model": {
+        "maximum_integrated_dt_sec": 0.054012540029361844,
+        "clipped_100ms_steps": 0,
+        "watchdog": "Evaluated at callback end, not split at expiry within a long scheduling gap"
+      }
+    }
+  ],
+  "final_serial_replays": [
+    {
+      "name": "serial_final_slow_decel90",
+      "artifact_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_geometry_20260910/serial_final_slow_decel90",
+      "result": {
+        "scenario": "normal",
+        "domain": 188,
+        "success": false,
+        "geometry_enabled": true,
+        "expected": "arrive",
+        "duration_sec": 54.00027517299168,
+        "final_map_pose": [
+          3.8917395779858657,
+          4.16368948762144,
+          -0.24458858364264519
+        ],
+        "final_odom_pose": [
+          3.8917395779858657,
+          4.16368948762144,
+          -0.24458858364264519
+        ],
+        "final_safe_velocity": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "goal": [
+          4.0,
+          4.0,
+          0.0
+        ],
+        "xy_error_m": 0.19625128619310492,
+        "yaw_error_rad": 0.24458858364264519,
+        "accepted_goals": [
+          {
+            "uuid": [
+              224,
+              150,
+              200,
+              50,
+              181,
+              32,
+              69,
+              13,
+              130,
+              203,
+              127,
+              79,
+              208,
+              155,
+              175,
+              128
+            ],
+            "pose": [
+              4.0,
+              4.0,
+              0.0
+            ]
+          }
+        ],
+        "action_statuses": [
+          4
+        ],
+        "injection_evidence": [],
+        "runtime_inputs_unchanged": true,
+        "wire_audit_failures": 1,
+        "error": "Independent wire audit failed; inspect wire_audit.json",
+        "geometry_pass": true,
+        "execution_pass": true
+      },
+      "geometry": {
+        "initial_classification": "free",
+        "steps": 2658,
+        "initial_overlap": false,
+        "initial_outside_map": false,
+        "trajectory_confirmed_collisions": 0,
+        "sweep_uncertainties": 0,
+        "violations": [],
+        "uncertainties": [],
+        "reverse_distance_m": 0.0,
+        "lateral_distance_m": 0.0,
+        "path_length_m": 1.9407451604587291,
+        "maximum_sweep_bound_m": 0.0008736422577948274,
+        "geometry_pass": true,
+        "note": "Occupied/unknown/out-of-map treated separately; continuous sweep safety certified conservatively, not by production sweepFree.",
+        "footprint": {
+          "source": "/home/charles/project/colcon_ws/src/zsibot/zsibot_roamerx_lite/src/navigation/src/robot_navigo/params/zsl1_model_envelope.yaml",
+          "source_sha256": "94965f8269a74137490fa07416ac231824831b5601ef035d8c686677d99c5855",
+          "raw_polygon": [
+            [
+              -0.3597869945979023,
+              -0.188144226321578
+            ],
+            [
+              0.28218671679496765,
+              -0.188144226321578
+            ],
+            [
+              0.28218671679496765,
+              0.18816181053173542
+            ],
+            [
+              -0.3597869945979023,
+              0.18816181053173542
+            ]
+          ],
+          "padded_polygon": [
+            [
+              -0.3697869945979023,
+              -0.19814422632157802
+            ],
+            [
+              0.29218671679496766,
+              -0.19814422632157802
+            ],
+            [
+              0.29218671679496766,
+              0.19816181053173543
+            ],
+            [
+              -0.3697869945979023,
+              0.19816181053173543
+            ]
+          ],
+          "padding": 0.01,
+          "frame_id": "base_link",
+          "inflation_radius": 0.5,
+          "envelope_kind": "model_posture_union"
+        }
+      },
+      "execution": {
+        "safe_nonzero_samples": 896,
+        "raw_relay_safe_matches": 896,
+        "mode_counts": {
+          "ALIGN_TO_PATH": 404,
+          "HOLD": 13,
+          "FORWARD_TRACK": 494,
+          "FINAL_ALIGN": 30
+        },
+        "changed_nonzero_relay_count": 43,
+        "changed_examples": [
+          {
+            "at": 289460825392659,
+            "raw": [
+              0.0,
+              0.0,
+              -0.1
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.075
+            ],
+            "sequence": 16
+          },
+          {
+            "at": 289462325134751,
+            "raw": [
+              0.0,
+              0.0,
+              -0.1
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.075
+            ],
+            "sequence": 31
+          },
+          {
+            "at": 289463825143038,
+            "raw": [
+              0.0,
+              0.0,
+              -0.1
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.075
+            ],
+            "sequence": 46
+          },
+          {
+            "at": 289465325447234,
+            "raw": [
+              0.0,
+              0.0,
+              -0.1
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.075
+            ],
+            "sequence": 61
+          },
+          {
+            "at": 289466824976155,
+            "raw": [
+              0.0,
+              0.0,
+              -0.1
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.075
+            ],
+            "sequence": 76
+          },
+          {
+            "at": 289468325012731,
+            "raw": [
+              0.0,
+              0.0,
+              -0.1
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.075
+            ],
+            "sequence": 91
+          },
+          {
+            "at": 289469824953518,
+            "raw": [
+              0.0,
+              0.0,
+              -0.1
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.075
+            ],
+            "sequence": 106
+          },
+          {
+            "at": 289471325037689,
+            "raw": [
+              0.0,
+              0.0,
+              -0.1
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.075
+            ],
+            "sequence": 121
+          },
+          {
+            "at": 289472825231918,
+            "raw": [
+              0.0,
+              0.0,
+              -0.1
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.075
+            ],
+            "sequence": 136
+          },
+          {
+            "at": 289473324986041,
+            "raw": [
+              0.0,
+              0.0,
+              -0.07758138174875594
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.08758138174875595
+            ],
+            "sequence": 141
+          },
+          {
+            "at": 289473424901733,
+            "raw": [
+              0.0,
+              0.0,
+              -0.05758138174875595
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.06758138174875596
+            ],
+            "sequence": 142
+          },
+          {
+            "at": 289473524891047,
+            "raw": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.04758138174875595
+            ],
+            "sequence": 143
+          },
+          {
+            "at": 289473575032937,
+            "raw": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.03758138174875595
+            ],
+            "sequence": 143
+          },
+          {
+            "at": 289473625235574,
+            "raw": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.027581381748755948
+            ],
+            "sequence": 144
+          },
+          {
+            "at": 289474325147906,
+            "raw": [
+              0.08489476889371872,
+              0.0,
+              0.0
+            ],
+            "smooth": [
+              0.075,
+              0.0,
+              0.0
+            ],
+            "sequence": 151
+          },
+          {
+            "at": 289475825063994,
+            "raw": [
+              0.08419709652662277,
+              0.0,
+              0.0
+            ],
+            "smooth": [
+              0.075,
+              0.0,
+              0.0
+            ],
+            "sequence": 166
+          },
+          {
+            "at": 289477324982685,
+            "raw": [
+              0.08431971818208694,
+              0.0,
+              0.0
+            ],
+            "smooth": [
+              0.075,
+              0.0,
+              0.0
+            ],
+            "sequence": 181
+          },
+          {
+            "at": 289478825160899,
+            "raw": [
+              0.08369684964418411,
+              0.0,
+              0.0
+            ],
+            "smooth": [
+              0.075,
+              0.0,
+              0.0
+            ],
+            "sequence": 196
+          },
+          {
+            "at": 289480224954888,
+            "raw": [
+              0.08357388526201248,
+              0.0,
+              0.0
+            ],
+            "smooth": [
+              0.075,
+              0.0,
+              0.0
+            ],
+            "sequence": 210
+          },
+          {
+            "at": 289481725096321,
+            "raw": [
+              0.08363866060972214,
+              0.0,
+              0.0
+            ],
+            "smooth": [
+              0.075,
+              0.0,
+              0.0
+            ],
+            "sequence": 225
+          }
+        ],
+        "declared_braking_samples": 19,
+        "reverse_command_count": 0,
+        "reverse_examples": [],
+        "violations": [],
+        "violation_count": 0,
+        "phase_change_without_zero_count": 0,
+        "raw_zero_axis_leak_count": 0,
+        "axis_leak_examples": [],
+        "within_or_braking_axis_lag_count": 8,
+        "axis_lag_examples": [
+          {
+            "at": 289473524891047,
+            "raw": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.04758138174875595
+            ],
+            "phase": 1,
+            "braking": true,
+            "axes": [
+              2
+            ]
+          },
+          {
+            "at": 289473575032937,
+            "raw": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.03758138174875595
+            ],
+            "phase": 1,
+            "braking": true,
+            "axes": [
+              2
+            ]
+          },
+          {
+            "at": 289473625235574,
+            "raw": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.027581381748755948
+            ],
+            "phase": 1,
+            "braking": true,
+            "axes": [
+              2
+            ]
+          },
+          {
+            "at": 289497924908753,
+            "raw": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.045433166847201736
+            ],
+            "phase": 1,
+            "braking": true,
+            "axes": [
+              2
+            ]
+          },
+          {
+            "at": 289497975200150,
+            "raw": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.035433166847201734
+            ],
+            "phase": 1,
+            "braking": true,
+            "axes": [
+              2
+            ]
+          },
+          {
+            "at": 289498024940873,
+            "raw": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.025433166847201732
+            ],
+            "phase": 1,
+            "braking": true,
+            "axes": [
+              2
+            ]
+          },
+          {
+            "at": 289504425071273,
+            "raw": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              0.038174309775775496
+            ],
+            "phase": 1,
+            "braking": true,
+            "axes": [
+              2
+            ]
+          },
+          {
+            "at": 289504474955136,
+            "raw": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              0.028174309775775494
+            ],
+            "phase": 1,
+            "braking": true,
+            "axes": [
+              2
+            ]
+          }
+        ],
+        "simultaneous_translation_rotation": {},
+        "execution_pass": true,
+        "observer_window_ms": 50,
+        "note": "Independent phase/provenance observer; legacy vectors and explicit phases differ.\n\nTRACK legitimately includes the optimizer's curved trajectories. A phase change\nmust brake under its witnessed old phase and pass through an exact zero relay\nsample. Amplitude/within-TRACK lag remains a diagnostic, not a proof that MPPI\nmodels the complete smoother dynamics.\n"
+      },
+      "wire": {
+        "require_motion": true,
+        "safe_samples": 1676,
+        "nonzero_safe_samples": 896,
+        "matched_typed_samples": 896,
+        "max_nonzero_source_age_ms": 63.939534,
+        "failures": [
+          {
+            "reason": "DDS publication time is unscorable",
+            "clock_issues": [
+              {
+                "at": 289462631785765,
+                "reason": "local publication bracket missing or too wide"
+              },
+              {
+                "at": 289481232793926,
+                "reason": "local publication bracket missing or too wide"
+              },
+              {
+                "at": 289483526840885,
+                "reason": "local publication bracket missing or too wide"
+              },
+              {
+                "at": 289483726707646,
+                "reason": "local publication bracket missing or too wide"
+              },
+              {
+                "at": 289485926627285,
+                "reason": "local publication bracket missing or too wide"
+              },
+              {
+                "at": 289487032435716,
+                "reason": "local publication bracket missing or too wide"
+              },
+              {
+                "at": 289487630582727,
+                "reason": "local publication bracket missing or too wide"
+              },
+              {
+                "at": 289491832912577,
+                "reason": "local publication bracket missing or too wide"
+              },
+              {
+                "at": 289491926972208,
+                "reason": "local publication bracket missing or too wide"
+              },
+              {
+                "at": 289505050647420,
+                "reason": "local publication bracket missing or too wide"
+              }
+            ]
+          }
+        ],
+        "observer_matching_window_ms": 50,
+        "source_age_observer_margin_ms": 30.0,
+        "minimum_timestamp_boundary_margin_ns": null,
+        "timestamp_uncertainty_ns": 0,
+        "note": "Wire audit complements action/scenario assertions; it is not a gate implementation.",
+        "publication_clock": {
+          "available": false,
+          "basis": "dds_publication",
+          "issues": [
+            {
+              "at": 289462631785765,
+              "reason": "local publication bracket missing or too wide"
+            },
+            {
+              "at": 289481232793926,
+              "reason": "local publication bracket missing or too wide"
+            },
+            {
+              "at": 289483526840885,
+              "reason": "local publication bracket missing or too wide"
+            },
+            {
+              "at": 289483726707646,
+              "reason": "local publication bracket missing or too wide"
+            },
+            {
+              "at": 289485926627285,
+              "reason": "local publication bracket missing or too wide"
+            },
+            {
+              "at": 289487032435716,
+              "reason": "local publication bracket missing or too wide"
+            },
+            {
+              "at": 289487630582727,
+              "reason": "local publication bracket missing or too wide"
+            },
+            {
+              "at": 289491832912577,
+              "reason": "local publication bracket missing or too wide"
+            },
+            {
+              "at": 289491926972208,
+              "reason": "local publication bracket missing or too wide"
+            },
+            {
+              "at": 289505050647420,
+              "reason": "local publication bracket missing or too wide"
+            }
+          ],
+          "observed_wire_messages": 6117,
+          "offset_lower_ns": 1788769666815581508,
+          "offset_upper_ns": 1788769666815599477,
+          "timestamp_uncertainty_ns": 49982,
+          "max_local_publication_bracket_ns": 99965,
+          "max_clock_bracket_ns": 100000,
+          "max_offset_spread_ns": 1000000,
+          "max_observer_queue_ms": 52.157222,
+          "max_publication_to_callback_ms": 52.191364
+        }
+      },
+      "maximum_local_publication_bracket_ns": 134972,
+      "local_brackets_above_100us": 10,
+      "events_sha256": "807142ccac5288c233556de675523fee76d6176f04b16eefb6a706bc69619443",
+      "runtime_manifest_sha256": "9025344e130e98291c300ed2e7ab570d75af296ab54058500e51c224b79d2232",
+      "plant_time_model": {
+        "maximum_integrated_dt_sec": 0.05829709203680977,
+        "clipped_100ms_steps": 0,
+        "watchdog": "Evaluated at callback end, not split at expiry within a long scheduling gap"
+      }
+    },
+    {
+      "name": "serial_final_open90",
+      "artifact_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_geometry_20260910/serial_final_open90",
+      "result": {
+        "scenario": "normal",
+        "domain": 188,
+        "success": false,
+        "geometry_enabled": true,
+        "expected": "arrive",
+        "duration_sec": 54.879295204009395,
+        "final_map_pose": [
+          3.897748918663561,
+          4.164305891826057,
+          -0.24473525557089698
+        ],
+        "final_odom_pose": [
+          3.897748918663561,
+          4.164305891826057,
+          -0.24473525557089698
+        ],
+        "final_safe_velocity": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "goal": [
+          4.0,
+          4.0,
+          0.0
+        ],
+        "xy_error_m": 0.1935244421855467,
+        "yaw_error_rad": 0.24473525557089698,
+        "accepted_goals": [
+          {
+            "uuid": [
+              97,
+              211,
+              10,
+              37,
+              26,
+              239,
+              64,
+              30,
+              137,
+              87,
+              47,
+              69,
+              156,
+              244,
+              224,
+              119
+            ],
+            "pose": [
+              4.0,
+              4.0,
+              0.0
+            ]
+          }
+        ],
+        "action_statuses": [
+          4
+        ],
+        "injection_evidence": [],
+        "runtime_inputs_unchanged": true,
+        "wire_audit_failures": 1,
+        "error": "Independent wire audit failed; inspect wire_audit.json",
+        "geometry_pass": true,
+        "execution_pass": true
+      },
+      "geometry": {
+        "initial_classification": "free",
+        "steps": 2714,
+        "initial_overlap": false,
+        "initial_outside_map": false,
+        "trajectory_confirmed_collisions": 0,
+        "sweep_uncertainties": 0,
+        "violations": [],
+        "uncertainties": [],
+        "reverse_distance_m": 0.0,
+        "lateral_distance_m": 0.0,
+        "path_length_m": 1.946158357066184,
+        "maximum_sweep_bound_m": 0.0009306685337011543,
+        "geometry_pass": true,
+        "note": "Occupied/unknown/out-of-map treated separately; continuous sweep safety certified conservatively, not by production sweepFree.",
+        "footprint": {
+          "source": "/home/charles/project/colcon_ws/src/zsibot/zsibot_roamerx_lite/src/navigation/src/robot_navigo/params/zsl1_model_envelope.yaml",
+          "source_sha256": "94965f8269a74137490fa07416ac231824831b5601ef035d8c686677d99c5855",
+          "raw_polygon": [
+            [
+              -0.3597869945979023,
+              -0.188144226321578
+            ],
+            [
+              0.28218671679496765,
+              -0.188144226321578
+            ],
+            [
+              0.28218671679496765,
+              0.18816181053173542
+            ],
+            [
+              -0.3597869945979023,
+              0.18816181053173542
+            ]
+          ],
+          "padded_polygon": [
+            [
+              -0.3697869945979023,
+              -0.19814422632157802
+            ],
+            [
+              0.29218671679496766,
+              -0.19814422632157802
+            ],
+            [
+              0.29218671679496766,
+              0.19816181053173543
+            ],
+            [
+              -0.3697869945979023,
+              0.19816181053173543
+            ]
+          ],
+          "padding": 0.01,
+          "frame_id": "base_link",
+          "inflation_radius": 0.5,
+          "envelope_kind": "model_posture_union"
+        }
+      },
+      "execution": {
+        "safe_nonzero_samples": 908,
+        "raw_relay_safe_matches": 908,
+        "mode_counts": {
+          "ALIGN_TO_PATH": 415,
+          "HOLD": 8,
+          "FORWARD_TRACK": 505,
+          "FINAL_ALIGN": 32
+        },
+        "changed_nonzero_relay_count": 30,
+        "changed_examples": [
+          {
+            "at": 289517258674829,
+            "raw": [
+              0.0,
+              0.0,
+              -0.1
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.075
+            ],
+            "sequence": 16
+          },
+          {
+            "at": 289518758672971,
+            "raw": [
+              0.0,
+              0.0,
+              -0.1
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.075
+            ],
+            "sequence": 31
+          },
+          {
+            "at": 289520258618547,
+            "raw": [
+              0.0,
+              0.0,
+              -0.1
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.075
+            ],
+            "sequence": 46
+          },
+          {
+            "at": 289521758682237,
+            "raw": [
+              0.0,
+              0.0,
+              -0.1
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.075
+            ],
+            "sequence": 61
+          },
+          {
+            "at": 289523258745210,
+            "raw": [
+              0.0,
+              0.0,
+              -0.1
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.075
+            ],
+            "sequence": 76
+          },
+          {
+            "at": 289524758536521,
+            "raw": [
+              0.0,
+              0.0,
+              -0.1
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.075
+            ],
+            "sequence": 91
+          },
+          {
+            "at": 289526258538899,
+            "raw": [
+              0.0,
+              0.0,
+              -0.1
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.075
+            ],
+            "sequence": 106
+          },
+          {
+            "at": 289527758645674,
+            "raw": [
+              0.0,
+              0.0,
+              -0.1
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.075
+            ],
+            "sequence": 121
+          },
+          {
+            "at": 289529258704774,
+            "raw": [
+              0.0,
+              0.0,
+              -0.1
+            ],
+            "smooth": [
+              0.0,
+              0.0,
+              -0.075
+            ],
+            "sequence": 136
+          },
+          {
+            "at": 289530758544737,
+            "raw": [
+              0.0855148583650589,
+              0.0,
+              0.0
+            ],
+            "smooth": [
+              0.075,
+              0.0,
+              0.0
+            ],
+            "sequence": 151
+          },
+          {
+            "at": 289532258516599,
+            "raw": [
+              0.08377818763256073,
+              0.0,
+              0.0
+            ],
+            "smooth": [
+              0.075,
+              0.0,
+              0.0
+            ],
+            "sequence": 166
+          },
+          {
+            "at": 289533758481024,
+            "raw": [
+              0.08362682908773422,
+              0.0,
+              0.0
+            ],
+            "smooth": [
+              0.075,
+              0.0,
+              0.0
+            ],
+            "sequence": 181
+          },
+          {
+            "at": 289535158414308,
+            "raw": [
+              0.08382005989551544,
+              0.0,
+              0.0
+            ],
+            "smooth": [
+              0.075,
+              0.0,
+              0.0
+            ],
+            "sequence": 195
+          },
+          {
+            "at": 289536658432320,
+            "raw": [
+              0.08378259092569351,
+              0.0,
+              0.0
+            ],
+            "smooth": [
+              0.075,
+              0.0,
+              0.0
+            ],
+            "sequence": 210
+          },
+          {
+            "at": 289538158635199,
+            "raw": [
+              0.08373300731182098,
+              0.0,
+              0.0
+            ],
+            "smooth": [
+              0.075,
+              0.0,
+              0.0
+            ],
+            "sequence": 225
+          },
+          {
+            "at": 289539658629138,
+            "raw": [
+              0.08340887725353241,
+              0.0,
+              0.0
+            ],
+            "smooth": [
+              0.075,
+              0.0,
+              0.0
+            ],
+            "sequence": 240
+          },
+          {
+            "at": 289541158626157,
+            "raw": [
+              0.08329552412033081,
+              0.0,
+              0.0
+            ],
+            "smooth": [
+              0.075,
+              0.0,
+              0.0
+            ],
+            "sequence": 255
+          },
+          {
+            "at": 289542658598049,
+            "raw": [
+              0.0829448252916336,
+              0.0,
+              0.0
+            ],
+            "smooth": [
+              0.075,
+              0.0,
+              0.0
+            ],
+            "sequence": 270
+          },
+          {
+            "at": 289544158816254,
+            "raw": [
+              0.08265991508960724,
+              0.0,
+              0.0
+            ],
+            "smooth": [
+              0.075,
+              0.0,
+              0.0
+            ],
+            "sequence": 285
+          },
+          {
+            "at": 289545558866005,
+            "raw": [
+              0.08226904273033142,
+              0.0,
+              0.0
+            ],
+            "smooth": [
+              0.075,
+              0.0,
+              0.0
+            ],
+            "sequence": 299
+          }
+        ],
+        "declared_braking_samples": 7,
+        "reverse_command_count": 0,
+        "reverse_examples": [],
+        "violations": [],
+        "violation_count": 0,
+        "phase_change_without_zero_count": 0,
+        "raw_zero_axis_leak_count": 0,
+        "axis_leak_examples": [],
+        "within_or_braking_axis_lag_count": 0,
+        "axis_lag_examples": [],
+        "simultaneous_translation_rotation": {},
+        "execution_pass": true,
+        "observer_window_ms": 50,
+        "note": "Independent phase/provenance observer; legacy vectors and explicit phases differ.\n\nTRACK legitimately includes the optimizer's curved trajectories. A phase change\nmust brake under its witnessed old phase and pass through an exact zero relay\nsample. Amplitude/within-TRACK lag remains a diagnostic, not a proof that MPPI\nmodels the complete smoother dynamics.\n"
+      },
+      "wire": {
+        "require_motion": true,
+        "safe_samples": 1842,
+        "nonzero_safe_samples": 908,
+        "matched_typed_samples": 908,
+        "max_nonzero_source_age_ms": 90.433038,
+        "failures": [
+          {
+            "reason": "DDS publication time is unscorable",
+            "clock_issues": [
+              {
+                "at": 289516594015439,
+                "reason": "local publication bracket missing or too wide"
+              },
+              {
+                "at": 289516995195553,
+                "reason": "local publication bracket missing or too wide"
+              },
+              {
+                "at": 289518393048600,
+                "reason": "local publication bracket missing or too wide"
+              },
+              {
+                "at": 289518489513760,
+                "reason": "local publication bracket missing or too wide"
+              },
+              {
+                "at": 289519489838415,
+                "reason": "local publication bracket missing or too wide"
+              },
+              {
+                "at": 289521794730617,
+                "reason": "local publication bracket missing or too wide"
+              },
+              {
+                "at": 289522592642322,
+                "reason": "local publication bracket missing or too wide"
+              },
+              {
+                "at": 289523592544125,
+                "reason": "local publication bracket missing or too wide"
+              },
+              {
+                "at": 289524290373298,
+                "reason": "local publication bracket missing or too wide"
+              },
+              {
+                "at": 289537710564201,
+                "reason": "local publication bracket missing or too wide"
+              },
+              {
+                "at": 289539813607997,
+                "reason": "local publication bracket missing or too wide"
+              },
+              {
+                "at": 289544309902098,
+                "reason": "local publication bracket missing or too wide"
+              },
+              {
+                "at": 289558454231908,
+                "reason": "local publication bracket missing or too wide"
+              },
+              {
+                "at": 289559055536537,
+                "reason": "local publication bracket missing or too wide"
+              },
+              {
+                "at": 289559149812948,
+                "reason": "local publication bracket missing or too wide"
+              },
+              {
+                "at": 289559349824389,
+                "reason": "local publication bracket missing or too wide"
+              },
+              {
+                "at": 289559452999718,
+                "reason": "local publication bracket missing or too wide"
+              },
+              {
+                "at": 289560452559242,
+                "reason": "local publication bracket missing or too wide"
+              }
+            ]
+          }
+        ],
+        "observer_matching_window_ms": 50,
+        "source_age_observer_margin_ms": 30.0,
+        "minimum_timestamp_boundary_margin_ns": null,
+        "timestamp_uncertainty_ns": 0,
+        "note": "Wire audit complements action/scenario assertions; it is not a gate implementation.",
+        "publication_clock": {
+          "available": false,
+          "basis": "dds_publication",
+          "issues": [
+            {
+              "at": 289516594015439,
+              "reason": "local publication bracket missing or too wide"
+            },
+            {
+              "at": 289516995195553,
+              "reason": "local publication bracket missing or too wide"
+            },
+            {
+              "at": 289518393048600,
+              "reason": "local publication bracket missing or too wide"
+            },
+            {
+              "at": 289518489513760,
+              "reason": "local publication bracket missing or too wide"
+            },
+            {
+              "at": 289519489838415,
+              "reason": "local publication bracket missing or too wide"
+            },
+            {
+              "at": 289521794730617,
+              "reason": "local publication bracket missing or too wide"
+            },
+            {
+              "at": 289522592642322,
+              "reason": "local publication bracket missing or too wide"
+            },
+            {
+              "at": 289523592544125,
+              "reason": "local publication bracket missing or too wide"
+            },
+            {
+              "at": 289524290373298,
+              "reason": "local publication bracket missing or too wide"
+            },
+            {
+              "at": 289537710564201,
+              "reason": "local publication bracket missing or too wide"
+            },
+            {
+              "at": 289539813607997,
+              "reason": "local publication bracket missing or too wide"
+            },
+            {
+              "at": 289544309902098,
+              "reason": "local publication bracket missing or too wide"
+            },
+            {
+              "at": 289558454231908,
+              "reason": "local publication bracket missing or too wide"
+            },
+            {
+              "at": 289559055536537,
+              "reason": "local publication bracket missing or too wide"
+            },
+            {
+              "at": 289559149812948,
+              "reason": "local publication bracket missing or too wide"
+            },
+            {
+              "at": 289559349824389,
+              "reason": "local publication bracket missing or too wide"
+            },
+            {
+              "at": 289559452999718,
+              "reason": "local publication bracket missing or too wide"
+            },
+            {
+              "at": 289560452559242,
+              "reason": "local publication bracket missing or too wide"
+            }
+          ],
+          "observed_wire_messages": 6371,
+          "offset_lower_ns": 1788769666815574627,
+          "offset_upper_ns": 1788769666815594121,
+          "timestamp_uncertainty_ns": 49963,
+          "max_local_publication_bracket_ns": 99926,
+          "max_clock_bracket_ns": 100000,
+          "max_offset_spread_ns": 1000000,
+          "max_observer_queue_ms": 52.315385,
+          "max_publication_to_callback_ms": 52.337758
+        }
+      },
+      "maximum_local_publication_bracket_ns": 209390,
+      "local_brackets_above_100us": 18,
+      "events_sha256": "66158cf7c1302ee16c9df6af6aaa24fff510beb902a9b0c47f03b756259ef4d4",
+      "runtime_manifest_sha256": "9ca356d109f7e00fbd9f41edaa462acea126f48dbbc1a24458e6dd125a80fdd3",
+      "plant_time_model": {
+        "maximum_integrated_dt_sec": 0.06592360703507438,
+        "clipped_100ms_steps": 0,
+        "watchdog": "Evaluated at callback end, not split at expiry within a long scheduling gap"
+      }
+    }
+  ],
+  "tests": {
+    "phase_cpp": 11,
+    "independent_python": 32,
+    "scene_pytest": 2
+  },
+  "historical_failure_directories": [
+    "/home/charles/project/colcon_ws/analysis_outputs/epoch_geometry_20260910/slow_decel90_v1",
+    "/home/charles/project/colcon_ws/analysis_outputs/epoch_geometry_20260910/matrix_final/slow_decel90_run"
+  ],
+  "final_serial_version": "BackUp .75s reaction budget; before BackUp-only frequency parameter change; TRACK remained 10Hz",
+  "baseline_counterexample": {
+    "artifact_directory": "/home/charles/project/colcon_ws/analysis_outputs/epoch_geometry_20260910/slow_decel90_v1",
+    "events_sha256": "d0092fd684ed8f8d412af18aae535fe6f6e550fcd18684764496ec322add44af",
+    "simultaneous_translation_rotation": {
+      "/cmd_vel_epoch": 4,
+      "/cmd_vel_safe": 4
+    },
+    "execution_pass": false,
+    "first_cross_axis_example": {
+      "at": 286090017290887,
+      "raw": [
+        0.051179010421037674,
+        0.0,
+        0.0
+      ],
+      "smooth": [
+        0.051179010421037674,
+        0.0,
+        -0.03886005406287824
+      ],
+      "axes": [
+        2
+      ]
+    },
+    "configuration": {
+      "alignment_exit_angle_rad": 0.2,
+      "smoother_angular_deceleration": 0.2
+    }
+  }
+}

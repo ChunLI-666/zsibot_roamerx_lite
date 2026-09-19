@@ -22,6 +22,27 @@
 namespace navigo_bt_navigator
 {
 
+void
+NavigateToPoseNavigator::configureEpochTree(rclcpp_lifecycle::LifecycleNode::SharedPtr node)
+{
+  if (!node->has_parameter("enable_epoch_contract")) {
+    node->declare_parameter("enable_epoch_contract", false);
+  }
+  if (!node->has_parameter("enable_epoch_backup_recovery")) {
+    node->declare_parameter("enable_epoch_backup_recovery", false);
+  }
+  enable_epoch_contract_ = node->get_parameter("enable_epoch_contract").as_bool();
+  const bool backup = node->get_parameter("enable_epoch_backup_recovery").as_bool();
+  if (backup && !enable_epoch_contract_) {
+    throw std::invalid_argument("Epoch BackUp recovery requires enable_epoch_contract");
+  }
+  // Only these packaged, reviewed trees can acquire epoch motion authority.
+  // A user-supplied default BT path never broadens the epoch allowlist.
+  strict_bt_path_ = ament_index_cpp::get_package_share_directory("navigo_bt_navigator") +
+    (backup ? "/behavior_trees/navigate_to_pose_with_epoch_backup.xml" :
+    "/behavior_trees/navigate_to_pose_with_epoch.xml");
+}
+
 bool
 NavigateToPoseNavigator::configure(
   rclcpp_lifecycle::LifecycleNode::WeakPtr parent_node,
@@ -29,12 +50,7 @@ NavigateToPoseNavigator::configure(
 {
   start_time_ = rclcpp::Time(0);
   auto node = parent_node.lock();
-  if (!node->has_parameter("enable_epoch_contract")) {
-    node->declare_parameter("enable_epoch_contract", false);
-  }
-  enable_epoch_contract_ = node->get_parameter("enable_epoch_contract").as_bool();
-  strict_bt_path_ = ament_index_cpp::get_package_share_directory("navigo_bt_navigator") +
-    "/behavior_trees/navigate_to_pose_with_epoch.xml";
+  configureEpochTree(node);
 
   if (!node->has_parameter("goal_blackboard_id")) {
     node->declare_parameter("goal_blackboard_id", std::string("goal"));
@@ -66,12 +82,7 @@ NavigateToPoseNavigator::getDefaultBTFilepath(
 {
   std::string default_bt_xml_filename;
   auto node = parent_node.lock();
-  if (!node->has_parameter("enable_epoch_contract")) {
-    node->declare_parameter("enable_epoch_contract", false);
-  }
-  enable_epoch_contract_ = node->get_parameter("enable_epoch_contract").as_bool();
-  strict_bt_path_ = ament_index_cpp::get_package_share_directory("navigo_bt_navigator") +
-    "/behavior_trees/navigate_to_pose_with_epoch.xml";
+  configureEpochTree(node);
 
   if (!node->has_parameter("default_nav_to_pose_bt_xml")) {
     std::string pkg_share_dir =

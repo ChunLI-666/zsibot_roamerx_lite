@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "navigo_velocity_optimizer/velocity_smoother.hpp"
+#include "navigo_velocity_optimizer/motion_phase.hpp"
 
 using namespace std::chrono_literals;
 using navigo_util::declare_parameter_if_not_declared;
@@ -234,6 +235,7 @@ void VelocityOptimizer::clearEpochCommand()
     epoch_pub_->publish(zero);
   }
   epoch_command_.reset(); command_.reset(); last_cmd_ = geometry_msgs::msg::Twist(); stopped_ = true;
+  phase_transition_.reset();
 }
 
 void VelocityOptimizer::epochCommandCallback(navigo_epoch_msgs::msg::EpochCommand::ConstSharedPtr msg)
@@ -243,6 +245,15 @@ void VelocityOptimizer::epochCommandCallback(navigo_epoch_msgs::msg::EpochComman
   if (!epoch_authority_.permits(msg->token, now_ns) ||
     !navigo_core::epoch::commandFresh(*msg, epoch_authority_.boot, now_ns, epoch_command_ttl_ns_) ||
     !msg->relay_session_id.empty() || msg->relay_sequence != 0 || !navigo_util::validateTwist(msg->velocity)) {return;}
+  if (msg->transition_braking || msg->braking_from_phase != 0 ||
+    !phase::valid(msg->source_motion_phase, msg->velocity) ||
+    !navigo_core::epoch::motionCommandValid(msg->token, msg->velocity, now_ns) ||
+    (msg->token.execution_kind == msg->token.BACKUP &&
+    (!std::isfinite(smoothing_frequency_) || smoothing_frequency_ < 20. ||
+    !std::isfinite(max_decels_[0]) || max_decels_[0] > -.2 || deadband_velocities_[0] > .05)))
+  {
+    clearEpochCommand(); return;
+  }
   auto & high = source_highwater_[msg->controller_session_id];
   if (msg->command_sequence <= high.first || msg->source_steady_time_ns <= high.second) {return;}
   high = {msg->command_sequence, msg->source_steady_time_ns};
@@ -324,7 +335,10 @@ void VelocityOptimizer::smootherTimer()
     epoch_lock.lock();
     const auto now_ns = navigo_core::epoch::steadyNow();
     if (!epoch_command_ || !epoch_authority_.permits(epoch_command_->token, now_ns) ||
-      !navigo_core::epoch::commandFresh(*epoch_command_, epoch_authority_.boot, now_ns, epoch_command_ttl_ns_)) {
+      !navigo_core::epoch::commandFresh(*epoch_command_, epoch_authority_.boot, now_ns, epoch_command_ttl_ns_) ||
+      (epoch_command_->token.execution_kind == epoch_command_->token.BACKUP &&
+      (!std::isfinite(smoothing_frequency_) || smoothing_frequency_ < 20. ||
+    !std::isfinite(max_decels_[0]) || max_decels_[0] > -.2 || deadband_velocities_[0] > .05))) {
       clearEpochCommand(); return;
     }
   }
@@ -354,10 +368,20 @@ void VelocityOptimizer::smootherTimer()
     current_ = odom_smoother_->getTwist();
   }
 
+  auto target_command = *command_;
+  bool transition_braking = false;
+  const auto braking_from_phase = phase_transition_.currentPhase();
+  if (epoch_contract_) {
+    const auto selection = phase_transition_.select(epoch_command_->source_motion_phase,
+      target_command, current_, last_cmd_);
+    target_command = selection.velocity;
+    transition_braking = selection.braking;
+  }
+
   // Apply absolute velocity restrictions to the command
-  command_->linear.x = std::clamp(command_->linear.x, min_velocities_[0], max_velocities_[0]);
-  command_->linear.y = std::clamp(command_->linear.y, min_velocities_[1], max_velocities_[1]);
-  command_->angular.z = std::clamp(command_->angular.z, min_velocities_[2], max_velocities_[2]);
+  target_command.linear.x = std::clamp(target_command.linear.x, min_velocities_[0], max_velocities_[0]);
+  target_command.linear.y = std::clamp(target_command.linear.y, min_velocities_[1], max_velocities_[1]);
+  target_command.angular.z = std::clamp(target_command.angular.z, min_velocities_[2], max_velocities_[2]);
 
   // Find if any component is not within the acceleration constraints. If so, store the most
   // significant scale factor to apply to the vector <dvx, dvy, dvw>, eta, to reduce all axes
@@ -369,31 +393,42 @@ void VelocityOptimizer::smootherTimer()
     double curr_eta = -1.0;
 
     curr_eta = findEtaConstraint(
-      current_.linear.x, command_->linear.x, max_accels_[0], max_decels_[0]);
+      current_.linear.x, target_command.linear.x, max_accels_[0], max_decels_[0]);
     if (curr_eta > 0.0 && std::fabs(1.0 - curr_eta) > std::fabs(1.0 - eta)) {
       eta = curr_eta;
     }
 
     curr_eta = findEtaConstraint(
-      current_.linear.y, command_->linear.y, max_accels_[1], max_decels_[1]);
+      current_.linear.y, target_command.linear.y, max_accels_[1], max_decels_[1]);
     if (curr_eta > 0.0 && std::fabs(1.0 - curr_eta) > std::fabs(1.0 - eta)) {
       eta = curr_eta;
     }
 
     curr_eta = findEtaConstraint(
-      current_.angular.z, command_->angular.z, max_accels_[2], max_decels_[2]);
+      current_.angular.z, target_command.angular.z, max_accels_[2], max_decels_[2]);
     if (curr_eta > 0.0 && std::fabs(1.0 - curr_eta) > std::fabs(1.0 - eta)) {
       eta = curr_eta;
     }
   }
 
   cmd_vel->linear.x = applyConstraints(
-    current_.linear.x, command_->linear.x, max_accels_[0], max_decels_[0], eta);
+    current_.linear.x, target_command.linear.x, max_accels_[0], max_decels_[0], eta);
   cmd_vel->linear.y = applyConstraints(
-    current_.linear.y, command_->linear.y, max_accels_[1], max_decels_[1], eta);
+    current_.linear.y, target_command.linear.y, max_accels_[1], max_decels_[1], eta);
   cmd_vel->angular.z = applyConstraints(
-    current_.angular.z, command_->angular.z, max_accels_[2], max_decels_[2], eta);
+    current_.angular.z, target_command.angular.z, max_accels_[2], max_decels_[2], eta);
+  if (epoch_contract_ &&
+    ((!transition_braking && !phase::valid(epoch_command_->source_motion_phase, *cmd_vel)) ||
+    (transition_braking && !phase::brakingOutput(current_, *cmd_vel, braking_from_phase)) ||
+    !navigo_core::epoch::motionCommandValid(epoch_command_->token, *cmd_vel,
+      navigo_core::epoch::steadyNow())))
+  {
+    clearEpochCommand(); return;
+  }
   last_cmd_ = *cmd_vel;
+  if (epoch_contract_) {
+    phase_transition_.update(last_cmd_, epoch_command_->source_motion_phase, transition_braking);
+  }
 
   // Apply deadband restrictions & publish
   cmd_vel->linear.x = fabs(cmd_vel->linear.x) < deadband_velocities_[0] ? 0.0 : cmd_vel->linear.x;
@@ -404,6 +439,8 @@ void VelocityOptimizer::smootherTimer()
   if (epoch_contract_) {
     auto output = *epoch_command_;
     output.velocity = *cmd_vel;
+    output.transition_braking = transition_braking;
+    output.braking_from_phase = transition_braking ? braking_from_phase : 0;
     output.relay_session_id = relay_session_;
     output.relay_sequence = ++relay_sequence_;
     epoch_pub_->publish(output);

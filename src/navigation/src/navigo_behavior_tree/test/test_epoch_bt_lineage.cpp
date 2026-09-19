@@ -7,12 +7,15 @@
 #include <vector>
 #include "behaviortree_cpp_v3/bt_factory.h"
 #include "navigo_epoch_msgs/msg/epoch_path.hpp"
+#include "navigo_epoch_msgs/action/follow_path_epoch.hpp"
+#include "navigo_epoch_msgs/action/back_up_epoch.hpp"
 #include "navigo_epoch_msgs/msg/localization_epoch.hpp"
 #include "nav2_msgs/action/compute_path_to_pose.hpp"
 #include "nav2_msgs/action/compute_path_through_poses.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
 #include "std_msgs/msg/string.hpp"
+#include "navigo_util/simple_action_server.hpp"
 
 using namespace std::chrono_literals;
 using Action = nav2_msgs::action::ComputePathToPose;
@@ -81,7 +84,9 @@ protected:
       state_pub_->publish(state_);
       std_msgs::msg::String gate; gate.data = gate_; gate_pub_->publish(gate);
     }
+    const auto tick_started=std::chrono::steady_clock::now();
     const auto result = tree_->tickRoot();
+    maximum_tick_us_=std::max(maximum_tick_us_,std::chrono::duration<double,std::micro>(std::chrono::steady_clock::now()-tick_started).count());
     std::this_thread::sleep_for(10ms);
     return result;
   }
@@ -121,6 +126,7 @@ protected:
   std::unique_ptr<BT::Tree> tree_;
   State state_;
   std::string gate_;
+  double maximum_tick_us_{0.};
 };
 
 TEST_F(EpochBT, PlannerUsesTaggedStartAndResultRetainsCapturedIdentity)
@@ -280,4 +286,102 @@ TEST_F(EpochBT, ThroughPosesPrunesOnlyReachedPrefixUsingTaggedPoseAndKeepsFinalG
     EXPECT_DOUBLE_EQ(received->back().goals.front().pose.position.x, 3.);
   }
   EXPECT_EQ(blackboard_->get<std::vector<geometry_msgs::msg::PoseStamped>>("goals").size(), 1u);
+}
+
+TEST_F(EpochBT, TerminalFollowFailureWinsOverSimultaneousReplacement)
+{
+  using FollowAction = navigo_epoch_msgs::action::FollowPathEpoch;
+  using FollowHandle = rclcpp_action::ServerGoalHandle<FollowAction>;
+  std::shared_ptr<FollowHandle> follow_handle;
+  std::atomic<int> follow_requests{0};
+  auto follow_server = rclcpp_action::create_server<FollowAction>(mock_, "follow_path_epoch",
+    [](const auto &, const auto) {return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;},
+    [](const auto) {return rclcpp_action::CancelResponse::ACCEPT;},
+    [&](std::shared_ptr<FollowHandle> handle) {
+      std::lock_guard<std::mutex> lock(mutex_);follow_handle=handle;++follow_requests;
+    });
+  tree_->haltTree();tree_.reset();
+  tree_ = std::make_unique<BT::Tree>(factory_.createTreeFromText(
+    "<root main_tree_to_execute='Main'><BehaviorTree ID='Main'><EpochGuard><Sequence>"
+    "<EpochComputePathToPose goal='{goal}' epoch_path='{epoch_raw_path}'/>"
+    "<EpochFollowPath epoch_path='{epoch_raw_path}'/>"
+    "</Sequence></EpochGuard></BehaviorTree></root>",blackboard_));
+  ASSERT_TRUE(until([&] {return count()==1;}));succeed(0);
+  ASSERT_TRUE(until([&] {return follow_requests.load()==1;}));
+  // Pump the accepted-goal response so the client has issued GetResult before
+  // making both a terminal result and a replacement available.
+  for (int i=0;i<3;++i) {tick();}
+  // This failure and a newer path are both available on the next BT tick.
+  auto result=std::make_shared<FollowAction::Result>();
+  result->error_code=FollowAction::Result::INVALID_EPOCH;result->error_msg="Failed to make progress";
+  {std::lock_guard<std::mutex> lock(mutex_);follow_handle->abort(result);}
+  auto newer=output();++newer.token.plan_sequence;blackboard_->set("epoch_raw_path",newer);
+  std::this_thread::sleep_for(50ms);
+  EXPECT_EQ(tick(),BT::NodeStatus::FAILURE);
+  std::this_thread::sleep_for(50ms);
+  EXPECT_EQ(follow_requests.load(),1);
+  tree_->haltTree();tree_.reset();
+}
+
+TEST_F(EpochBT, BackupAcknowledgmentSurvivesExecutionBeyondAckDeadline)
+{
+  using BackupAction = navigo_epoch_msgs::action::BackUpEpoch;
+  using BackupHandle = rclcpp_action::ServerGoalHandle<BackupAction>;
+  std::shared_ptr<BackupHandle> backup_handle;
+  std::atomic<bool> accepted{false};
+  auto backup_server = rclcpp_action::create_server<BackupAction>(mock_, "back_up_epoch",
+    [](const auto &, const auto) {return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;},
+    [](const auto) {return rclcpp_action::CancelResponse::ACCEPT;},
+    [&](std::shared_ptr<BackupHandle> handle) {
+      std::lock_guard<std::mutex> lock(mutex_);backup_handle=handle;accepted=true;
+    });
+  tree_->haltTree();tree_.reset();
+  tree_ = std::make_unique<BT::Tree>(factory_.createTreeFromText(
+    "<root main_tree_to_execute='Main'><BehaviorTree ID='Main'><EpochGuard>"
+    "<EpochBackUp action_timeout_sec='6'/></EpochGuard></BehaviorTree></root>",blackboard_));
+  ASSERT_TRUE(until([&] {return accepted.load();}));
+  const auto end=std::chrono::steady_clock::now()+2300ms;
+  while (std::chrono::steady_clock::now()<end) {ASSERT_EQ(tick(),BT::NodeStatus::RUNNING);}
+  {std::lock_guard<std::mutex> lock(mutex_);backup_handle->succeed(std::make_shared<BackupAction::Result>());}
+  BT::NodeStatus status=BT::NodeStatus::RUNNING;
+  const auto result_deadline=std::chrono::steady_clock::now()+2s;
+  while (status==BT::NodeStatus::RUNNING && std::chrono::steady_clock::now()<result_deadline) {status=tick();}
+  ASSERT_EQ(status,BT::NodeStatus::SUCCESS);
+  RCLCPP_INFO(client_->get_logger(), "Maximum complete BT tick %.3f ms", maximum_tick_us_/1000.);
+}
+
+TEST_F(EpochBT, BackupAcknowledgmentWithTwentyHzFeedbackAndTenHzTree)
+{
+  using BackupAction = navigo_epoch_msgs::action::BackUpEpoch;
+  std::atomic<bool> accepted{false},release{false};
+  std::unique_ptr<navigo_util::SimpleActionServer<BackupAction>> backup_server;
+  backup_server=std::make_unique<navigo_util::SimpleActionServer<BackupAction>>(
+    mock_,"back_up_epoch",[&] {
+      accepted=true;const auto deadline=std::chrono::steady_clock::now()+3s;
+      while (!release && std::chrono::steady_clock::now()<deadline) {
+        backup_server->publish_feedback(std::make_shared<BackupAction::Feedback>());
+        std::this_thread::sleep_for(50ms);
+      }
+      backup_server->succeeded_current(std::make_shared<BackupAction::Result>());
+    },nullptr,500ms,true);
+  backup_server->activate();
+  tree_->haltTree();tree_.reset();
+  tree_ = std::make_unique<BT::Tree>(factory_.createTreeFromText(
+    "<root main_tree_to_execute='Main'><BehaviorTree ID='Main'><EpochGuard>"
+    "<EpochBackUp action_timeout_sec='6'/></EpochGuard></BehaviorTree></root>",blackboard_));
+  const auto discovery_deadline=std::chrono::steady_clock::now()+4s;
+  while (!accepted && std::chrono::steady_clock::now()<discovery_deadline) {tick();std::this_thread::sleep_for(90ms);}
+  ASSERT_TRUE(accepted);
+  const auto end=std::chrono::steady_clock::now()+2300ms;
+  BT::NodeStatus during=BT::NodeStatus::RUNNING;
+  while (std::chrono::steady_clock::now()<end && during==BT::NodeStatus::RUNNING) {during=tick();std::this_thread::sleep_for(90ms);}
+  release=true;
+  const auto cleanup_deadline=std::chrono::steady_clock::now()+1s;
+  while (backup_server->is_running() && std::chrono::steady_clock::now()<cleanup_deadline) {std::this_thread::sleep_for(1ms);}
+  ASSERT_EQ(during,BT::NodeStatus::RUNNING);
+  BT::NodeStatus status=BT::NodeStatus::RUNNING;
+  const auto result_deadline=std::chrono::steady_clock::now()+2s;
+  while (status==BT::NodeStatus::RUNNING && std::chrono::steady_clock::now()<result_deadline) {status=tick();}
+  ASSERT_EQ(status,BT::NodeStatus::SUCCESS);
+  RCLCPP_INFO(client_->get_logger(), "Maximum complete BT tick %.3f ms", maximum_tick_us_/1000.);
 }

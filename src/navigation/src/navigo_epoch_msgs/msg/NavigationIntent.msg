@@ -1,4 +1,4 @@
-# BT task authority, renewed only while its matching FollowPath is live.
+# BT motion authority, renewed only while the matching typed action is live.
 navigo_epoch_msgs/NavigationToken token
 uint64 heartbeat_sequence
 bool active

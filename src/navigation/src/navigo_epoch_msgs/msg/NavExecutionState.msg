@@ -1,4 +1,4 @@
-# Published by the controller only after installing the typed path.
+# Published only after installing the typed motion: a TRACK path or bounded BACKUP request.
 navigo_epoch_msgs/NavigationToken token
 string controller_session_id
 uint64 heartbeat_sequence

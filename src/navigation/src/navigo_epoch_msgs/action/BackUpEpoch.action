@@ -1,0 +1,23 @@
+# Experimental: no path is installed by this action. Positive metric bounds.
+navigo_epoch_msgs/NavigationToken token
+geometry_msgs/PoseStamped start
+uint64 localization_heartbeat_sequence
+# Maximum travel budget, not an exact-distance arrival command. Minimum 0.03 m.
+# May stop early when the remaining budget cannot accommodate SDK minimum speed.
+float64 distance
+float64 speed
+---
+uint16 NONE=0
+uint16 INVALID_REQUEST=1
+uint16 STOPPED=2
+uint16 error_code
+string error_msg
+# Rearward projection along installed heading.
+float64 distance_traveled
+# Accumulated odometry path length consumes the hard travel budget.
+float64 path_length
+float64 configured_minimum_speed
+geometry_msgs/PoseStamped executed_start
+---
+float64 distance_traveled
+float64 remaining_time
