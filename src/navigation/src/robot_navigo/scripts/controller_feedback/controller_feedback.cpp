@@ -1,6 +1,7 @@
 // Test-only integration harness: production controller plugin, direct command
 // feedback to an ideal SE(2) plant. No actuator, bag playback, or hardware topics.
 #include <fstream>
+#include <filesystem>
 #include <iomanip>
 #include <cmath>
 #include <limits>
@@ -73,6 +74,9 @@ int main(int argc,char**argv) {
     std::cout<<"PASS: exact grid-edge contacts, convex diamond, concavity rejection,  free, out-of-bounds, interior obstacle, unknown, rotated footprint, nonfinite\n";return 0;
   }
   if(argc<4) {std::cerr<<"usage: controller_feedback CASE.yaml PARAMS.yaml OUTPUT.csv [--ros-args ...]\n";return 2;}
+  if (std::filesystem::exists(argv[3])) {
+    std::cerr << "Refusing to overwrite prior feedback trace\n"; return 2;
+  }
   auto data=YAML::LoadFile(argv[1]);
   std::ifstream footprint_input(data["footprint_file"].as<std::string>());
   if (!footprint_input) throw std::runtime_error("Missing external footprint configuration");
@@ -101,7 +105,14 @@ int main(int argc,char**argv) {
   auto clock=node->get_clock();
   if(rcl_enable_ros_time_override(clock->get_clock_handle())!=RCL_RET_OK) return 3;
   auto cm=std::make_shared<navigo_costmap_2d::Costmap2DROS>("feedback_costmap","", "feedback_costmap");
-  cm->set_parameter(rclcpp::Parameter("plugins",std::vector<std::string>{}));
+  const bool inflation=data["load_inflation_layer"].as<bool>(false);
+  cm->set_parameter(rclcpp::Parameter("plugins",inflation ?
+    std::vector<std::string>{"inflation_layer"} : std::vector<std::string>{}));
+  if (inflation) {
+    cm->declare_parameter("inflation_layer.plugin",std::string("navigo_costmap_2d::InflationLayer"));
+    cm->declare_parameter("inflation_layer.inflation_radius",data["inflation_radius"].as<double>());
+    cm->declare_parameter("inflation_layer.cost_scaling_factor",data["cost_scaling_factor"].as<double>());
+  }
   cm->set_parameter(rclcpp::Parameter("global_frame",std::string("odom")));
   cm->set_parameter(rclcpp::Parameter("footprint_padding",padding));
   const std::string parameter_text=data["test_only_footprint_parameter"] ?
@@ -174,6 +185,9 @@ int main(int argc,char**argv) {
   geometry_record["map"]=data["map"];
   std::ofstream(std::string(argv[3])+".footprint.yaml") << geometry_record;
   int status=1;
+  int consecutive_success=0;
+  const int success_hold_steps=data["success_hold_steps"].as<int>(1);
+  if (success_hold_steps<1) throw std::runtime_error("Invalid success hold steps");
   for(int step=0;step<steps;++step) {
     const double t=data["shadow_stamps"] ? data["shadow_stamps"][step].as<double>()-data["shadow_stamps"][0].as<double>() : step*dt;
     if(rcl_set_ros_time_override(clock->get_clock_handle(),static_cast<int64_t>(((data["shadow_stamps"] ? data["shadow_stamps"][step].as<double>() : 1000+t)+(data["reset_step"] && step>=data["reset_step"].as<int>() ? 5.0 : 0.0))*1e9))!=RCL_RET_OK) return 3;
@@ -199,14 +213,21 @@ int main(int argc,char**argv) {
     double nx=x,ny=y,na=yaw;bool collision=false;std::string collision_reason;
     // At dt=.1, check every .01 s (<=2.13 mm translation / .001 rad yaw).
     for(int sub=0;sub<10;++sub) {
-      nx+=(std::cos(na)*actual.linear.x-std::sin(na)*actual.linear.y)*dt/10;
-      ny+=(std::sin(na)*actual.linear.x+std::cos(na)*actual.linear.y)*dt/10;
-      na=angle(na+actual.angular.z*dt/10);
+      const double h=dt/10, turn=actual.angular.z*h;
+      const double a=std::abs(turn)<1e-8 ? h*(1-turn*turn/6) : std::sin(turn)/actual.angular.z;
+      const double b=std::abs(turn)<1e-8 ? h*turn/2 : (1-std::cos(turn))/actual.angular.z;
+      const double dx=a*actual.linear.x-b*actual.linear.y;
+      const double dy=b*actual.linear.x+a*actual.linear.y;
+      nx+=std::cos(na)*dx-std::sin(na)*dy;
+      ny+=std::sin(na)*dx+std::cos(na)*dy;
+      na=angle(na+turn);
       if(feedback_test::collides(costmap,effective_footprint,nx,ny,na,&collision_reason)) {collision=true;break;}
     }
     double xy=std::hypot(goal.position.x-x,goal.position.y-y),ye=std::abs(angle(goal_yaw-yaw));
     bool success=!collision && exception.empty() && checker->isGoalReached(query.pose,goal,velocity) &&
       std::hypot(actual.linear.x,actual.linear.y)<=.01 && std::abs(actual.angular.z)<=.01;
+    consecutive_success=success ? consecutive_success+1 : 0;
+    success=consecutive_success>=success_hold_steps;
     out<<step<<','<<t<<','<<x<<','<<y<<','<<yaw<<','<<actual.linear.x<<','<<actual.linear.y<<','<<actual.angular.z<<','<<raw.linear.x<<','<<raw.linear.y<<','<<raw.angular.z<<','<<xy<<','<<ye<<','<<collision<<','<<exception<<','<<success<<','<<motion_mode<<','<<collision_reason<<'\n';
     if(collision) {status=4;break;}
     if(!data["shadow"]) status=success ? 0 : 1;

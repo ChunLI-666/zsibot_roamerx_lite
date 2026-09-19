@@ -1,0 +1,79 @@
+{
+  "scope": "Current source legacy mode re-evaluation; not historical sample-cost recovery or closed-loop validation",
+  "runs": 180,
+  "sampled_runs": 162,
+  "fixed_proposal_runs": 18,
+  "checks": {
+    "native_manager_equal": true,
+    "finite_costs": true,
+    "cost_sum_consistent": true,
+    "softmax_consistent": true,
+    "prefer_forward_integral_consistent_with_float32_ulp": true,
+    "paired_weights_have_identical_exported_rollout_summaries": true,
+    "inputs_and_runtime_unchanged": true
+  },
+  "grouped": [
+    {
+      "warm": "zero",
+      "weight": 0,
+      "runs": 27,
+      "valid_runs": 27,
+      "negative_output_count": 24,
+      "reverse_at_or_above_005_deadband_count": 0,
+      "mean_vx": -0.013064913753489102,
+      "mean_reverse_weight_mass": 0.7398649098254251
+    },
+    {
+      "warm": "zero",
+      "weight": 5,
+      "runs": 27,
+      "valid_runs": 27,
+      "negative_output_count": 22,
+      "reverse_at_or_above_005_deadband_count": 0,
+      "mean_vx": -0.005382011541061931,
+      "mean_reverse_weight_mass": 0.6004185381002892
+    },
+    {
+      "warm": "zero",
+      "weight": 20,
+      "runs": 27,
+      "valid_runs": 27,
+      "negative_output_count": 1,
+      "reverse_at_or_above_005_deadband_count": 0,
+      "mean_vx": 0.008703316961785916,
+      "mean_reverse_weight_mass": 0.1966861154383789
+    },
+    {
+      "warm": "measured",
+      "weight": 0,
+      "runs": 27,
+      "valid_runs": 27,
+      "negative_output_count": 24,
+      "reverse_at_or_above_005_deadband_count": 11,
+      "mean_vx": -0.047809437917614425,
+      "mean_reverse_weight_mass": 0.8641639331498091
+    },
+    {
+      "warm": "measured",
+      "weight": 5,
+      "runs": 27,
+      "valid_runs": 27,
+      "negative_output_count": 23,
+      "reverse_at_or_above_005_deadband_count": 10,
+      "mean_vx": -0.040941352110907984,
+      "mean_reverse_weight_mass": 0.819899940813836
+    },
+    {
+      "warm": "measured",
+      "weight": 20,
+      "runs": 27,
+      "valid_runs": 27,
+      "negative_output_count": 17,
+      "reverse_at_or_above_005_deadband_count": 9,
+      "mean_vx": -0.02539133764286008,
+      "mean_reverse_weight_mass": 0.6959360235267901
+    }
+  ],
+  "native_output_validation": 0.0,
+  "full_results": "/home/charles/project/colcon_ws/analysis_outputs/mppi_cost_audit_20260918/with_inflation_metadata/results.json"
+}
