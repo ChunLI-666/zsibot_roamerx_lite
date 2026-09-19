@@ -17,6 +17,8 @@
 
 #include <string>
 #include <memory>
+#include "std_msgs/msg/string.hpp"
+#include "navigo_mppi_controller/tools/forward_alignment.hpp"
 
 #include "navigo_mppi_controller/tools/path_handler.hpp"
 #include "navigo_mppi_controller/optimizer.hpp"
@@ -107,6 +109,23 @@ protected:
     * @param transformed_plan Transformed input plan
     */
   void visualize(nav_msgs::msg::Path transformed_plan);
+
+  void publishMode(const std::string & mode, const std::string & reason,
+    double error, const builtin_interfaces::msg::Time & stamp);
+  bool alignmentCommand(const geometry_msgs::msg::PoseStamped & pose,
+    const geometry_msgs::msg::Twist & speed, const nav_msgs::msg::Path & path,
+    const geometry_msgs::msg::Pose & goal, navigo_core::GoalChecker * checker,
+    geometry_msgs::msg::TwistStamped & command, double dt);
+
+  bool forward_alignment_enabled_{false};
+  forward_alignment::Mode motion_mode_{forward_alignment::Mode::TRACK};
+  double entry_angle_, exit_angle_, lookahead_distance_, max_angular_velocity_;
+  double min_angular_velocity_, angular_acceleration_, xy_hysteresis_;
+  double rotation_collision_step_, stopped_linear_velocity_;
+  double control_period_{0.1};
+  geometry_msgs::msg::PoseStamped previous_goal_;
+  bool have_goal_{false};
+  rclcpp_lifecycle::LifecyclePublisher<std_msgs::msg::String>::SharedPtr mode_publisher_;
 
   std::string name_;
   rclcpp_lifecycle::LifecycleNode::WeakPtr parent_;

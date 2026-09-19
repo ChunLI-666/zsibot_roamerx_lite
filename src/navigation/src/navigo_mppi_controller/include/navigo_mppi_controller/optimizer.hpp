@@ -116,6 +116,8 @@ public:
    */
   void reset();
 
+  const models::ControlConstraints & getConstraints() const {return settings_.constraints;}
+
 protected:
   /**
    * @brief Main function to generate, score, and return trajectories
@@ -219,6 +221,7 @@ protected:
    * @return Bool if holonomic to populate `y` axis of state
    */
   bool isHolonomic() const;
+
 
   /**
    * @brief Using control frequence and time step size, determine if trajectory

@@ -21,6 +21,7 @@ include_directories(
 
 set(dependencies_pkgs
   rclcpp
+  std_msgs
   nav2_common
   pluginlib
   tf2
@@ -70,7 +71,7 @@ if(COMPILER_SUPPORTS_FMA)
 endif()
 
 # If building one the same hardware to be deployed on, try `-march=native`!
-add_compile_options(-O3 -finline-limit=10000000 -ffp-contract=fast -ffast-math -mtune=generic)
+add_compile_options(-O3 -finline-limit=10000000 -ffp-contract=fast -mtune=generic)
 
 # Suppress false positive array-bounds warning from xtensor with GCC 13+
 add_compile_options(-Wno-array-bounds -Wno-stringop-overflow)
@@ -127,6 +128,11 @@ pluginlib_export_plugin_description_file(navigo_mppi_controller critics.xml)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_forward_alignment test/test_forward_alignment.cpp)
+  target_include_directories(test_forward_alignment PUBLIC ${xsimd_INCLUDE_DIRS})
+  target_link_libraries(test_forward_alignment mppi_controller
+    xtensor xtensor::optimize xtensor::use_xsimd)
+  ament_target_dependencies(test_forward_alignment ${dependencies_pkgs})
   ament_add_gtest(test_velocity_deadband_critic
     test/test_velocity_deadband_critic.cpp)
   target_include_directories(test_velocity_deadband_critic PUBLIC ${xsimd_INCLUDE_DIRS})

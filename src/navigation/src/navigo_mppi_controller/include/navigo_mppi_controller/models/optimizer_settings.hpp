@@ -37,6 +37,11 @@ struct OptimizerSettings
   unsigned int time_steps{0};
   unsigned int iteration_count{0};
   bool shift_control_sequence{false};
+  bool forward_alignment{false};
+  float minimum_forward_velocity{0.05f};
+  float minimum_angular_velocity{0.02f};
+  double speed_limit{0.0};  // NO_SPEED_LIMIT
+  bool speed_limit_percentage{false};
   size_t retry_attempt_limit{0};
 };
 
