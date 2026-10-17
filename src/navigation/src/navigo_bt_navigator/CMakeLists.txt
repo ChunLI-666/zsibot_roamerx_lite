@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.5)
 project(navigo_bt_navigator)
 
 find_package(ament_cmake REQUIRED)
+find_package(robot_debug_msgs REQUIRED)
+find_package(robot_debug_tools REQUIRED)
 find_package(nav2_common REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
@@ -41,6 +43,8 @@ add_executable(${executable_name}
 set(library_name ${executable_name}_core)
 
 set(dependencies
+  robot_debug_msgs
+  robot_debug_tools
   rclcpp
   rclcpp_action
   rclcpp_lifecycle
@@ -62,6 +66,8 @@ add_library(${library_name} SHARED
   src/navigators/navigate_to_pose.cpp
   src/navigators/navigate_through_poses.cpp
 )
+robot_debug_build_stamp(${library_name} "navigation" "bt_navigator_core")
+
 
 ament_target_dependencies(${executable_name}
   ${dependencies}

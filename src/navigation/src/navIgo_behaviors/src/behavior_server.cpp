@@ -19,6 +19,9 @@
 #include "navigo_util/node_utils.hpp"
 #include "navigo_behaviors/behavior_server.hpp"
 
+#include "robot_debug_tools/recorder.hpp"
+#include "robot_debug_build.hpp"
+
 namespace behavior_server
 {
 
@@ -31,6 +34,16 @@ BehaviorServer::BehaviorServer(const rclcpp::NodeOptions & options)
     "navigo_behaviors/DriveOnHeading",
     "navigo_behaviors/Wait"}
 {
+  // Actions are owned by configurable plugins. The server-core build alone
+  // cannot identify the running plugin or its chosen action endpoint.
+  try {
+    debug_metadata_ = std::make_unique<robot_debug::Recorder>(
+      *this, "behavior_server", robot_debug::compiled_build_stamp(),
+      std::vector<std::string>{}, true);
+  } catch (...) {
+    RCLCPP_WARN(get_logger(), "Build metadata unavailable; continuing without diagnostics");
+  }
+
   declare_parameter(
     "costmap_topic",
     rclcpp::ParameterValue(std::string("local_costmap/costmap_raw")));

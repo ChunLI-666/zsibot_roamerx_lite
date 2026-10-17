@@ -27,6 +27,9 @@ using navigo_util::declare_parameter_if_not_declared;
 using std::placeholders::_1;
 using rcl_interfaces::msg::ParameterType;
 
+#include "robot_debug_tools/recorder.hpp"
+#include "robot_debug_build.hpp"
+
 namespace navigo_velocity_optimizer
 {
 
@@ -34,6 +37,14 @@ VelocityOptimizer::VelocityOptimizer(const rclcpp::NodeOptions & options)
 : LifecycleNode("velocity_smoother", "", options),
   last_command_time_{0, 0, get_clock()->get_clock_type()}
 {
+  try {
+    debug_metadata_ = std::make_unique<robot_debug::Recorder>(
+      *this, "velocity_smoother", robot_debug::compiled_build_stamp(),
+      std::vector<std::string>{
+        get_node_topics_interface()->resolve_topic_name("cmd_vel_smoothed")}, true);
+  } catch (...) {
+    RCLCPP_WARN(get_logger(), "Build metadata unavailable; continuing without diagnostics");
+  }
 }
 
 VelocityOptimizer::~VelocityOptimizer()

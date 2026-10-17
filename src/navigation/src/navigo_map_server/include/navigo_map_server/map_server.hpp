@@ -25,6 +25,8 @@
 #include <memory>
 #include <string>
 
+namespace robot_debug { class Recorder; }
+
 namespace navigo_map_server
 {
 
@@ -48,6 +50,8 @@ namespace navigo_map_server
         ~MapServer();
 
     protected:
+        std::unique_ptr<robot_debug::Recorder> debug_metadata_;
+
         /**
          * @brief Sets up required params and services. Loads map and its parameters from the file
          * @param state Lifecycle Node's state

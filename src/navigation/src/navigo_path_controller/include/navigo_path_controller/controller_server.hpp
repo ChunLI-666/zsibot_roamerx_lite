@@ -42,6 +42,7 @@
 #include "pluginlib/class_loader.hpp"
 #include "pluginlib/class_list_macros.hpp"
 #include "robots_dog_msgs/msg/navigo_controller_debug.hpp"
+#include "robot_debug_tools/recorder.hpp"
 
 namespace navigo_path_controller
 {
@@ -327,6 +328,21 @@ protected:
   // Path update diagnostics
   rclcpp::Time last_path_update_time_;
   uint32_t path_update_count_{0};
+
+  // Thin observations copy only values already consumed by the legacy action.
+  std::unique_ptr<robot_debug::Recorder> observation_recorder_;
+  bool observed_costmap_current_known_{false};
+  bool observed_costmap_current_{false};
+  uint8_t observed_checker_failure_{0};
+  rclcpp_action::GoalUUID observed_checker_goal_id_{};
+  uint32_t observed_checker_path_revision_{0};
+  void observeBranch(
+    const char * site, const char * branch, const char * error = "",
+    bool value_valid = false, bool value = false) noexcept;
+  void observeCostmapCurrent(bool current) noexcept;
+  bool observeGoalCheck(
+    const geometry_msgs::msg::PoseStamped * robot,
+    const geometry_msgs::msg::PoseStamped * goal, const bool * result) noexcept;
 
 private:
   /**

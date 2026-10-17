@@ -34,6 +34,7 @@
 #include "navigo_path_controller/controller_server.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 #include "tf2/utils.h"
+#include "robot_debug_build.hpp"
 
 using namespace std::chrono_literals;
 using rcl_interfaces::msg::ParameterType;
@@ -225,6 +226,19 @@ ControllerServer::on_configure(const rclcpp_lifecycle::State & /*state*/)
     speed_limit_topic, rclcpp::QoS(10),
     std::bind(&ControllerServer::speedLimitCallback, this, std::placeholders::_1));
 
+  if (!epoch_contract_) {
+    try {
+      observation_recorder_ = std::make_unique<robot_debug::Recorder>(
+        *this, "controller", robot_debug::compiled_build_stamp(),
+        std::vector<std::string>{get_node_topics_interface()->resolve_topic_name("follow_path")});
+    } catch (const std::exception & error) {
+      observation_recorder_.reset();
+      RCLCPP_WARN(get_logger(), "Thin observations unavailable: %s", error.what());
+    }
+  }
+  observed_costmap_current_known_ = false;
+  observed_checker_failure_ = 0;
+
   return navigo_util::CallbackReturn::SUCCESS;
 }
 
@@ -323,6 +337,7 @@ ControllerServer::on_cleanup(const rclcpp_lifecycle::State & /*state*/)
   costmap_thread_.reset();
   vel_publisher_.reset();
   debug_publisher_.reset();
+  observation_recorder_.reset();
   speed_limit_sub_.reset();
 
   return navigo_util::CallbackReturn::SUCCESS;
@@ -802,6 +817,7 @@ void ControllerServer::computeControl()
   std::lock_guard<std::mutex> lock(dynamic_params_lock_);
 
   RCLCPP_INFO(get_logger(), "Received a goal, begin computing control effort.");
+  observed_costmap_current_known_ = false;
 
   try {
     std::string c_name = action_server_->get_current_goal()->controller_id;
@@ -843,21 +859,30 @@ void ControllerServer::computeControl()
       // Never leave the previous command active while obstacle observations are stale.
       const auto costmap_wait_start = std::chrono::steady_clock::now();
       bool stale_stop_published = false;
+      bool consumed_current = false;
       rclcpp::Rate r(100);
-      while (!costmap_ros_->isCurrent()) {
+      while (!(consumed_current = costmap_ros_->isCurrent())) {
         if (!stale_stop_published) {
           publishZeroVelocity();
           stale_stop_published = true;
+          observeCostmapCurrent(consumed_current);
+          observeBranch("costmap_wait", "entered");
         }
         if (!rclcpp::ok() || action_server_->is_cancel_requested()) {
+          observeBranch("costmap_wait", "stopped", "Controller stopped while waiting for costmap");
           throw navigo_core::PlannerException("Controller stopped while waiting for costmap");
         }
         const double wait_seconds = std::chrono::duration<double>(
           std::chrono::steady_clock::now() - costmap_wait_start).count();
         if (wait_seconds > costmap_update_timeout_) {
+          observeBranch("costmap_wait", "timeout", "Costmap observations are stale");
           throw navigo_core::PlannerException("Costmap observations are stale");
         }
         r.sleep();
+      }
+      observeCostmapCurrent(consumed_current);
+      if (stale_stop_published) {
+        observeBranch("costmap_wait", "exited");
       }
 
       updateGlobalPath();
@@ -876,11 +901,13 @@ void ControllerServer::computeControl()
       }
     }
   } catch (navigo_core::PlannerException & e) {
+    observeBranch("compute_control", "planner_exception", e.what());
     RCLCPP_ERROR(this->get_logger(), "%s", e.what());
     publishZeroVelocity();
     action_server_->terminate_current();
     return;
   } catch (std::exception & e) {
+    observeBranch("compute_control", "exception", e.what());
     RCLCPP_ERROR(this->get_logger(), "%s", e.what());
     publishZeroVelocity();
     std::shared_ptr<Action::Result> result = std::make_shared<Action::Result>();
@@ -917,6 +944,14 @@ void ControllerServer::setPlannerPath(const nav_msgs::msg::Path & path)
   current_path_ = path;
   last_path_update_time_ = now();
   ++path_update_count_;
+  if (observation_recorder_ && observation_recorder_->enabled() && !epoch_contract_ && action_server_) {
+    try {
+      observation_recorder_->path_installed(
+        action_server_->get_current_goal_id(), path_update_count_);
+    } catch (...) {
+      // A dropped path observation must not change installation of the plan.
+    }
+  }
 }
 
 void ControllerServer::computeAndPublishVelocity()
@@ -924,10 +959,12 @@ void ControllerServer::computeAndPublishVelocity()
   geometry_msgs::msg::PoseStamped pose;
 
   if (!getRobotPose(pose)) {
+    observeBranch("compute_velocity", "pose_unavailable", "Failed to obtain robot pose");
     throw navigo_core::PlannerException("Failed to obtain robot pose");
   }
 
   if (!progress_checker_->check(pose)) {
+    observeBranch("progress_checker", "returned_false", "Failed to make progress");
     if (epoch_contract_) {
       // Recoverable execution termination seals this token without invalidating
       // the mission identity needed by the explicit recovery BT.
@@ -953,6 +990,7 @@ void ControllerServer::computeAndPublishVelocity()
       goal_checkers_[current_goal_checker_].get());
     last_valid_cmd_time_ = now();
   } catch (navigo_core::PlannerException & e) {
+    observeBranch("compute_velocity", "planner_exception", e.what());
     if (failure_tolerance_ > 0 || failure_tolerance_ == -1.0) {
       RCLCPP_WARN(this->get_logger(), "%s", e.what());
       cmd_vel_2d.twist.angular.x = 0;
@@ -1292,11 +1330,92 @@ void ControllerServer::publishControllerDebug(
   debug_publisher_->publish(msg);
 }
 
+void ControllerServer::observeBranch(
+  const char * site, const char * branch, const char * error,
+  bool value_valid, bool value) noexcept
+{
+  if (!observation_recorder_ || !observation_recorder_->enabled() ||
+    epoch_contract_ || !action_server_)
+  {
+    return;
+  }
+  try {
+    observation_recorder_->branch(
+      site, branch, error, value_valid, value, action_server_->get_current_goal_id());
+  } catch (...) {
+    // Observation allocation or handoff must never change the action result.
+  }
+}
+
+void ControllerServer::observeCostmapCurrent(bool current) noexcept
+{
+  if (!observed_costmap_current_known_ || observed_costmap_current_ != current) {
+    observeBranch("costmap_current", current ? "current" : "stale", "", true, current);
+    observed_costmap_current_ = current;
+    observed_costmap_current_known_ = true;
+  }
+}
+
+bool ControllerServer::observeGoalCheck(
+  const geometry_msgs::msg::PoseStamped * robot,
+  const geometry_msgs::msg::PoseStamped * goal, const bool * result) noexcept
+{
+  if (!observation_recorder_ || !observation_recorder_->enabled() ||
+    epoch_contract_ || !action_server_)
+  {
+    return false;
+  }
+  try {
+    const auto goal_id = action_server_->get_current_goal_id();
+    const uint8_t failure = result ? 0 : (robot ? 2 : 1);
+    if (failure != 0 && failure == observed_checker_failure_ &&
+      goal_id == observed_checker_goal_id_ &&
+      path_update_count_ == observed_checker_path_revision_)
+    {
+      return false;
+    }
+    robot_debug_msgs::msg::CheckerSample sample;
+    sample.checker_id = current_goal_checker_;
+    sample.evaluated = result != nullptr;
+    sample.result_valid = result != nullptr;
+    sample.result = result != nullptr && *result;
+    if (robot) {
+      sample.robot_stamp = robot->header.stamp;
+    }
+    if (goal) {
+      sample.goal_stamp = goal->header.stamp;
+    }
+    if (result && robot && goal && !robot->header.frame_id.empty() &&
+      robot->header.frame_id == goal->header.frame_id)
+    {
+      sample.path_end_xy_distance_m = std::hypot(
+        goal->pose.position.x - robot->pose.position.x,
+        goal->pose.position.y - robot->pose.position.y);
+      sample.path_end_yaw_error_rad = std::abs(angles::shortest_angular_distance(
+          tf2::getYaw(robot->pose.orientation), tf2::getYaw(goal->pose.orientation)));
+      sample.geometry_valid = std::isfinite(sample.path_end_xy_distance_m) &&
+        std::isfinite(sample.path_end_yaw_error_rad);
+      sample.frame_id = robot->header.frame_id;
+    }
+    observation_recorder_->checker(sample, goal_id, path_update_count_);
+    observed_checker_failure_ = failure;
+    observed_checker_goal_id_ = goal_id;
+    observed_checker_path_revision_ = path_update_count_;
+    return true;
+  } catch (...) {
+    // Keep this optional observation entirely outside the checker decision.
+  }
+  return false;
+}
+
 bool ControllerServer::isGoalReached()
 {
   geometry_msgs::msg::PoseStamped pose;
 
   if (!getRobotPose(pose)) {
+    if (observeGoalCheck(nullptr, nullptr, nullptr)) {
+      observeBranch("checker", "pose_unavailable");
+    }
     return false;
   }
 
@@ -1319,12 +1438,17 @@ bool ControllerServer::isGoalReached()
       get_logger(), *get_clock(), 2000,
       "Cannot evaluate goal reached: failed to transform goal from %s to %s",
       end_pose_.header.frame_id.c_str(), costmap_ros_->getGlobalFrameID().c_str());
+    if (observeGoalCheck(&pose, nullptr, nullptr)) {
+      observeBranch("checker", "goal_transform_failed");
+    }
     return false;
   }
 
-  return goal_checkers_[current_goal_checker_]->isGoalReached(
+  const bool reached = goal_checkers_[current_goal_checker_]->isGoalReached(
     pose.pose, transformed_end_pose.pose,
     velocity);
+  observeGoalCheck(&pose, &transformed_end_pose, &reached);
+  return reached;
 }
 
 bool ControllerServer::getRobotPose(geometry_msgs::msg::PoseStamped & pose)

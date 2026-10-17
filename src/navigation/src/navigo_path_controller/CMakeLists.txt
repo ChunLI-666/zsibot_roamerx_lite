@@ -17,6 +17,8 @@ find_package(nav_2d_utils REQUIRED)
 find_package(nav_2d_msgs REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(robots_dog_msgs REQUIRED)
+find_package(robot_debug_msgs REQUIRED)
+find_package(robot_debug_tools REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 
 nav2_package()
@@ -57,6 +59,8 @@ set(dependencies
   navigo_core
   pluginlib
   robots_dog_msgs
+  robot_debug_msgs
+  robot_debug_tools
   tf2_geometry_msgs
 )
 
@@ -77,6 +81,7 @@ ament_target_dependencies(stopped_goal_checker ${dependencies})
 ament_target_dependencies(${library_name}
   ${dependencies}
 )
+robot_debug_build_stamp(${library_name} navigation ${PROJECT_NAME}/${library_name})
 
 ament_target_dependencies(${executable_name}
   ${dependencies}

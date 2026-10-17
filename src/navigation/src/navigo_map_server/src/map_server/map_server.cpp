@@ -59,6 +59,9 @@
 using namespace std::chrono_literals;
 using namespace std::placeholders;
 
+#include "robot_debug_tools/recorder.hpp"
+#include "robot_debug_build.hpp"
+
 namespace navigo_map_server
 {
 
@@ -66,6 +69,16 @@ namespace navigo_map_server
         : navigo_util::LifecycleNode("map_server", "", options),
           map_available_(false)
     {
+        // topic_name is configurable before on_configure. Report the core
+        // identity without pretending that the default /map endpoint is bound.
+        try {
+          debug_metadata_ = std::make_unique<robot_debug::Recorder>(
+            *this, "map_server", robot_debug::compiled_build_stamp(),
+            std::vector<std::string>{}, true);
+        } catch (...) {
+          RCLCPP_WARN(get_logger(), "Build metadata unavailable; continuing without diagnostics");
+        }
+
         RCLCPP_INFO(get_logger(), "Creating");
 
         // Declare the node parameters

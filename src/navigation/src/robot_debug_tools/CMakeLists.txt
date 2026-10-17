@@ -1,0 +1,36 @@
+cmake_minimum_required(VERSION 3.16)
+project(robot_debug_tools)
+find_package(ament_cmake REQUIRED)
+find_package(ament_cmake_python REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(robot_debug_msgs REQUIRED)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+include(cmake/robot_debug_build_stamp.cmake)
+add_custom_target(observer_debug_stamp ALL
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_build_stamp.py
+    --repo ${CMAKE_CURRENT_SOURCE_DIR} --repository-id navigation
+    --artifact robot_debug_tools/debug_observer --json ${CMAKE_CURRENT_BINARY_DIR}/debug_build.json
+  BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/debug_build.json VERBATIM)
+add_library(robot_debug_recorder INTERFACE)
+target_include_directories(robot_debug_recorder INTERFACE
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>)
+target_link_libraries(robot_debug_recorder INTERFACE rclcpp::rclcpp)
+ament_python_install_package(${PROJECT_NAME})
+install(DIRECTORY include/ DESTINATION include)
+install(FILES cmake/robot_debug_build_stamp.cmake DESTINATION share/${PROJECT_NAME}/cmake)
+install(PROGRAMS scripts/generate_build_stamp.py DESTINATION share/${PROJECT_NAME}/cmake)
+install(PROGRAMS scripts/debug_observer DESTINATION lib/${PROJECT_NAME})
+install(DIRECTORY launch/ DESTINATION share/${PROJECT_NAME}/launch)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/debug_build.json DESTINATION share/${PROJECT_NAME})
+install(TARGETS robot_debug_recorder EXPORT robot_debug_recorder)
+ament_export_targets(robot_debug_recorder)
+ament_export_include_directories(include)
+ament_export_dependencies(rclcpp robot_debug_msgs)
+if(BUILD_TESTING)
+  find_package(ament_cmake_pytest REQUIRED)
+  ament_add_pytest_test(test_build_stamp test/test_build_stamp.py)
+  ament_add_pytest_test(test_debug_tools test/test_debug_tools.py)
+  ament_add_pytest_test(test_publication_isolation test/test_publication_isolation.py)
+endif()
+ament_package(CONFIG_EXTRAS cmake/robot_debug_build_stamp.cmake)

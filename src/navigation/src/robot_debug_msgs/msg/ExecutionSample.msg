@@ -1,0 +1,9 @@
+string event
+bool command_accepted_valid
+bool command_accepted
+bool wrapper_called_valid
+bool wrapper_called
+bool dedup_valid
+bool dedup
+bool return_valid
+uint32 wrapper_raw_return

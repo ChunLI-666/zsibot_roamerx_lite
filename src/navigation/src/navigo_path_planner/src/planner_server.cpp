@@ -21,6 +21,7 @@
 #include <iterator>
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <vector>
 #include <utility>
 
@@ -32,6 +33,7 @@
 #include "navigo_costmap_2d/cost_values.hpp"
 
 #include "navigo_path_planner/planner_server.hpp"
+#include "robot_debug_build.hpp"
 
 using namespace std::chrono_literals;
 using rcl_interfaces::msg::ParameterType;
@@ -137,6 +139,19 @@ PlannerServer::on_configure(const rclcpp_lifecycle::State & /*state*/)
 
   // Initialize pubs & subs
   plan_publisher_ = create_publisher<nav_msgs::msg::Path>("plan", 1);
+  try {
+    observation_to_pose_endpoint_ =
+      get_node_topics_interface()->resolve_topic_name("compute_path_to_pose");
+    observation_through_poses_endpoint_ =
+      get_node_topics_interface()->resolve_topic_name("compute_path_through_poses");
+    observation_recorder_ = std::make_unique<robot_debug::Recorder>(
+      *this, "planner", robot_debug::compiled_build_stamp(),
+      std::vector<std::string>{
+        observation_to_pose_endpoint_, observation_through_poses_endpoint_});
+  } catch (const std::exception & error) {
+    observation_recorder_.reset();
+    RCLCPP_WARN(get_logger(), "Thin observations unavailable: %s", error.what());
+  }
 
   // Create the action servers for path planning to a pose and through poses
   action_server_pose_ = std::make_unique<ActionServerToPose>(
@@ -230,6 +245,7 @@ PlannerServer::on_cleanup(const rclcpp_lifecycle::State & /*state*/)
   action_server_pose_.reset();
   action_server_poses_.reset();
   plan_publisher_.reset();
+  observation_recorder_.reset();
   tf_.reset();
 
   costmap_ros_->cleanup();
@@ -264,12 +280,44 @@ bool PlannerServer::isServerInactive(
   return false;
 }
 
-void PlannerServer::waitForCostmap()
+template<typename T>
+void PlannerServer::observeBranch(
+  const std::unique_ptr<navigo_util::SimpleActionServer<T>> & action_server,
+  const char * site, const char * branch, const char * error,
+  bool value_valid, bool value) noexcept
+{
+  if (!observation_recorder_ || !observation_recorder_->enabled() || !action_server) {
+    return;
+  }
+  try {
+    observation_recorder_->branch(
+      site, branch, error, value_valid, value, action_server->get_current_goal_id(),
+      std::is_same<T, ActionToPose>::value ?
+      observation_to_pose_endpoint_ : observation_through_poses_endpoint_);
+  } catch (...) {
+    // The optional observation must not affect planning or its result.
+  }
+}
+
+template<typename T>
+void PlannerServer::waitForCostmap(
+  const std::unique_ptr<navigo_util::SimpleActionServer<T>> & action_server)
 {
   // Don't compute a plan until costmap is valid (after clear costmap)
   rclcpp::Rate r(100);
-  while (!costmap_ros_->isCurrent()) {
+  bool waiting = false;
+  bool consumed_current = false;
+  while (!(consumed_current = costmap_ros_->isCurrent())) {
+    if (!waiting) {
+      observeBranch(action_server, "costmap_current", "stale", "", true, consumed_current);
+      observeBranch(action_server, "costmap_wait", "entered");
+      waiting = true;
+    }
     r.sleep();
+  }
+  observeBranch(action_server, "costmap_current", "current", "", true, consumed_current);
+  if (waiting) {
+    observeBranch(action_server, "costmap_wait", "exited");
   }
 }
 
@@ -305,6 +353,7 @@ bool PlannerServer::getStartPose(
   if (goal->use_start) {
     start = goal->start;
   } else if (!costmap_ros_->getRobotPose(start)) {
+    observeBranch(action_server, "start_pose", "pose_unavailable");
     action_server->terminate_current();
     return false;
   }
@@ -321,6 +370,7 @@ bool PlannerServer::transformPosesToGlobalFrame(
   if (!costmap_ros_->transformPoseToGlobalFrame(curr_start, curr_start) ||
     !costmap_ros_->transformPoseToGlobalFrame(curr_goal, curr_goal))
   {
+    observeBranch(action_server, "transform_poses", "returned_false");
     RCLCPP_WARN(
       get_logger(), "Could not transform the start or goal pose in the costmap frame");
     action_server->terminate_current();
@@ -338,6 +388,7 @@ bool PlannerServer::validatePath(
   const std::string & planner_id)
 {
   if (path.poses.size() == 0) {
+    observeBranch(action_server, "validate_path", "empty_path");
     RCLCPP_WARN(
       get_logger(), "Planning algorithm %s failed to generate a valid"
       " path to (%.2f, %.2f)", planner_id.c_str(),
@@ -372,7 +423,7 @@ PlannerServer::computePlanThroughPoses()
       return;
     }
 
-    waitForCostmap();
+    waitForCostmap(action_server_poses_);
 
     getPreemptedGoalIfRequested(action_server_poses_, goal);
 
@@ -438,6 +489,7 @@ PlannerServer::computePlanThroughPoses()
 
     action_server_poses_->succeeded_current(result);
   } catch (std::exception & ex) {
+    observeBranch(action_server_poses_, "compute_plan_through_poses", "exception", ex.what());
     RCLCPP_WARN(
       get_logger(),
       "%s plugin failed to plan through %zu points with final goal (%.2f, %.2f): \"%s\"",
@@ -463,7 +515,7 @@ PlannerServer::computePlan()
       return;
     }
 
-    waitForCostmap();
+    waitForCostmap(action_server_pose_);
 
     getPreemptedGoalIfRequested(action_server_pose_, goal);
 
@@ -500,6 +552,7 @@ PlannerServer::computePlan()
 
     action_server_pose_->succeeded_current(result);
   } catch (std::exception & ex) {
+    observeBranch(action_server_pose_, "compute_plan", "exception", ex.what());
     RCLCPP_WARN(
       get_logger(), "%s plugin failed to plan calculation to (%.2f, %.2f): \"%s\"",
       goal->planner_id.c_str(), goal->goal.pose.position.x,

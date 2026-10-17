@@ -19,6 +19,10 @@ all)
 
   colcon build --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON $CMAKE_DEBUG_ARGS --packages-select \
     robots_dog_msgs \
+    robot_debug_msgs \
+    robot_debug_tools \
+    bondcpp \
+    nav2_lifecycle_manager \
     robot_slam \
     navigo_behavior_tree \
     navigo_behaviors \

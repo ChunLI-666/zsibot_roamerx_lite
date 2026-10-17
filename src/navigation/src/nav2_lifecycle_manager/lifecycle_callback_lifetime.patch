@@ -1,0 +1,239 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -29,6 +29,11 @@
+   src/lifecycle_manager.cpp
+   src/lifecycle_manager_client.cpp
+ )
++
++# GNU unique symbols otherwise cause implicit NODELETE and hide unload defects.
++if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
++  target_compile_options(${library_name} PRIVATE -fno-gnu-unique)
++endif()
+ 
+ set(dependencies
+   geometry_msgs
+@@ -78,6 +83,9 @@
+ 
+ install(DIRECTORY include/ DESTINATION include/)
+ 
++install(FILES LICENSE LOCAL_PATCH.md upstream_provenance.json lifecycle_callback_lifetime.patch
++  DESTINATION share/${PROJECT_NAME})
++
+ if(BUILD_TESTING)
+   find_package(ament_lint_auto REQUIRED)
+   ament_lint_auto_find_test_dependencies()
+--- a/package.xml
++++ b/package.xml
+@@ -37,6 +37,7 @@
+   <test_depend>ament_lint_auto</test_depend>
+   <test_depend>ament_lint_common</test_depend>
+   <test_depend>ament_cmake_gtest</test_depend>
++  <test_depend>class_loader</test_depend>
+   <test_depend>ament_cmake_pytest</test_depend>
+ 
+   <export>
+--- a/include/nav2_lifecycle_manager/lifecycle_manager.hpp
++++ b/include/nav2_lifecycle_manager/lifecycle_manager.hpp
+@@ -68,6 +68,17 @@
+    */
+   ~LifecycleManager();
+ 
++private:
++  // Keep the registration alive and remove it even if construction later throws.
++  // Context can outlive both this component and the DSO containing its callback.
++  struct RclPreshutdownRegistration
++  {
++    rclcpp::Context::SharedPtr context;
++    rclcpp::PreShutdownCallbackHandle handle;
++    ~RclPreshutdownRegistration();
++  };
++  std::unique_ptr<RclPreshutdownRegistration> rcl_preshutdown_registration_;
++
+ protected:
+   // Callback group used by services and timers
+   rclcpp::CallbackGroup::SharedPtr callback_group_;
+--- a/src/lifecycle_manager.cpp
++++ b/src/lifecycle_manager.cpp
+@@ -109,10 +109,22 @@
+   diagnostics_updater_.add("Nav2 Health", this, &LifecycleManager::CreateDiagnostic);
+ }
+ 
++LifecycleManager::RclPreshutdownRegistration::~RclPreshutdownRegistration()
++{
++  if (context) {
++    context->remove_pre_shutdown_callback(handle);
++  }
++}
++
+ LifecycleManager::~LifecycleManager()
+ {
++  rcl_preshutdown_registration_.reset();
+   RCLCPP_INFO(get_logger(), "Destroying %s", get_name());
+   service_thread_.reset();
++  destroyBondTimer();
++  node_names_.clear();
++  node_map_.clear();
++  bond_map_.clear();
+ }
+ 
+ void
+@@ -195,9 +207,13 @@
+ LifecycleManager::createLifecycleServiceClients()
+ {
+   message("Creating and initializing lifecycle service clients");
++  // These clients never escape node_map_. Borrow the parent without retaining
++  // this manager: its destructor joins their only worker before destroying them.
++  // An empty-owner alias avoids an owning manager -> client -> manager cycle.
++  rclcpp::Node::SharedPtr borrowed_node(rclcpp::Node::SharedPtr{}, this);
+   for (auto & node_name : node_names_) {
+     node_map_[node_name] =
+-      std::make_shared<LifecycleServiceClient>(node_name, shared_from_this());
++      std::make_shared<LifecycleServiceClient>(node_name, borrowed_node);
+   }
+ }
+ 
+@@ -218,8 +234,11 @@
+   const double timeout_s = timeout_ns / 1e9;
+ 
+   if (bond_map_.find(node_name) == bond_map_.end() && bond_timeout_.count() > 0.0) {
++    // The manager owns each bond until after its worker has joined. Do not
++    // reacquire an owning shared_from_this while destruction may be joining it.
++    rclcpp::Node::SharedPtr borrowed_node(rclcpp::Node::SharedPtr{}, this);
+     bond_map_[node_name] =
+-      std::make_shared<bond::Bond>("bond", node_name, shared_from_this());
++      std::make_shared<bond::Bond>("bond", node_name, borrowed_node);
+     bond_map_[node_name]->setHeartbeatTimeout(timeout_s);
+     bond_map_[node_name]->setHeartbeatPeriod(0.10);
+     bond_map_[node_name]->start();
+@@ -427,11 +446,23 @@
+     return;
+   }
+ 
++  const auto context = get_node_base_interface()->get_context();
++  if (!context->is_valid()) {
++    return;
++  }
+   message("Creating bond timer...");
+-  bond_timer_ = this->create_wall_timer(
+-    200ms,
+-    std::bind(&LifecycleManager::checkBondConnections, this),
+-    callback_group_);
++  try {
++    bond_timer_ = this->create_wall_timer(
++      200ms,
++      std::bind(&LifecycleManager::checkBondConnections, this),
++      callback_group_);
++  } catch (const rclcpp::exceptions::RCLError &) {
++    // Context can close between the check and timer construction. An error
++    // while this same Context is still valid retains its original behavior.
++    if (context->is_valid()) {
++      throw;
++    }
++  }
+ }
+ 
+ void
+@@ -451,16 +482,9 @@
+     get_logger(), "Running Nav2 LifecycleManager rcl preshutdown (%s)",
+     this->get_name());
+ 
+-  destroyBondTimer();
+-
+-  /*
+-   * Dropping the bond map is what we really need here, but we drop the others
+-   * to prevent the bond map being used. Likewise, squash the service thread.
+-   */
+-  service_thread_.reset();
+-  node_names_.clear();
+-  node_map_.clear();
+-  bond_map_.clear();
++  // Do not mutate worker resources or join here: a worker can be waiting in a
++  // nested client executor which Context only interrupts after pre-shutdown. The
++  // destructor joins the worker and releases its resources outside that lock.
+ }
+ 
+ void
+@@ -468,9 +492,12 @@
+ {
+   rclcpp::Context::SharedPtr context = get_node_base_interface()->get_context();
+ 
+-  context->add_pre_shutdown_callback(
++  auto registration = std::make_unique<RclPreshutdownRegistration>();
++  registration->context = context;
++  registration->handle = context->add_pre_shutdown_callback(
+     std::bind(&LifecycleManager::onRclPreshutdown, this)
+   );
++  rcl_preshutdown_registration_ = std::move(registration);
+ }
+ 
+ void
+@@ -503,10 +530,20 @@
+       // Initialize the bond respawn timer to check if server comes back online
+       // after a failure, within a maximum timeout period.
+       if (attempt_respawn_reconnection_) {
+-        bond_respawn_timer_ = this->create_wall_timer(
+-          1s,
+-          std::bind(&LifecycleManager::checkBondRespawnConnection, this),
+-          callback_group_);
++        const auto context = get_node_base_interface()->get_context();
++        if (!context->is_valid()) {
++          return;
++        }
++        try {
++          bond_respawn_timer_ = this->create_wall_timer(
++            1s,
++            std::bind(&LifecycleManager::checkBondRespawnConnection, this),
++            callback_group_);
++        } catch (const rclcpp::exceptions::RCLError &) {
++          if (context->is_valid()) {
++            throw;
++          }
++        }
+       }
+       return;
+     }
+@@ -543,6 +580,12 @@
+     } catch (...) {
+       break;
+     }
++  }
++
++  // A query can finish because Context shutdown interrupted its nested wait.
++  // Do not start a new recovery sequence after that Context has closed.
++  if (!get_node_base_interface()->get_context()->is_valid()) {
++    return;
+   }
+ 
+   // If all are alive, kill timer and retransition system to active
+--- a/test/CMakeLists.txt
++++ b/test/CMakeLists.txt
+@@ -39,3 +39,29 @@
+   ENV
+     TEST_EXECUTABLE=$<TARGET_FILE:test_bond_gtest>
+ )
++
++# Local lifetime regression: no navigation nodes, algorithms or actuator bridges.
++ament_add_gtest(test_callback_lifetime test_callback_lifetime.cpp)
++target_link_libraries(test_callback_lifetime ${library_name})
++ament_target_dependencies(test_callback_lifetime ${dependencies})
++
++find_package(class_loader REQUIRED)
++add_executable(component_callback_lifetime component_callback_lifetime.cpp)
++ament_target_dependencies(component_callback_lifetime
++  rclcpp rclcpp_components class_loader lifecycle_msgs std_srvs)
++add_test(NAME component_callback_lifetime
++  COMMAND component_callback_lifetime $<TARGET_FILE:${library_name}>)
++set_tests_properties(component_callback_lifetime PROPERTIES TIMEOUT 20)
++add_test(NAME component_populated_client_lifetime
++  COMMAND component_callback_lifetime $<TARGET_FILE:${library_name}> populated)
++set_tests_properties(component_populated_client_lifetime PROPERTIES TIMEOUT 20)
++
++# Real manager worker + intentionally unanswered lifecycle service. Each case
++# runs in its own process so the old shutdown deadlock has a strict deadline.
++add_executable(blocked_request_shutdown blocked_request_shutdown.cpp)
++target_link_libraries(blocked_request_shutdown ${library_name})
++ament_target_dependencies(blocked_request_shutdown ${dependencies})
++foreach(mode ownership startup shutdown bond_active bond_owner_release bond_recovery_shutdown)
++  add_test(NAME blocked_request_${mode} COMMAND blocked_request_shutdown ${mode})
++  set_tests_properties(blocked_request_${mode} PROPERTIES TIMEOUT 15)
++endforeach()

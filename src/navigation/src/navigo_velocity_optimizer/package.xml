@@ -8,6 +8,8 @@
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>robot_debug_msgs</depend>
+  <depend>robot_debug_tools</depend>
   <depend>navigo_epoch_msgs</depend>
   <depend>navigo_core</depend>
   <build_depend>nav2_common</build_depend>

@@ -28,6 +28,8 @@
 #include "navigo_bt_navigator/navigators/navigate_to_pose.hpp"
 #include "navigo_bt_navigator/navigators/navigate_through_poses.hpp"
 
+namespace robot_debug { class Recorder; }
+
 namespace navigo_bt_navigator
 {
 
@@ -50,6 +52,8 @@ public:
   ~BtNavigator();
 
 protected:
+  std::unique_ptr<robot_debug::Recorder> debug_metadata_;
+
   /**
    * @brief Configures member variables
    *

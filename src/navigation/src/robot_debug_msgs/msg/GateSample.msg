@@ -1,0 +1,9 @@
+uint8 gate_status
+string actual_branch
+bool input_zero_valid
+bool input_is_zero
+bool output_is_zero
+bool loc_elapsed_valid
+float64 loc_elapsed_ms
+bool cmd_elapsed_valid
+float64 cmd_elapsed_ms
