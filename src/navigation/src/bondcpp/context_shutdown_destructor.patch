@@ -1,0 +1,71 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -29,6 +29,9 @@
+   SHARED
+   src/bond.cpp
+   src/BondSM_sm.cpp)
++if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
++  target_compile_options(${PROJECT_NAME} PRIVATE -fno-gnu-unique)
++endif()
+ target_include_directories(${PROJECT_NAME} PUBLIC
+   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+   $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
+@@ -61,8 +64,18 @@
+ ament_export_libraries(${PROJECT_NAME})
+ ament_export_targets(${PROJECT_NAME})
+ 
++install(FILES LICENSE LOCAL_PATCH.md upstream_provenance.json context_shutdown_destructor.patch
++  DESTINATION share/${PROJECT_NAME})
++
+ if(BUILD_TESTING)
+   find_package(ament_lint_auto REQUIRED)
+   ament_lint_auto_find_test_dependencies()
++
++  add_executable(bond_shutdown_lifetime test/bond_shutdown_lifetime.cpp)
++  target_link_libraries(bond_shutdown_lifetime ${PROJECT_NAME})
++  foreach(mode formed concurrent)
++    add_test(NAME bond_shutdown_${mode} COMMAND bond_shutdown_lifetime ${mode})
++    set_tests_properties(bond_shutdown_${mode} PROPERTIES TIMEOUT 20)
++  endforeach()
+ endif()
+ ament_package()
+--- a/src/bond.cpp
++++ b/src/bond.cpp
+@@ -38,6 +38,7 @@
+ 
+ #include <algorithm>
+ #include <chrono>
++#include <exception>
+ #include <functional>
+ #include <memory>
+ #include <string>
+@@ -160,11 +161,24 @@
+   if (!started_) {
+     return;
+   }
+-  breakBond();
+-  if (rclcpp::ok() && !waitUntilBroken(rclcpp::Duration(100ms))) {
+-    RCLCPP_DEBUG(
+-      node_logging_->get_logger(), "Bond failed to break on destruction %s (%s)",
+-      id_.c_str(), instance_id_.c_str());
++  // Final notification may create a timer. Once this Node's Context is closed,
++  // only release resources; ROS entities can no longer be created or notified.
++  const auto context = node_base_->get_context();
++  if (context->is_valid()) {
++    try {
++      breakBond();
++      if (context->is_valid() && rclcpp::ok() &&
++        !waitUntilBroken(rclcpp::Duration(100ms)))
++      {
++        RCLCPP_DEBUG(
++          node_logging_->get_logger(), "Bond failed to break on destruction %s (%s)",
++          id_.c_str(), instance_id_.c_str());
++      }
++    } catch (const rclcpp::exceptions::RCLError &) {
++      // Context can close after the check above. Do not hide errors from a
++      // still-live Context: preserve this destructor's original noexcept exit.
++      if (context->is_valid()) {std::terminate();}
++    }
+   }
+ 
+   publishingTimerCancel();

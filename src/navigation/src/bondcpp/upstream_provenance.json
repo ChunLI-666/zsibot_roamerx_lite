@@ -1,0 +1,28 @@
+{
+  "upstream_package": "bondcpp",
+  "upstream_version": "4.2.0",
+  "source_version": "4.2.0-1noble",
+  "installed_binary_version": "4.2.0-1noble.20260903.012116",
+  "archive_url": "http://packages.ros.org/ros2/ubuntu/pool/main/r/ros-jazzy-bondcpp/ros-jazzy-bondcpp_4.2.0.orig.tar.gz",
+  "archive_sha256": "09abc4b5a726d4932d8eb584c0aac6e96367e9dac5e4056d159ec986aeb717d9",
+  "dsc_sha256": "f3cb6d86d370fd50ab9eda4c5fe515e745ec1bee80b3160b26831b98e100bfaa",
+  "installed_byte_identity": {
+    "package.xml": true,
+    "include/bondcpp/bond.hpp": true,
+    "include/bondcpp/BondSM_sm.hpp": true,
+    "include/bondcpp/visibility_control.hpp": true
+  },
+  "upstream_file_sha256": {
+    "package.xml": "8ea6e9c96f9f6b2d663302f8ad3235f920019d243f53275bd0fbf19b720b8c35",
+    "CMakeLists.txt": "376efa3dad94fd5a6f7a42d1b0f9cd20e0c5b6df164c5a7da6fc3a854c8c8791",
+    "CHANGELOG.rst": "b2364160cde3e9fbd261d35ba692fdf9f6a06fbc07d3f99f900f70a9e181241e",
+    "LICENSE": "143077f9f6a8de5a99f78c2c2472801fb53cf240277ef661642f079b9acdfff8",
+    "src/bond.cpp": "425b756a469883cc8f1472d1cc4527a86fe354a44e6c17017e331c035f9e5a2d",
+    "src/BondSM_sm.cpp": "73986630164d2f674eb7d06bbf407751aae8be83a4b94653d4329666ca339ac9",
+    "include/bondcpp/BondSM_sm.hpp": "fb7338e70fbed6b0f69e935a2c945a27a3485b02272de0dc294b91793ce530f0",
+    "include/bondcpp/bond.hpp": "51f4d2704bd68c7e95b57ef09b08ca36d74843174b6563f097adbb8db8fff045",
+    "include/bondcpp/visibility_control.hpp": "364a829cf535f67056a9dc298935b6ab8762e6889dcf17414c18a1687cc46dea"
+  },
+  "scope": "Destructor-only Context-invalid notification guard; no public header/layout/protocol/timeout/heartbeat changes.",
+  "gnu_build_option": "-fno-gnu-unique keeps actual unload possible instead of implicit NODELETE."
+}

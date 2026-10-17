@@ -1,0 +1,65 @@
+{
+  "upstream_package": "nav2_lifecycle_manager",
+  "upstream_version": "1.3.13",
+  "source_package": "ros-jazzy-nav2-lifecycle-manager",
+  "source_version": "1.3.13-1noble",
+  "installed_binary_version": "1.3.13-1noble.20260903.024931",
+  "archive_url": "http://packages.ros.org/ros2/ubuntu/pool/main/r/ros-jazzy-nav2-lifecycle-manager/ros-jazzy-nav2-lifecycle-manager_1.3.13.orig.tar.gz",
+  "archive_sha256": "eee2f02bd5a103de49870de33a3b690bb03cca72fcefde4f49e69689a29b9591",
+  "dsc_sha256": "5b0418dbdfd9bcb2feedd484fd96d3246b6b769c9976f98d377aebbe73523f09",
+  "debian_tar_sha256": "4946279151c96fe1830db2a98b5685b6cbf3890d2719efd2b361a94c76b629a6",
+  "installed_header_byte_identical": true,
+  "installed_package_xml_before_local_test_dep_byte_identical": true,
+  "upstream_file_sha256": {
+    "CHANGELOG.rst": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "CMakeLists.txt": "40b47100f6ad15231500fb058db4bdb2d788a58bc1ee413152f5bf6736e1c072",
+    "README.md": "703dcee6e2f38d29ab42fc28d627fbdd267687d1057c7300495bb349df884ea6",
+    "doc/diagram_lifecycle_manager.JPG": "10720dba88fcdcc48555b295dc05e084eff96e0fe6055ea683b9c5e178e49ef8",
+    "doc/uml_lifecycle_manager.JPG": "9d78620a3b7b5386d4fa907726900aba0c28b721477fec5a301df9a8fca3ea44",
+    "include/nav2_lifecycle_manager/lifecycle_manager.hpp": "66540074adc21a10e06ef4af64bec6494330891d41469a8a5707bc880c0aab32",
+    "include/nav2_lifecycle_manager/lifecycle_manager_client.hpp": "98a0bcc0fa9e8bae0186a69db31402d88ecac8b5fed47cfcad0f301236872399",
+    "package.xml": "c66b266ef5aeb785493d571fa5bb21e10bc41419968d00add22f029263d46fdf",
+    "src/lifecycle_manager.cpp": "7d56021ac5c47315eda2a5a1003ecbcbb63355364696835d4300084de8b00f81",
+    "src/lifecycle_manager_client.cpp": "c2669e2e8d7bcf119b0a1956b15fb1eba6d1cf0b7a96b15af309f60987ed5c2a",
+    "src/main.cpp": "1ddf78b83090bf7e2bff3d9b6caf48cba3797c6401e1719ee574bf6190d501b2",
+    "test/CMakeLists.txt": "9da0cbecb0794b2d93ad39fc6ec9084327a9c1c352f3fbc02cb1969e8036a775",
+    "test/launch_bond_test.py": "cb2d4974479711bfd73b4b9236abe74c523a9b5545cd25ed44fbc975808563ed",
+    "test/launch_lifecycle_test.py": "3db49dcaacaf596fd0ed6b35206cee3ad709d5d63afe09a7f2271b6acd11dfdd",
+    "test/test_bond.cpp": "767131c3692de0e69c9c6b16de84b18f08b288097f6fe718e13db342161e6eb6",
+    "test/test_lifecycle_manager.cpp": "63d19bbcc095a5264e272243d89110afe221ea553ac9e7391fac8e07d034d258"
+  },
+  "behavior_change": "Callback registration lifetime, shutdown resource ownership/order, and prevention of new timers or recovery after Node Context closure; functional live-Context transitions, service results, production timeouts/retries and navigation algorithms remain unchanged.",
+  "local_build_option": "GNU core target -fno-gnu-unique prevents implicit NODELETE and preserves actual component unload; no library pin",
+  "installed_byte_identity_scope": "Unmodified extracted upstream header and package.xml matched the installed package before applying local source/test metadata changes.",
+  "local_test_metadata_change": {
+    "package.xml": {
+      "added_test_depend": [
+        "class_loader"
+      ]
+    },
+    "test/CMakeLists.txt": "Direct find_package(class_loader REQUIRED) supports the new real component-load/unload regression; production dependencies unchanged."
+  },
+  "local_shutdown_ownership_fix": {
+    "pre_shutdown": "Log only; no worker resources, timers, joins or map destruction under Context callbacks.",
+    "destructor": "Unregister callback; join service worker; cancel bond timer; release maps/bonds before Node base destruction.",
+    "client_parent": "Empty-owner shared_ptr<Node> alias; manager-owned non-escaping clients do not retain parent manager.",
+    "new_tests": [
+      "blocked_request_ownership",
+      "blocked_request_startup",
+      "blocked_request_shutdown",
+      "component_populated_client_lifetime",
+      "blocked_request_bond_active",
+      "blocked_request_bond_owner_release",
+      "blocked_request_bond_recovery_shutdown"
+    ],
+    "before_control_library_sha256": "8bc5784e0bfe1494767316ae412d044f05f44a8888eb0055fcdbb1b581501211",
+    "bond_parent": "Same borrowed Node alias, retaining the same Bond Node interfaces without worker shared_from_this reacquisition.",
+    "unsupported_boundary": "Hot unload under a still-valid Context with a permanently unanswered RPC remains outside scope; bounded finite activation race is tested.",
+    "required_runtime_overlay": "Sibling bondcpp4.2.0 Context-safe destructor overlay; existing dependency unchanged, local library resolution must be verified.",
+    "timer_creation": "createBondTimer (200ms) and checkBondConnections respawn timer (1s): same Node Context validity precheck, RCLError suppressed only after that Context closes, otherwise rethrow; hard reset remains outside catch.",
+    "respawn_after_queries": "Return after Node Context closure before successful-reconnection log or new startup.",
+    "respawn_before_control_manager_sha256": "30b898f680becb4b46089ab9890afdf4fefd04cc20534ce4caec1d84c102e89e",
+    "respawn_before_control_bond_sha256": "86d0d91b19556ee545126574de2a047fe9cd4080fac1a86ebf9a1d066453138e",
+    "respawn_before_control": "Real paired Bond -> fixture pre-break -> worker hard reset -> held DEACTIVATE reply -> Context closes. Own-child gdb captured SIGABRT TimerBase -> create_wall_timer<ratio<1,1>> -> checkBondConnections. Actual wrapper has no fresh apport core; this stack is the controlled reproduction."
+  }
+}
