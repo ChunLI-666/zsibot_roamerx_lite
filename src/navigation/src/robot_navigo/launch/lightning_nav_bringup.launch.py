@@ -21,6 +21,7 @@ Note: Lightning-LM localization should be started separately before running this
 """
 
 import os
+import shlex
 from datetime import datetime
 from launch import LaunchDescription
 from launch.actions import (
@@ -43,7 +44,8 @@ from ament_index_python.packages import get_package_share_directory
 
 def _setup_log_dir(context):
     """Create timestamped log directory and 'latest' symlink."""
-    log_base = os.path.expanduser('~/log')
+    log_base = os.path.abspath(os.path.expanduser(
+        LaunchConfiguration('log_base_dir').perform(context)))
     os.makedirs(log_base, exist_ok=True)
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -61,7 +63,8 @@ def _setup_log_dir(context):
         # Aggregate all node logs into one file for real-time monitoring
         ExecuteProcess(
             cmd=['bash', '-c',
-                 f'sleep 2 && tail -F {log_dir}/*.log > {log_dir}/all.log 2>/dev/null'],
+                 f'sleep 2 && exec tail -F {shlex.quote(log_dir)}/*.log '
+                 f'> {shlex.quote(os.path.join(log_dir, "all.log"))} 2>/dev/null'],
             name='log_aggregator',
             output='log',
         ),
@@ -241,7 +244,13 @@ def generate_launch_description():
     # Create launch description
     ld = LaunchDescription()
 
-    # Log management (must be first - sets ROS_LOG_DIR before nodes start)
+    # Keep the normal logging default while allowing isolated local replay logs.
+    ld.add_action(DeclareLaunchArgument(
+        'log_base_dir',
+        default_value=os.path.expanduser('~/log'),
+        description='Base directory for navigation logs and the nav_latest symlink'))
+
+    # Set ROS_LOG_DIR before starting nodes.
     ld.add_action(OpaqueFunction(function=_setup_log_dir))
 
     # Add declarations
