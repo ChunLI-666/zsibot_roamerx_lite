@@ -17,6 +17,8 @@
 #include "tf2_ros/static_transform_broadcaster.h"
 
 #include "robot_navigo/livox_scan_projection.hpp"
+#include "robot_debug_tools/recorder.hpp"
+#include "robot_debug_build.hpp"
 
 namespace robot_navigo
 {
@@ -65,6 +67,13 @@ public:
     const std::string output_topic = declare_parameter("laserscan_output_topic", "/laser_scan");
     const std::string debug_topic = declare_parameter(
       "bridge_debug_topic", "/lightning_bridge/debug");
+    try {
+      debug_metadata_ = std::make_unique<robot_debug::Recorder>(
+        *this, "scan_projection", robot_debug::compiled_build_stamp(),
+        std::vector<std::string>{output_topic, debug_topic}, true);
+    } catch (const std::exception & error) {
+      RCLCPP_WARN(get_logger(), "Debug metadata unavailable: %s", error.what());
+    }
 
     const auto qos = rclcpp::QoS(rclcpp::KeepLast(qos_depth_)).best_effort().durability_volatile();
     scan_pub_ = create_publisher<sensor_msgs::msg::LaserScan>(output_topic, qos);
@@ -93,6 +102,7 @@ public:
   }
 
 private:
+  std::unique_ptr<robot_debug::Recorder> debug_metadata_;
   void validateConfig() const
   {
     if (config_.angle_increment <= 0.0 || config_.angle_max <= config_.angle_min) {

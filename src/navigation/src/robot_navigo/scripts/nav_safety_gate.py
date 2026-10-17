@@ -353,6 +353,17 @@ class NavSafetyGate(Node):
 
         self.cmd_vel_pub = self.create_publisher(Twist, cmd_vel_out, 10)
         self.gate_status_pub = self.create_publisher(UInt8, '~/gate_status', 1)
+        self.debug_observer = None
+        self._last_debug_signature = None
+        self._last_debug_time_ns = 0
+        try:
+            from robot_debug_tools.build import load_build_stamp
+            from robot_debug_tools.publisher import DiagnosticPublisher
+            self.debug_observer = DiagnosticPublisher(
+                self, 'safety_gate', load_build_stamp('robot_navigo'),
+                [cmd_vel_out, self.resolve_topic_name('~/gate_status')])
+        except Exception as error:
+            self.get_logger().warning('Debug sideband unavailable: ' + str(error))
         if self.epoch_contract:
             self.configure_epoch()
         if self.epoch_contract:
@@ -445,7 +456,9 @@ class NavSafetyGate(Node):
         # Stop at the loss notification, not at the next command/timeout.
         # Returning to NORMAL does not replay a cached pre-loss command.
         if self.current_status != self.LOC_NORMAL:
-            self.publish_zero(self._status_gate())
+            status = self._status_gate()
+            self.publish_zero(status)
+            self._observe_gate(status, 'loc_callback_non_normal')
 
     def emergency_stop_callback(self, msg: Bool):
         prev = self.emergency_stop_active
@@ -457,6 +470,7 @@ class NavSafetyGate(Node):
                 if self.epoch_contract:
                     self.revoke_epoch()
                 self.publish_zero(self.GATE_EMERGENCY_STOP)
+                self._observe_gate(self.GATE_EMERGENCY_STOP, 'emergency_stop_callback')
 
     def cmd_vel_callback(self, msg: Twist):
         if self.epoch_contract:
@@ -471,22 +485,29 @@ class NavSafetyGate(Node):
         gate_status = self.LOC_UNKNOWN
 
         timed_out = self._is_timed_out(now)
+        observed_branch = 'default_zero'
 
         if self.emergency_stop_active:
             gate_status = self.GATE_EMERGENCY_STOP
+            observed_branch = 'emergency_stop'
         elif timed_out:
             gate_status = self.LOC_LOST
+            observed_branch = 'loc_heartbeat_timeout'
         elif self.current_status != self.LOC_NORMAL:
             gate_status = self._status_gate()
+            observed_branch = 'loc_status_non_normal'
         elif self.invalid_cmd:
             gate_status = self.GATE_INVALID_CMD
+            observed_branch = 'invalid_command'
         elif self.current_status == self.LOC_NORMAL:
             safe_cmd = msg
             gate_status = self.LOC_NORMAL
+            observed_branch = 'allow'
         # else: UNKNOWN or LOST -> zero velocity (already default)
         # DEGRADED also outputs zero velocity for safety
 
         self.publish_cmd(safe_cmd, gate_status)
+        self._observe_gate(gate_status, observed_branch, msg, safe_cmd, now)
 
     def watchdog_callback(self):
         """Continuously enforce stop when either heartbeat becomes stale."""
@@ -498,14 +519,58 @@ class NavSafetyGate(Node):
         now = self.safety_clock.now()
         if self.emergency_stop_active:
             self.publish_zero(self.GATE_EMERGENCY_STOP)
+            self._observe_gate(self.GATE_EMERGENCY_STOP, 'watchdog_emergency_stop', now=now)
         elif self._is_timed_out(now):
             self.publish_zero(self.LOC_LOST)
+            self._observe_gate(self.LOC_LOST, 'watchdog_loc_heartbeat_timeout', now=now)
         elif self.current_status != self.LOC_NORMAL:
-            self.publish_zero(self._status_gate())
+            status = self._status_gate()
+            self.publish_zero(status)
+            self._observe_gate(status, 'watchdog_loc_status_non_normal', now=now)
         elif self.invalid_cmd:
             self.publish_zero(self.GATE_INVALID_CMD)
+            self._observe_gate(self.GATE_INVALID_CMD, 'watchdog_invalid_command', now=now)
         elif self._is_cmd_timed_out(now):
             self.publish_zero(self.GATE_CMD_TIMEOUT)
+            self._observe_gate(self.GATE_CMD_TIMEOUT, 'watchdog_cmd_timeout', now=now)
+
+    def _observe_gate(self, status, branch, input_msg=None, output_msg=None, now=None):
+        """Observe the already executed branch; never recompute its decision."""
+        if self.debug_observer is None or not self.debug_observer.enabled or self.epoch_contract:
+            return
+        try:
+            from robot_debug_msgs.msg import StatusObservation, GateSample
+            point = now if now is not None else self.safety_clock.now()
+            def is_zero(message):
+                return all(value == 0.0 for value in (
+                    message.linear.x, message.linear.y, message.linear.z,
+                    message.angular.x, message.angular.y, message.angular.z))
+            sample = GateSample(gate_status=status, actual_branch=branch,
+                                input_zero_valid=input_msg is not None,
+                                input_is_zero=is_zero(input_msg) if input_msg is not None else False,
+                                output_is_zero=output_msg is None or is_zero(output_msg))
+            signature = (status, branch, sample.input_zero_valid,
+                         sample.input_is_zero, sample.output_is_zero)
+            if signature == self._last_debug_signature and point.nanoseconds - self._last_debug_time_ns < 1000000000:
+                return
+            self._last_debug_signature = signature
+            self._last_debug_time_ns = point.nanoseconds
+            if self.last_status_time is not None:
+                sample.loc_elapsed_valid = True
+                sample.loc_elapsed_ms = (point - self.last_status_time).nanoseconds / 1e6
+            if self.last_cmd_time is not None:
+                sample.cmd_elapsed_valid = True
+                sample.cmd_elapsed_ms = (point - self.last_cmd_time).nanoseconds / 1e6
+            record = StatusObservation(component='safety_gate', gate=[sample])
+            self.debug_observer.record(record)
+        except Exception:
+            # Observability failure must not change a gate output or callback result.
+            pass
+
+    def destroy_node(self):
+        if self.debug_observer is not None:
+            self.debug_observer.close()
+        return super().destroy_node()
 
     def _status_gate(self):
         if self.emergency_stop_active:

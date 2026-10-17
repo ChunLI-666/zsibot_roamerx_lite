@@ -26,6 +26,9 @@
 #include "navigo_util/robot_utils.hpp"
 #include "navigo_behavior_tree/bt_conversions.hpp"
 
+#include "robot_debug_tools/recorder.hpp"
+#include "robot_debug_build.hpp"
+
 namespace navigo_bt_navigator
 {
 
@@ -33,6 +36,16 @@ BtNavigator::BtNavigator(rclcpp::NodeOptions options)
 : navigo_util::LifecycleNode("bt_navigator", "",
     options.automatically_declare_parameters_from_overrides(true))
 {
+  try {
+    debug_metadata_ = std::make_unique<robot_debug::Recorder>(
+      *this, "bt_navigator", robot_debug::compiled_build_stamp(),
+      std::vector<std::string>{
+        get_node_topics_interface()->resolve_topic_name("navigate_to_pose"),
+        get_node_topics_interface()->resolve_topic_name("navigate_through_poses")}, true);
+  } catch (...) {
+    RCLCPP_WARN(get_logger(), "Build metadata unavailable; continuing without diagnostics");
+  }
+
   RCLCPP_INFO(get_logger(), "Creating");
 
   const std::vector<std::string> plugin_libs = {

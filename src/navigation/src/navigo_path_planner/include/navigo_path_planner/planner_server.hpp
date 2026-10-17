@@ -39,6 +39,7 @@
 #include "pluginlib/class_list_macros.hpp"
 #include "navigo_core/global_planner.hpp"
 #include "nav2_msgs/srv/is_path_valid.hpp"
+#include "robot_debug_tools/recorder.hpp"
 
 namespace navigo_path_planner
 {
@@ -130,7 +131,15 @@ protected:
    * @brief Wait for costmap to be valid with updated sensor data or repopulate after a
    * clearing recovery. Blocks until true without timeout.
    */
-  void waitForCostmap();
+  template<typename T>
+  void waitForCostmap(
+    const std::unique_ptr<navigo_util::SimpleActionServer<T>> & action_server);
+
+  template<typename T>
+  void observeBranch(
+    const std::unique_ptr<navigo_util::SimpleActionServer<T>> & action_server,
+    const char * site, const char * branch, const char * error = "",
+    bool value_valid = false, bool value = false) noexcept;
 
   /**
    * @brief Check if an action server has a preemption request and replaces the goal
@@ -250,6 +259,10 @@ protected:
 
   // Service to deterime if the path is valid
   rclcpp::Service<nav2_msgs::srv::IsPathValid>::SharedPtr is_path_valid_service_;
+
+  std::unique_ptr<robot_debug::Recorder> observation_recorder_;
+  std::string observation_to_pose_endpoint_;
+  std::string observation_through_poses_endpoint_;
 };
 
 }  // namespace navigo_path_planner

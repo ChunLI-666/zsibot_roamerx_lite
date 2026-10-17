@@ -28,6 +28,8 @@
 #ifndef NAVIGO_BEHAVIORS__BEHAVIOR_SERVER_HPP_
 #define NAVIGO_BEHAVIORS__BEHAVIOR_SERVER_HPP_
 
+namespace robot_debug { class Recorder; }
+
 namespace behavior_server
 {
 
@@ -52,6 +54,8 @@ public:
   bool loadBehaviorPlugins();
 
 protected:
+  std::unique_ptr<robot_debug::Recorder> debug_metadata_;
+
   /**
    * @brief Configure lifecycle server
    */

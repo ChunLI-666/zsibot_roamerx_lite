@@ -8,6 +8,8 @@
   <license>TODO: License declaration</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>robot_debug_tools</depend>
+  <depend>robot_debug_msgs</depend>
 
   <build_depend>navigation2</build_depend>
   <build_depend>launch_ros</build_depend>
@@ -57,6 +59,8 @@
   <exec_depend>navigation2</exec_depend>
   <exec_depend>slam_toolbox</exec_depend>
   <exec_depend>nav2_smoother</exec_depend>
+  <!-- Build the workspace lifecycle ownership fix used by the default launch. -->
+  <exec_depend>nav2_lifecycle_manager</exec_depend>
 
   <!-- <exec_depend>eigen</exec_depend>
   <exec_depend>pcl_conversions</exec_depend>

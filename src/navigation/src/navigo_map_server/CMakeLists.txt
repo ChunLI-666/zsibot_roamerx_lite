@@ -4,6 +4,8 @@ project(navigo_map_server)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake_modules)
 
 find_package(ament_cmake REQUIRED)
+find_package(robot_debug_msgs REQUIRED)
+find_package(robot_debug_tools REQUIRED)
 find_package(nav2_common REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
@@ -58,6 +60,8 @@ add_library(${library_name} SHARED
   src/map_server/map_server.cpp
   src/map_saver/map_saver.cpp
   src/costmap_filter_info/costmap_filter_info_server.cpp)
+robot_debug_build_stamp(${library_name} "navigation" "map_server_core")
+
 
 set(map_io_dependencies
   yaml_cpp_vendor
@@ -66,6 +70,8 @@ set(map_io_dependencies
   tf2)
 
 set(map_server_dependencies
+  robot_debug_msgs
+  robot_debug_tools
   rclcpp
   rclcpp_lifecycle
   rclcpp_components

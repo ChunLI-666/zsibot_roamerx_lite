@@ -32,6 +32,8 @@
 #include "navigo_util/odometry_utils.hpp"
 #include "navigo_util/robot_utils.hpp"
 
+namespace robot_debug { class Recorder; }
+
 namespace navigo_velocity_optimizer
 {
 
@@ -79,6 +81,8 @@ public:
     const double accel, const double decel, const double eta);
 
 protected:
+  std::unique_ptr<robot_debug::Recorder> debug_metadata_;
+
   /**
    * @brief Configures parameters and member variables
    * @param state LifeCycle Node's state

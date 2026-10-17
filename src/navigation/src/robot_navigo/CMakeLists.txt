@@ -35,6 +35,8 @@ set(CMAKE_C_STANDARD 99)
 #############################################################################
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(robot_debug_tools REQUIRED)
+find_package(robot_debug_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(nav2_msgs REQUIRED)
 find_package(navigation2 REQUIRED)
@@ -226,12 +228,23 @@ add_executable(livox_scan_projector
 )
 target_include_directories(livox_scan_projector PRIVATE include)
 ament_target_dependencies(livox_scan_projector
+        robot_debug_tools
+        robot_debug_msgs
         geometry_msgs
         livox_ros_driver2
         rclcpp
         robots_dog_msgs
         sensor_msgs
         tf2_ros)
+robot_debug_build_stamp(livox_scan_projector navigation robot_navigo/livox_scan_projector)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_custom_target(gate_debug_stamp ALL
+  COMMAND ${Python3_EXECUTABLE}
+    ${robot_debug_tools_DIR}/generate_build_stamp.py
+    --repo ${CMAKE_CURRENT_SOURCE_DIR} --repository-id navigation
+    --artifact robot_navigo/nav_safety_gate --json ${CMAKE_CURRENT_BINARY_DIR}/debug_build.json
+  BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/debug_build.json VERBATIM)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/debug_build.json DESTINATION share/${PROJECT_NAME})
 
 #==========================>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 install(PROGRAMS

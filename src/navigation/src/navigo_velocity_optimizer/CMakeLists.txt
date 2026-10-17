@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.5)
 project(navigo_velocity_optimizer)
 
 find_package(ament_cmake REQUIRED)
+find_package(robot_debug_msgs REQUIRED)
+find_package(robot_debug_tools REQUIRED)
 find_package(navigo_epoch_msgs REQUIRED)
 find_package(nav2_common REQUIRED)
 find_package(rclcpp REQUIRED)
@@ -29,6 +31,8 @@ set(executable_name velocity_smoother)
 set(library_name ${executable_name}_core)
 
 set(dependencies
+  robot_debug_msgs
+  robot_debug_tools
   navigo_epoch_msgs
   rclcpp
   rclcpp_components
@@ -41,6 +45,8 @@ set(dependencies
 add_library(${library_name} SHARED
   src/velocity_smoother.cpp
 )
+robot_debug_build_stamp(${library_name} "navigation" "velocity_smoother_core")
+
 ament_target_dependencies(${library_name}
   ${dependencies}
 )

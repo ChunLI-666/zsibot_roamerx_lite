@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.5)
 project(navigo_behaviors)
 
 find_package(ament_cmake REQUIRED)
+find_package(robot_debug_msgs REQUIRED)
+find_package(robot_debug_tools REQUIRED)
 find_package(nav2_common REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
@@ -34,6 +36,8 @@ set(library_name behavior_server_core)
 set(executable_name behavior_server)
 
 set(dependencies
+  robot_debug_msgs
+  robot_debug_tools
   rclcpp
   rclcpp_action
   rclcpp_lifecycle
@@ -98,6 +102,8 @@ pluginlib_export_plugin_description_file(navigo_core behavior_plugin.xml)
 add_library(${library_name} SHARED
   src/behavior_server.cpp
 )
+robot_debug_build_stamp(${library_name} "navigation" "behavior_server_core")
+
 
 ament_target_dependencies(${library_name}
   ${dependencies}

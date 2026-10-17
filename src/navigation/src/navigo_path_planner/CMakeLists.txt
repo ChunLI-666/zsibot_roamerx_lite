@@ -18,6 +18,8 @@ find_package(tf2_ros REQUIRED)
 find_package(navigo_costmap_2d REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(navigo_core REQUIRED)
+find_package(robot_debug_msgs REQUIRED)
+find_package(robot_debug_tools REQUIRED)
 
 nav2_package()
 
@@ -49,6 +51,8 @@ set(dependencies
   navigo_costmap_2d
   pluginlib
   navigo_core
+  robot_debug_msgs
+  robot_debug_tools
 )
 
 add_library(${library_name} SHARED
@@ -58,6 +62,7 @@ add_library(${library_name} SHARED
 ament_target_dependencies(${library_name}
   ${dependencies}
 )
+robot_debug_build_stamp(${library_name} navigation ${PROJECT_NAME}/${library_name})
 
 add_executable(${executable_name}
   src/main.cpp

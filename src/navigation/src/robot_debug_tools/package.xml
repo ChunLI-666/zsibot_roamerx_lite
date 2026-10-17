@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>robot_debug_tools</name><version>0.1.0</version>
+  <description>Bounded sideband recorders, build identity and a read-only navigation observer.</description>
+  <maintainer email="dev@zsibot.com">Navigation maintainers</maintainer><license>Apache-2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend><buildtool_depend>ament_cmake_python</buildtool_depend>
+  <depend>rclcpp</depend><depend>rclpy</depend><depend>robot_debug_msgs</depend>
+  <depend>action_msgs</depend><depend>unique_identifier_msgs</depend><depend>std_msgs</depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>launch</exec_depend><exec_depend>launch_ros</exec_depend>
+  <test_depend>ament_cmake_pytest</test_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>
