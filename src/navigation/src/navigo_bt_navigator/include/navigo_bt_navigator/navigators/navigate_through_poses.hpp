@@ -71,6 +71,8 @@ public:
   std::string getDefaultBTFilepath(rclcpp_lifecycle::LifecycleNode::WeakPtr node) override;
 
 protected:
+  bool enable_epoch_contract_{false};
+  std::string strict_bt_path_;
   /**
    * @brief A callback to be called when a new goal is received by the BT action server
    * Can be used to check if goal is valid and put values on

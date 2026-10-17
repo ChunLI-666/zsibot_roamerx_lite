@@ -1,0 +1,1454 @@
+{
+  "schema_version": 1,
+  "bags": [
+    {
+      "path": "/home/charles/datasets/rock_dog/20260829/20260829_010614/metadata.yaml",
+      "sha256": "1a43e551dc670b034f2db54b751e069aa02bdb609e41f45fb1a06fb32a937f42",
+      "topic_count": 43,
+      "possible_joint_topics": [],
+      "topics": [
+        {
+          "name": "/emergency_stop",
+          "type": "std_msgs/msg/Bool",
+          "count": 0
+        },
+        {
+          "name": "/cmd_vel_safe",
+          "type": "geometry_msgs/msg/Twist",
+          "count": 0
+        },
+        {
+          "name": "/trajectories",
+          "type": "visualization_msgs/msg/MarkerArray",
+          "count": 0
+        },
+        {
+          "name": "/lightning/pose",
+          "type": "geometry_msgs/msg/PoseStamped",
+          "count": 0
+        },
+        {
+          "name": "/transformed_global_plan",
+          "type": "nav_msgs/msg/Path",
+          "count": 0
+        },
+        {
+          "name": "/plan_smoothed",
+          "type": "nav_msgs/msg/Path",
+          "count": 0
+        },
+        {
+          "name": "/global_costmap/costmap",
+          "type": "nav_msgs/msg/OccupancyGrid",
+          "count": 0
+        },
+        {
+          "name": "/local_costmap/costmap_updates",
+          "type": "map_msgs/msg/OccupancyGridUpdate",
+          "count": 0
+        },
+        {
+          "name": "/lightning/loc_status",
+          "type": "std_msgs/msg/UInt8",
+          "count": 0
+        },
+        {
+          "name": "/camera/vision/image/compressed",
+          "type": "sensor_msgs/msg/CompressedImage",
+          "count": 0
+        },
+        {
+          "name": "/camera/vision/rect/image",
+          "type": "sensor_msgs/msg/Image",
+          "count": 33
+        },
+        {
+          "name": "/robot/sdk_odom",
+          "type": "nav_msgs/msg/Odometry",
+          "count": 0
+        },
+        {
+          "name": "/dock/status",
+          "type": "std_msgs/msg/String",
+          "count": 18
+        },
+        {
+          "name": "/dock/cmd_vel",
+          "type": "geometry_msgs/msg/Twist",
+          "count": 0
+        },
+        {
+          "name": "/autonomy_mux/mode_cmd",
+          "type": "std_msgs/msg/String",
+          "count": 0
+        },
+        {
+          "name": "/parameter_events",
+          "type": "rcl_interfaces/msg/ParameterEvent",
+          "count": 0
+        },
+        {
+          "name": "/camera/vision/camera_info",
+          "type": "sensor_msgs/msg/CameraInfo",
+          "count": 0
+        },
+        {
+          "name": "/odom/current_pose",
+          "type": "nav_msgs/msg/Odometry",
+          "count": 0
+        },
+        {
+          "name": "/local_costmap/published_footprint",
+          "type": "geometry_msgs/msg/PolygonStamped",
+          "count": 0
+        },
+        {
+          "name": "/dock/tag_poses",
+          "type": "std_msgs/msg/String",
+          "count": 0
+        },
+        {
+          "name": "/dock/tag_pose",
+          "type": "geometry_msgs/msg/PoseStamped",
+          "count": 0
+        },
+        {
+          "name": "/rosout",
+          "type": "rcl_interfaces/msg/Log",
+          "count": 154
+        },
+        {
+          "name": "/laser_scan",
+          "type": "sensor_msgs/msg/LaserScan",
+          "count": 0
+        },
+        {
+          "name": "/yz_robot_ctrl/debug",
+          "type": "robots_dog_msgs/msg/YzRobotCtrlDebug",
+          "count": 40
+        },
+        {
+          "name": "/camera/web/camera_info",
+          "type": "sensor_msgs/msg/CameraInfo",
+          "count": 29
+        },
+        {
+          "name": "/autonomy_mux/state",
+          "type": "std_msgs/msg/String",
+          "count": 20
+        },
+        {
+          "name": "/camera/web/image/compressed",
+          "type": "sensor_msgs/msg/CompressedImage",
+          "count": 0
+        },
+        {
+          "name": "/tf",
+          "type": "tf2_msgs/msg/TFMessage",
+          "count": 48
+        },
+        {
+          "name": "/global_costmap/costmap_updates",
+          "type": "map_msgs/msg/OccupancyGridUpdate",
+          "count": 0
+        },
+        {
+          "name": "/camera/vision/rect/camera_info",
+          "type": "sensor_msgs/msg/CameraInfo",
+          "count": 33
+        },
+        {
+          "name": "/tf_static",
+          "type": "tf2_msgs/msg/TFMessage",
+          "count": 0
+        },
+        {
+          "name": "/nav_safety_gate/gate_status",
+          "type": "std_msgs/msg/UInt8",
+          "count": 0
+        },
+        {
+          "name": "/clicked_point",
+          "type": "geometry_msgs/msg/PointStamped",
+          "count": 0
+        },
+        {
+          "name": "/local_costmap/costmap",
+          "type": "nav_msgs/msg/OccupancyGrid",
+          "count": 0
+        },
+        {
+          "name": "/initialpose",
+          "type": "geometry_msgs/msg/PoseWithCovarianceStamped",
+          "count": 0
+        },
+        {
+          "name": "/autonomy_mux/action_cmd",
+          "type": "std_msgs/msg/String",
+          "count": 0
+        },
+        {
+          "name": "/move_base_simple/goal",
+          "type": "geometry_msgs/msg/PoseStamped",
+          "count": 0
+        },
+        {
+          "name": "/detections",
+          "type": "apriltag_msgs/msg/AprilTagDetectionArray",
+          "count": 48
+        },
+        {
+          "name": "/plan",
+          "type": "nav_msgs/msg/Path",
+          "count": 0
+        },
+        {
+          "name": "/lightning/debug",
+          "type": "lightning/msg/LightningDebug",
+          "count": 0
+        },
+        {
+          "name": "/goal_pose",
+          "type": "geometry_msgs/msg/PoseStamped",
+          "count": 0
+        },
+        {
+          "name": "/global_costmap/published_footprint",
+          "type": "geometry_msgs/msg/PolygonStamped",
+          "count": 0
+        },
+        {
+          "name": "/points_raw",
+          "type": "sensor_msgs/msg/PointCloud2",
+          "count": 0
+        }
+      ]
+    },
+    {
+      "path": "/home/charles/datasets/rock_dog/20260829/rosbag2_2026_08_29-01_26_38/metadata.yaml",
+      "sha256": "1008749f847ba83dc8254b61a3bffe257dc81f9b36718e00bb8ef3df1772f1d4",
+      "topic_count": 46,
+      "possible_joint_topics": [],
+      "topics": [
+        {
+          "name": "/autonomy_mux/mode_cmd",
+          "type": "std_msgs/msg/String",
+          "count": 1
+        },
+        {
+          "name": "/dock/cmd_vel",
+          "type": "geometry_msgs/msg/Twist",
+          "count": 0
+        },
+        {
+          "name": "/robot/sdk_odom",
+          "type": "nav_msgs/msg/Odometry",
+          "count": 1873
+        },
+        {
+          "name": "/autonomy_mux/action_cmd",
+          "type": "std_msgs/msg/String",
+          "count": 0
+        },
+        {
+          "name": "/move_base_simple/goal",
+          "type": "geometry_msgs/msg/PoseStamped",
+          "count": 0
+        },
+        {
+          "name": "/controller_server/debug",
+          "type": "robots_dog_msgs/msg/NavigoControllerDebug",
+          "count": 1147
+        },
+        {
+          "name": "/local_costmap/published_footprint",
+          "type": "geometry_msgs/msg/PolygonStamped",
+          "count": 1905
+        },
+        {
+          "name": "/lightning/debug",
+          "type": "lightning/msg/LightningDebug",
+          "count": 1928
+        },
+        {
+          "name": "/odom/current_pose",
+          "type": "nav_msgs/msg/Odometry",
+          "count": 31310
+        },
+        {
+          "name": "/lightning/loc_status",
+          "type": "std_msgs/msg/UInt8",
+          "count": 1963
+        },
+        {
+          "name": "/cmd_vel_safe",
+          "type": "geometry_msgs/msg/Twist",
+          "count": 2341
+        },
+        {
+          "name": "/cmd_vel",
+          "type": "geometry_msgs/msg/Twist",
+          "count": 2308
+        },
+        {
+          "name": "/plan_smoothed",
+          "type": "nav_msgs/msg/Path",
+          "count": 116
+        },
+        {
+          "name": "/yz_robot_ctrl/debug",
+          "type": "robots_dog_msgs/msg/YzRobotCtrlDebug",
+          "count": 1986
+        },
+        {
+          "name": "/laser_scan",
+          "type": "sensor_msgs/msg/LaserScan",
+          "count": 1916
+        },
+        {
+          "name": "/goal_pose",
+          "type": "geometry_msgs/msg/PoseStamped",
+          "count": 0
+        },
+        {
+          "name": "/navigate_to_pose/_action/status",
+          "type": "action_msgs/msg/GoalStatusArray",
+          "count": 6
+        },
+        {
+          "name": "/tf_static",
+          "type": "tf2_msgs/msg/TFMessage",
+          "count": 1
+        },
+        {
+          "name": "/waypoints",
+          "type": "visualization_msgs/msg/MarkerArray",
+          "count": 6
+        },
+        {
+          "name": "/rosout",
+          "type": "rcl_interfaces/msg/Log",
+          "count": 1044
+        },
+        {
+          "name": "/trajectories",
+          "type": "visualization_msgs/msg/MarkerArray",
+          "count": 1124
+        },
+        {
+          "name": "/clicked_point",
+          "type": "geometry_msgs/msg/PointStamped",
+          "count": 0
+        },
+        {
+          "name": "/nav_safety_gate/gate_status",
+          "type": "std_msgs/msg/UInt8",
+          "count": 2314
+        },
+        {
+          "name": "/emergency_stop",
+          "type": "std_msgs/msg/Bool",
+          "count": 0
+        },
+        {
+          "name": "/livox/imu",
+          "type": "sensor_msgs/msg/Imu",
+          "count": 38870
+        },
+        {
+          "name": "/points_raw",
+          "type": "sensor_msgs/msg/PointCloud2",
+          "count": 0
+        },
+        {
+          "name": "/global_costmap/published_footprint",
+          "type": "geometry_msgs/msg/PolygonStamped",
+          "count": 383
+        },
+        {
+          "name": "/livox/lidar",
+          "type": "livox_ros_driver2/msg/CustomMsg",
+          "count": 1949
+        },
+        {
+          "name": "/global_costmap/costmap",
+          "type": "nav_msgs/msg/OccupancyGrid",
+          "count": 0
+        },
+        {
+          "name": "/parameter_events",
+          "type": "rcl_interfaces/msg/ParameterEvent",
+          "count": 0
+        },
+        {
+          "name": "/map",
+          "type": "nav_msgs/msg/OccupancyGrid",
+          "count": 1
+        },
+        {
+          "name": "/plan",
+          "type": "nav_msgs/msg/Path",
+          "count": 116
+        },
+        {
+          "name": "/tf",
+          "type": "tf2_msgs/msg/TFMessage",
+          "count": 26774
+        },
+        {
+          "name": "/initialpose",
+          "type": "geometry_msgs/msg/PoseWithCovarianceStamped",
+          "count": 0
+        },
+        {
+          "name": "/local_costmap/costmap",
+          "type": "nav_msgs/msg/OccupancyGrid",
+          "count": 19
+        },
+        {
+          "name": "/camera/vision/camera_info",
+          "type": "sensor_msgs/msg/CameraInfo",
+          "count": 4511
+        },
+        {
+          "name": "/navigate_to_pose/_action/feedback",
+          "type": "nav2_msgs/action/NavigateToPose_FeedbackMessage",
+          "count": 12736
+        },
+        {
+          "name": "/lightning_bridge/debug",
+          "type": "robots_dog_msgs/msg/LivoxBridgeDebug",
+          "count": 1902
+        },
+        {
+          "name": "/local_costmap/costmap_updates",
+          "type": "map_msgs/msg/OccupancyGridUpdate",
+          "count": 327
+        },
+        {
+          "name": "/global_costmap/costmap_updates",
+          "type": "map_msgs/msg/OccupancyGridUpdate",
+          "count": 151
+        },
+        {
+          "name": "/lightning/pose",
+          "type": "geometry_msgs/msg/PoseStamped",
+          "count": 38133
+        },
+        {
+          "name": "/transformed_global_plan",
+          "type": "nav_msgs/msg/Path",
+          "count": 1121
+        },
+        {
+          "name": "/autonomy_mux/state",
+          "type": "std_msgs/msg/String",
+          "count": 1920
+        },
+        {
+          "name": "/camera/web/image/compressed",
+          "type": "sensor_msgs/msg/CompressedImage",
+          "count": 0
+        },
+        {
+          "name": "/camera/web/camera_info",
+          "type": "sensor_msgs/msg/CameraInfo",
+          "count": 2894
+        },
+        {
+          "name": "/camera/vision/image/compressed",
+          "type": "sensor_msgs/msg/CompressedImage",
+          "count": 5261
+        }
+      ]
+    },
+    {
+      "path": "/home/charles/datasets/rock_dog/20260829/rosbag2_2026_08_29-01_30_55/metadata.yaml",
+      "sha256": "449365bf5648ba37ab5a176bebe79ceeaedc4374de5d899fbefa50cc5235c043",
+      "topic_count": 46,
+      "possible_joint_topics": [],
+      "topics": [
+        {
+          "name": "/autonomy_mux/mode_cmd",
+          "type": "std_msgs/msg/String",
+          "count": 0
+        },
+        {
+          "name": "/dock/cmd_vel",
+          "type": "geometry_msgs/msg/Twist",
+          "count": 0
+        },
+        {
+          "name": "/controller_server/debug",
+          "type": "robots_dog_msgs/msg/NavigoControllerDebug",
+          "count": 391
+        },
+        {
+          "name": "/cmd_vel_safe",
+          "type": "geometry_msgs/msg/Twist",
+          "count": 829
+        },
+        {
+          "name": "/local_costmap/published_footprint",
+          "type": "geometry_msgs/msg/PolygonStamped",
+          "count": 796
+        },
+        {
+          "name": "/autonomy_mux/action_cmd",
+          "type": "std_msgs/msg/String",
+          "count": 0
+        },
+        {
+          "name": "/move_base_simple/goal",
+          "type": "geometry_msgs/msg/PoseStamped",
+          "count": 0
+        },
+        {
+          "name": "/odom/current_pose",
+          "type": "nav_msgs/msg/Odometry",
+          "count": 13875
+        },
+        {
+          "name": "/lightning/debug",
+          "type": "lightning/msg/LightningDebug",
+          "count": 925
+        },
+        {
+          "name": "/points_raw",
+          "type": "sensor_msgs/msg/PointCloud2",
+          "count": 0
+        },
+        {
+          "name": "/lightning/pose",
+          "type": "geometry_msgs/msg/PoseStamped",
+          "count": 18146
+        },
+        {
+          "name": "/transformed_global_plan",
+          "type": "nav_msgs/msg/Path",
+          "count": 378
+        },
+        {
+          "name": "/global_costmap/published_footprint",
+          "type": "geometry_msgs/msg/PolygonStamped",
+          "count": 163
+        },
+        {
+          "name": "/livox/lidar",
+          "type": "livox_ros_driver2/msg/CustomMsg",
+          "count": 967
+        },
+        {
+          "name": "/global_costmap/costmap",
+          "type": "nav_msgs/msg/OccupancyGrid",
+          "count": 0
+        },
+        {
+          "name": "/plan_smoothed",
+          "type": "nav_msgs/msg/Path",
+          "count": 53
+        },
+        {
+          "name": "/cmd_vel",
+          "type": "geometry_msgs/msg/Twist",
+          "count": 827
+        },
+        {
+          "name": "/parameter_events",
+          "type": "rcl_interfaces/msg/ParameterEvent",
+          "count": 0
+        },
+        {
+          "name": "/goal_pose",
+          "type": "geometry_msgs/msg/PoseStamped",
+          "count": 0
+        },
+        {
+          "name": "/tf",
+          "type": "tf2_msgs/msg/TFMessage",
+          "count": 11940
+        },
+        {
+          "name": "/nav_safety_gate/gate_status",
+          "type": "std_msgs/msg/UInt8",
+          "count": 814
+        },
+        {
+          "name": "/clicked_point",
+          "type": "geometry_msgs/msg/PointStamped",
+          "count": 0
+        },
+        {
+          "name": "/yz_robot_ctrl/debug",
+          "type": "robots_dog_msgs/msg/YzRobotCtrlDebug",
+          "count": 0
+        },
+        {
+          "name": "/laser_scan",
+          "type": "sensor_msgs/msg/LaserScan",
+          "count": 805
+        },
+        {
+          "name": "/map",
+          "type": "nav_msgs/msg/OccupancyGrid",
+          "count": 1
+        },
+        {
+          "name": "/plan",
+          "type": "nav_msgs/msg/Path",
+          "count": 53
+        },
+        {
+          "name": "/waypoints",
+          "type": "visualization_msgs/msg/MarkerArray",
+          "count": 5
+        },
+        {
+          "name": "/rosout",
+          "type": "rcl_interfaces/msg/Log",
+          "count": 826
+        },
+        {
+          "name": "/trajectories",
+          "type": "visualization_msgs/msg/MarkerArray",
+          "count": 384
+        },
+        {
+          "name": "/robot/sdk_odom",
+          "type": "nav_msgs/msg/Odometry",
+          "count": 950
+        },
+        {
+          "name": "/global_costmap/costmap_updates",
+          "type": "map_msgs/msg/OccupancyGridUpdate",
+          "count": 66
+        },
+        {
+          "name": "/lightning/loc_status",
+          "type": "std_msgs/msg/UInt8",
+          "count": 939
+        },
+        {
+          "name": "/camera/vision/camera_info",
+          "type": "sensor_msgs/msg/CameraInfo",
+          "count": 2229
+        },
+        {
+          "name": "/initialpose",
+          "type": "geometry_msgs/msg/PoseWithCovarianceStamped",
+          "count": 0
+        },
+        {
+          "name": "/local_costmap/costmap",
+          "type": "nav_msgs/msg/OccupancyGrid",
+          "count": 68
+        },
+        {
+          "name": "/camera/vision/image/compressed",
+          "type": "sensor_msgs/msg/CompressedImage",
+          "count": 1835
+        },
+        {
+          "name": "/camera/web/image/compressed",
+          "type": "sensor_msgs/msg/CompressedImage",
+          "count": 1447
+        },
+        {
+          "name": "/autonomy_mux/state",
+          "type": "std_msgs/msg/String",
+          "count": 970
+        },
+        {
+          "name": "/camera/web/camera_info",
+          "type": "sensor_msgs/msg/CameraInfo",
+          "count": 1445
+        },
+        {
+          "name": "/livox/imu",
+          "type": "sensor_msgs/msg/Imu",
+          "count": 19317
+        },
+        {
+          "name": "/emergency_stop",
+          "type": "std_msgs/msg/Bool",
+          "count": 0
+        },
+        {
+          "name": "/tf_static",
+          "type": "tf2_msgs/msg/TFMessage",
+          "count": 1
+        },
+        {
+          "name": "/navigate_to_pose/_action/status",
+          "type": "action_msgs/msg/GoalStatusArray",
+          "count": 4
+        },
+        {
+          "name": "/lightning_bridge/debug",
+          "type": "robots_dog_msgs/msg/LivoxBridgeDebug",
+          "count": 799
+        },
+        {
+          "name": "/local_costmap/costmap_updates",
+          "type": "map_msgs/msg/OccupancyGridUpdate",
+          "count": 75
+        },
+        {
+          "name": "/navigate_to_pose/_action/feedback",
+          "type": "nav2_msgs/action/NavigateToPose_FeedbackMessage",
+          "count": 6234
+        }
+      ]
+    },
+    {
+      "path": "/home/charles/datasets/rock_dog/20260829/rosbag2_2026_08_29-04_41_05/metadata.yaml",
+      "sha256": "677522e16406e5006dedc403718eb4aac10b7ca61030374cba9922d46fed6413",
+      "topic_count": 45,
+      "possible_joint_topics": [],
+      "topics": [
+        {
+          "name": "/goal_pose",
+          "type": "geometry_msgs/msg/PoseStamped",
+          "count": 8
+        },
+        {
+          "name": "/trajectories",
+          "type": "visualization_msgs/msg/MarkerArray",
+          "count": 2598
+        },
+        {
+          "name": "/global_costmap/published_footprint",
+          "type": "geometry_msgs/msg/PolygonStamped",
+          "count": 1080
+        },
+        {
+          "name": "/global_costmap/costmap",
+          "type": "nav_msgs/msg/OccupancyGrid",
+          "count": 1
+        },
+        {
+          "name": "/controller_server/debug",
+          "type": "robots_dog_msgs/msg/NavigoControllerDebug",
+          "count": 2598
+        },
+        {
+          "name": "/global_costmap/costmap_updates",
+          "type": "map_msgs/msg/OccupancyGridUpdate",
+          "count": 421
+        },
+        {
+          "name": "/local_costmap/published_footprint",
+          "type": "geometry_msgs/msg/PolygonStamped",
+          "count": 5398
+        },
+        {
+          "name": "/initialpose",
+          "type": "geometry_msgs/msg/PoseWithCovarianceStamped",
+          "count": 0
+        },
+        {
+          "name": "/local_costmap/costmap",
+          "type": "nav_msgs/msg/OccupancyGrid",
+          "count": 366
+        },
+        {
+          "name": "/lightning/loc_status",
+          "type": "std_msgs/msg/UInt8",
+          "count": 5474
+        },
+        {
+          "name": "/yz_robot_ctrl/debug",
+          "type": "robots_dog_msgs/msg/YzRobotCtrlDebug",
+          "count": 5895
+        },
+        {
+          "name": "/laser_scan",
+          "type": "sensor_msgs/msg/LaserScan",
+          "count": 5411
+        },
+        {
+          "name": "/cmd_vel_safe",
+          "type": "geometry_msgs/msg/Twist",
+          "count": 10706
+        },
+        {
+          "name": "/move_base_simple/goal",
+          "type": "geometry_msgs/msg/PoseStamped",
+          "count": 1
+        },
+        {
+          "name": "/autonomy_mux/action_cmd",
+          "type": "std_msgs/msg/String",
+          "count": 0
+        },
+        {
+          "name": "/livox/lidar",
+          "type": "livox_ros_driver2/msg/CustomMsg",
+          "count": 5390
+        },
+        {
+          "name": "/odom/current_pose",
+          "type": "nav_msgs/msg/Odometry",
+          "count": 107965
+        },
+        {
+          "name": "/plan",
+          "type": "nav_msgs/msg/Path",
+          "count": 220
+        },
+        {
+          "name": "/map",
+          "type": "nav_msgs/msg/OccupancyGrid",
+          "count": 1
+        },
+        {
+          "name": "/parameter_events",
+          "type": "rcl_interfaces/msg/ParameterEvent",
+          "count": 0
+        },
+        {
+          "name": "/autonomy_mux/mode_cmd",
+          "type": "std_msgs/msg/String",
+          "count": 0
+        },
+        {
+          "name": "/clicked_point",
+          "type": "geometry_msgs/msg/PointStamped",
+          "count": 0
+        },
+        {
+          "name": "/nav_safety_gate/gate_status",
+          "type": "std_msgs/msg/UInt8",
+          "count": 10706
+        },
+        {
+          "name": "/rosout",
+          "type": "rcl_interfaces/msg/Log",
+          "count": 1871
+        },
+        {
+          "name": "/camera/web/camera_info",
+          "type": "sensor_msgs/msg/CameraInfo",
+          "count": 8107
+        },
+        {
+          "name": "/autonomy_mux/state",
+          "type": "std_msgs/msg/String",
+          "count": 5412
+        },
+        {
+          "name": "/camera/web/image/compressed",
+          "type": "sensor_msgs/msg/CompressedImage",
+          "count": 8107
+        },
+        {
+          "name": "/transformed_global_plan",
+          "type": "nav_msgs/msg/Path",
+          "count": 2598
+        },
+        {
+          "name": "/lightning/pose",
+          "type": "geometry_msgs/msg/PoseStamped",
+          "count": 107969
+        },
+        {
+          "name": "/navigate_to_pose/_action/status",
+          "type": "action_msgs/msg/GoalStatusArray",
+          "count": 15
+        },
+        {
+          "name": "/tf_static",
+          "type": "tf2_msgs/msg/TFMessage",
+          "count": 1
+        },
+        {
+          "name": "/navigate_to_pose/_action/feedback",
+          "type": "nav2_msgs/action/NavigateToPose_FeedbackMessage",
+          "count": 4128
+        },
+        {
+          "name": "/local_costmap/costmap_updates",
+          "type": "map_msgs/msg/OccupancyGridUpdate",
+          "count": 609
+        },
+        {
+          "name": "/lightning_bridge/debug",
+          "type": "robots_dog_msgs/msg/LivoxBridgeDebug",
+          "count": 5408
+        },
+        {
+          "name": "/camera/vision/image/compressed",
+          "type": "sensor_msgs/msg/CompressedImage",
+          "count": 14715
+        },
+        {
+          "name": "/dock/cmd_vel",
+          "type": "geometry_msgs/msg/Twist",
+          "count": 0
+        },
+        {
+          "name": "/camera/vision/camera_info",
+          "type": "sensor_msgs/msg/CameraInfo",
+          "count": 14907
+        },
+        {
+          "name": "/robot/sdk_odom",
+          "type": "nav_msgs/msg/Odometry",
+          "count": 5388
+        },
+        {
+          "name": "/lightning/debug",
+          "type": "lightning/msg/LightningDebug",
+          "count": 5399
+        },
+        {
+          "name": "/tf",
+          "type": "tf2_msgs/msg/TFMessage",
+          "count": 107964
+        },
+        {
+          "name": "/cmd_vel",
+          "type": "geometry_msgs/msg/Twist",
+          "count": 6876
+        },
+        {
+          "name": "/plan_smoothed",
+          "type": "nav_msgs/msg/Path",
+          "count": 219
+        },
+        {
+          "name": "/emergency_stop",
+          "type": "std_msgs/msg/Bool",
+          "count": 0
+        },
+        {
+          "name": "/livox/imu",
+          "type": "sensor_msgs/msg/Imu",
+          "count": 107697
+        },
+        {
+          "name": "/points_raw",
+          "type": "sensor_msgs/msg/PointCloud2",
+          "count": 0
+        }
+      ]
+    },
+    {
+      "path": "/home/charles/datasets/rock_dog/20260829/rosbag2_2026_08_29-04_41_05/rosbag2_2026_08_29-04_28_31/metadata.yaml",
+      "sha256": "fcc8398dc5e19cdf74935b68649062c6c33b511337bbf65a7dd0f41b655e967d",
+      "topic_count": 46,
+      "possible_joint_topics": [],
+      "topics": [
+        {
+          "name": "/controller_server/debug",
+          "type": "robots_dog_msgs/msg/NavigoControllerDebug",
+          "count": 385
+        },
+        {
+          "name": "/autonomy_mux/mode_cmd",
+          "type": "std_msgs/msg/String",
+          "count": 0
+        },
+        {
+          "name": "/dock/cmd_vel",
+          "type": "geometry_msgs/msg/Twist",
+          "count": 0
+        },
+        {
+          "name": "/trajectories",
+          "type": "visualization_msgs/msg/MarkerArray",
+          "count": 385
+        },
+        {
+          "name": "/robot/sdk_odom",
+          "type": "nav_msgs/msg/Odometry",
+          "count": 2397
+        },
+        {
+          "name": "/goal_pose",
+          "type": "geometry_msgs/msg/PoseStamped",
+          "count": 2
+        },
+        {
+          "name": "/local_costmap/published_footprint",
+          "type": "geometry_msgs/msg/PolygonStamped",
+          "count": 1710
+        },
+        {
+          "name": "/global_costmap/costmap",
+          "type": "nav_msgs/msg/OccupancyGrid",
+          "count": 0
+        },
+        {
+          "name": "/points_raw",
+          "type": "sensor_msgs/msg/PointCloud2",
+          "count": 0
+        },
+        {
+          "name": "/global_costmap/published_footprint",
+          "type": "geometry_msgs/msg/PolygonStamped",
+          "count": 344
+        },
+        {
+          "name": "/livox/lidar",
+          "type": "livox_ros_driver2/msg/CustomMsg",
+          "count": 2403
+        },
+        {
+          "name": "/tf",
+          "type": "tf2_msgs/msg/TFMessage",
+          "count": 48443
+        },
+        {
+          "name": "/odom/current_pose",
+          "type": "nav_msgs/msg/Odometry",
+          "count": 48445
+        },
+        {
+          "name": "/transformed_global_plan",
+          "type": "nav_msgs/msg/Path",
+          "count": 385
+        },
+        {
+          "name": "/lightning/pose",
+          "type": "geometry_msgs/msg/PoseStamped",
+          "count": 48446
+        },
+        {
+          "name": "/waypoints",
+          "type": "visualization_msgs/msg/MarkerArray",
+          "count": 0
+        },
+        {
+          "name": "/rosout",
+          "type": "rcl_interfaces/msg/Log",
+          "count": 1024
+        },
+        {
+          "name": "/local_costmap/costmap",
+          "type": "nav_msgs/msg/OccupancyGrid",
+          "count": 26
+        },
+        {
+          "name": "/initialpose",
+          "type": "geometry_msgs/msg/PoseWithCovarianceStamped",
+          "count": 0
+        },
+        {
+          "name": "/lightning/loc_status",
+          "type": "std_msgs/msg/UInt8",
+          "count": 2453
+        },
+        {
+          "name": "/nav_safety_gate/gate_status",
+          "type": "std_msgs/msg/UInt8",
+          "count": 3423
+        },
+        {
+          "name": "/clicked_point",
+          "type": "geometry_msgs/msg/PointStamped",
+          "count": 0
+        },
+        {
+          "name": "/yz_robot_ctrl/debug",
+          "type": "robots_dog_msgs/msg/YzRobotCtrlDebug",
+          "count": 0
+        },
+        {
+          "name": "/laser_scan",
+          "type": "sensor_msgs/msg/LaserScan",
+          "count": 1723
+        },
+        {
+          "name": "/cmd_vel_safe",
+          "type": "geometry_msgs/msg/Twist",
+          "count": 3423
+        },
+        {
+          "name": "/autonomy_mux/action_cmd",
+          "type": "std_msgs/msg/String",
+          "count": 0
+        },
+        {
+          "name": "/move_base_simple/goal",
+          "type": "geometry_msgs/msg/PoseStamped",
+          "count": 1
+        },
+        {
+          "name": "/autonomy_mux/state",
+          "type": "std_msgs/msg/String",
+          "count": 2412
+        },
+        {
+          "name": "/camera/web/image/compressed",
+          "type": "sensor_msgs/msg/CompressedImage",
+          "count": 0
+        },
+        {
+          "name": "/camera/web/camera_info",
+          "type": "sensor_msgs/msg/CameraInfo",
+          "count": 3618
+        },
+        {
+          "name": "/parameter_events",
+          "type": "rcl_interfaces/msg/ParameterEvent",
+          "count": 0
+        },
+        {
+          "name": "/lightning/debug",
+          "type": "lightning/msg/LightningDebug",
+          "count": 2422
+        },
+        {
+          "name": "/navigate_to_pose/_action/feedback",
+          "type": "nav2_msgs/action/NavigateToPose_FeedbackMessage",
+          "count": 770
+        },
+        {
+          "name": "/local_costmap/costmap_updates",
+          "type": "map_msgs/msg/OccupancyGridUpdate",
+          "count": 283
+        },
+        {
+          "name": "/lightning_bridge/debug",
+          "type": "robots_dog_msgs/msg/LivoxBridgeDebug",
+          "count": 1723
+        },
+        {
+          "name": "/map",
+          "type": "nav_msgs/msg/OccupancyGrid",
+          "count": 0
+        },
+        {
+          "name": "/plan",
+          "type": "nav_msgs/msg/Path",
+          "count": 29
+        },
+        {
+          "name": "/navigate_to_pose/_action/status",
+          "type": "action_msgs/msg/GoalStatusArray",
+          "count": 4
+        },
+        {
+          "name": "/tf_static",
+          "type": "tf2_msgs/msg/TFMessage",
+          "count": 1
+        },
+        {
+          "name": "/livox/imu",
+          "type": "sensor_msgs/msg/Imu",
+          "count": 48027
+        },
+        {
+          "name": "/emergency_stop",
+          "type": "std_msgs/msg/Bool",
+          "count": 0
+        },
+        {
+          "name": "/camera/vision/image/compressed",
+          "type": "sensor_msgs/msg/CompressedImage",
+          "count": 7007
+        },
+        {
+          "name": "/camera/vision/camera_info",
+          "type": "sensor_msgs/msg/CameraInfo",
+          "count": 6656
+        },
+        {
+          "name": "/cmd_vel",
+          "type": "geometry_msgs/msg/Twist",
+          "count": 1303
+        },
+        {
+          "name": "/plan_smoothed",
+          "type": "nav_msgs/msg/Path",
+          "count": 28
+        },
+        {
+          "name": "/global_costmap/costmap_updates",
+          "type": "map_msgs/msg/OccupancyGridUpdate",
+          "count": 133
+        }
+      ]
+    },
+    {
+      "path": "/home/charles/datasets/rock_dog/20260829/rosbag2_2026_08_29-04_41_05/rosbag2_2026_08_29-04_38_22/metadata.yaml",
+      "sha256": "fe98a30da751c12fe40826d0cc50cfb5f51459697360d9567688b0b0b0af15ab",
+      "topic_count": 46,
+      "possible_joint_topics": [],
+      "topics": [
+        {
+          "name": "/camera/vision/image/compressed",
+          "type": "sensor_msgs/msg/CompressedImage",
+          "count": 688
+        },
+        {
+          "name": "/camera/vision/camera_info",
+          "type": "sensor_msgs/msg/CameraInfo",
+          "count": 724
+        },
+        {
+          "name": "/lightning/debug",
+          "type": "lightning/msg/LightningDebug",
+          "count": 263
+        },
+        {
+          "name": "/lightning/loc_status",
+          "type": "std_msgs/msg/UInt8",
+          "count": 266
+        },
+        {
+          "name": "/tf",
+          "type": "tf2_msgs/msg/TFMessage",
+          "count": 5276
+        },
+        {
+          "name": "/goal_pose",
+          "type": "geometry_msgs/msg/PoseStamped",
+          "count": 0
+        },
+        {
+          "name": "/odom/current_pose",
+          "type": "nav_msgs/msg/Odometry",
+          "count": 5267
+        },
+        {
+          "name": "/clicked_point",
+          "type": "geometry_msgs/msg/PointStamped",
+          "count": 0
+        },
+        {
+          "name": "/nav_safety_gate/gate_status",
+          "type": "std_msgs/msg/UInt8",
+          "count": 519
+        },
+        {
+          "name": "/laser_scan",
+          "type": "sensor_msgs/msg/LaserScan",
+          "count": 0
+        },
+        {
+          "name": "/yz_robot_ctrl/debug",
+          "type": "robots_dog_msgs/msg/YzRobotCtrlDebug",
+          "count": 284
+        },
+        {
+          "name": "/waypoints",
+          "type": "visualization_msgs/msg/MarkerArray",
+          "count": 0
+        },
+        {
+          "name": "/rosout",
+          "type": "rcl_interfaces/msg/Log",
+          "count": 227
+        },
+        {
+          "name": "/trajectories",
+          "type": "visualization_msgs/msg/MarkerArray",
+          "count": 252
+        },
+        {
+          "name": "/points_raw",
+          "type": "sensor_msgs/msg/PointCloud2",
+          "count": 0
+        },
+        {
+          "name": "/global_costmap/published_footprint",
+          "type": "geometry_msgs/msg/PolygonStamped",
+          "count": 54
+        },
+        {
+          "name": "/autonomy_mux/mode_cmd",
+          "type": "std_msgs/msg/String",
+          "count": 0
+        },
+        {
+          "name": "/parameter_events",
+          "type": "rcl_interfaces/msg/ParameterEvent",
+          "count": 0
+        },
+        {
+          "name": "/plan_smoothed",
+          "type": "nav_msgs/msg/Path",
+          "count": 19
+        },
+        {
+          "name": "/cmd_vel",
+          "type": "geometry_msgs/msg/Twist",
+          "count": 519
+        },
+        {
+          "name": "/dock/cmd_vel",
+          "type": "geometry_msgs/msg/Twist",
+          "count": 0
+        },
+        {
+          "name": "/livox/lidar",
+          "type": "livox_ros_driver2/msg/CustomMsg",
+          "count": 268
+        },
+        {
+          "name": "/global_costmap/costmap",
+          "type": "nav_msgs/msg/OccupancyGrid",
+          "count": 1
+        },
+        {
+          "name": "/camera/web/camera_info",
+          "type": "sensor_msgs/msg/CameraInfo",
+          "count": 388
+        },
+        {
+          "name": "/camera/web/image/compressed",
+          "type": "sensor_msgs/msg/CompressedImage",
+          "count": 0
+        },
+        {
+          "name": "/autonomy_mux/state",
+          "type": "std_msgs/msg/String",
+          "count": 273
+        },
+        {
+          "name": "/robot/sdk_odom",
+          "type": "nav_msgs/msg/Odometry",
+          "count": 269
+        },
+        {
+          "name": "/cmd_vel_safe",
+          "type": "geometry_msgs/msg/Twist",
+          "count": 531
+        },
+        {
+          "name": "/local_costmap/published_footprint",
+          "type": "geometry_msgs/msg/PolygonStamped",
+          "count": 264
+        },
+        {
+          "name": "/livox/imu",
+          "type": "sensor_msgs/msg/Imu",
+          "count": 5265
+        },
+        {
+          "name": "/emergency_stop",
+          "type": "std_msgs/msg/Bool",
+          "count": 0
+        },
+        {
+          "name": "/move_base_simple/goal",
+          "type": "geometry_msgs/msg/PoseStamped",
+          "count": 1
+        },
+        {
+          "name": "/autonomy_mux/action_cmd",
+          "type": "std_msgs/msg/String",
+          "count": 0
+        },
+        {
+          "name": "/lightning/pose",
+          "type": "geometry_msgs/msg/PoseStamped",
+          "count": 5246
+        },
+        {
+          "name": "/transformed_global_plan",
+          "type": "nav_msgs/msg/Path",
+          "count": 252
+        },
+        {
+          "name": "/initialpose",
+          "type": "geometry_msgs/msg/PoseWithCovarianceStamped",
+          "count": 0
+        },
+        {
+          "name": "/local_costmap/costmap",
+          "type": "nav_msgs/msg/OccupancyGrid",
+          "count": 12
+        },
+        {
+          "name": "/controller_server/debug",
+          "type": "robots_dog_msgs/msg/NavigoControllerDebug",
+          "count": 252
+        },
+        {
+          "name": "/global_costmap/costmap_updates",
+          "type": "map_msgs/msg/OccupancyGridUpdate",
+          "count": 21
+        },
+        {
+          "name": "/lightning_bridge/debug",
+          "type": "robots_dog_msgs/msg/LivoxBridgeDebug",
+          "count": 262
+        },
+        {
+          "name": "/local_costmap/costmap_updates",
+          "type": "map_msgs/msg/OccupancyGridUpdate",
+          "count": 37
+        },
+        {
+          "name": "/navigate_to_pose/_action/feedback",
+          "type": "nav2_msgs/action/NavigateToPose_FeedbackMessage",
+          "count": 263
+        },
+        {
+          "name": "/tf_static",
+          "type": "tf2_msgs/msg/TFMessage",
+          "count": 0
+        },
+        {
+          "name": "/navigate_to_pose/_action/status",
+          "type": "action_msgs/msg/GoalStatusArray",
+          "count": 1
+        },
+        {
+          "name": "/map",
+          "type": "nav_msgs/msg/OccupancyGrid",
+          "count": 1
+        },
+        {
+          "name": "/plan",
+          "type": "nav_msgs/msg/Path",
+          "count": 19
+        }
+      ]
+    }
+  ],
+  "existing_debug_extracts": [
+    {
+      "path": "/home/charles/project/colcon_ws/docs/progress/2026-09-08_relocalization_and_reverse_design/rosbag2_2026_08_29-04_28_31_extracted.json",
+      "sha256": "4a7ed8d5e0d870cb71acba5dd404ecec427664ad6680f886c59e534fa61606cc",
+      "debug_message_count": 0,
+      "payload_keys": [],
+      "possible_joint_payloads": 0
+    },
+    {
+      "path": "/home/charles/project/colcon_ws/docs/progress/2026-09-08_relocalization_and_reverse_design/rosbag2_2026_08_29-04_38_22_extracted.json",
+      "sha256": "ff574a3ac0ba499a098c2f45bfdf2861566ba98914021742b51c986c88605d57",
+      "debug_message_count": 284,
+      "payload_keys": [
+        "action",
+        "battery",
+        "owner",
+        "type",
+        "vx",
+        "vy",
+        "wz"
+      ],
+      "possible_joint_payloads": 0
+    },
+    {
+      "path": "/home/charles/project/colcon_ws/docs/progress/2026-09-08_relocalization_and_reverse_design/rosbag2_2026_08_29-04_41_05_extracted.json",
+      "sha256": "9d8d2ebda6c87a196188a33dabd395e6b47de5560865b8d8723cf9fdf1f1f6f2",
+      "debug_message_count": 5895,
+      "payload_keys": [
+        "action",
+        "battery",
+        "owner",
+        "type",
+        "vx",
+        "vy",
+        "wz"
+      ],
+      "possible_joint_payloads": 0
+    }
+  ],
+  "finding": "No joint trajectory can be inferred from base odometry or body velocity commands. Topic inventory and extracted payload evidence are separate from raw bag re-deserialization.",
+  "joint_observations_available": false
+}

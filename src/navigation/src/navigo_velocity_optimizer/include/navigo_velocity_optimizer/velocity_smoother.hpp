@@ -23,6 +23,11 @@
 #include <vector>
 
 #include "navigo_util/lifecycle_node.hpp"
+#include "navigo_core/epoch_contract.hpp"
+#include "navigo_velocity_optimizer/motion_phase.hpp"
+#include "std_msgs/msg/string.hpp"
+#include <mutex>
+#include <unordered_map>
 #include "navigo_util/node_utils.hpp"
 #include "navigo_util/odometry_utils.hpp"
 #include "navigo_util/robot_utils.hpp"
@@ -126,6 +131,24 @@ protected:
    */
   rcl_interfaces::msg::SetParametersResult dynamicParametersCallback(
     std::vector<rclcpp::Parameter> parameters);
+
+  void configureEpoch();
+  void clearEpochCommand();
+  void epochCommandCallback(navigo_epoch_msgs::msg::EpochCommand::ConstSharedPtr msg);
+  bool epoch_contract_{false};
+  navigo_core::epoch::Authority epoch_authority_;
+  std::mutex epoch_mutex_;
+  uint64_t epoch_command_ttl_ns_{300000000};
+  std::string relay_session_{navigo_core::epoch::sessionId()};
+  uint64_t relay_sequence_{0};
+  phase::Transition phase_transition_;
+  navigo_epoch_msgs::msg::EpochCommand::ConstSharedPtr epoch_command_;
+  std::unordered_map<std::string, std::pair<uint64_t, uint64_t>> source_highwater_;
+  rclcpp_lifecycle::LifecyclePublisher<navigo_epoch_msgs::msg::EpochCommand>::SharedPtr epoch_pub_;
+  rclcpp::Subscription<navigo_epoch_msgs::msg::EpochCommand>::SharedPtr epoch_sub_;
+  rclcpp::Subscription<navigo_epoch_msgs::msg::LocalizationEpoch>::SharedPtr epoch_loc_sub_;
+  rclcpp::Subscription<navigo_epoch_msgs::msg::NavigationIntent>::SharedPtr epoch_intent_sub_;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr epoch_gate_sub_;
 
   // Network interfaces
   std::unique_ptr<navigo_util::OdomSmoother> odom_smoother_;

@@ -1,0 +1,7 @@
+# Frozen 2026-09-08 test fixture only. This is not a ZSL1 body/leg envelope.
+frame_id: base_link
+footprint: [[0.30, 0.15], [0.30, -0.15], [-0.30, -0.15], [-0.30, 0.15]]
+footprint_padding: 0.01
+envelope_kind: legacy_regression_fixture
+assumptions:
+  - Historical test rectangle; does not model measured or simulated ZSL1 legs.

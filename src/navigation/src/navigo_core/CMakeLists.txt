@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.5)
 project(navigo_core)
 
 find_package(ament_cmake REQUIRED)
+find_package(navigo_epoch_msgs REQUIRED)
 find_package(nav2_common REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
@@ -22,6 +23,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 set(dependencies
+  navigo_epoch_msgs
   rclcpp
   rclcpp_lifecycle
   std_msgs

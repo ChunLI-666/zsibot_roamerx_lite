@@ -1,0 +1,150 @@
+{
+  "repo": "https://github.com/zsibot/genisom_model",
+  "commit": "e6aa98e22d38ae3fdf4d448f79820295e78e83a5",
+  "files": [
+    {
+      "path": "zsl-1/urdf/ZSL-1.urdf",
+      "url": "https://raw.githubusercontent.com/zsibot/genisom_model/e6aa98e22d38ae3fdf4d448f79820295e78e83a5/zsl-1/urdf/ZSL-1.urdf",
+      "sha256": "992c91921be1099794554295f731064d108d096a5bb6068a9cdc35eb903e0c76",
+      "remote_sha256": "992c91921be1099794554295f731064d108d096a5bb6068a9cdc35eb903e0c76",
+      "bytes": 20090,
+      "matches_remote": true
+    },
+    {
+      "path": "zsl-1/meshes/BASE_LINK.STL",
+      "url": "https://raw.githubusercontent.com/zsibot/genisom_model/e6aa98e22d38ae3fdf4d448f79820295e78e83a5/zsl-1/meshes/BASE_LINK.STL",
+      "sha256": "0845e10816311dc00dbb5a0ed093e4a8cdc9d2daa0cf9a5d103354b04eaab874",
+      "remote_sha256": "0845e10816311dc00dbb5a0ed093e4a8cdc9d2daa0cf9a5d103354b04eaab874",
+      "bytes": 3519384,
+      "matches_remote": true
+    },
+    {
+      "path": "zsl-1/meshes/FL_ABAD_LINK.STL",
+      "url": "https://raw.githubusercontent.com/zsibot/genisom_model/e6aa98e22d38ae3fdf4d448f79820295e78e83a5/zsl-1/meshes/FL_ABAD_LINK.STL",
+      "sha256": "85acafd444f4c1c5b35266d093a11700cbd80d4a9559f00901eff2b00a35366d",
+      "remote_sha256": "85acafd444f4c1c5b35266d093a11700cbd80d4a9559f00901eff2b00a35366d",
+      "bytes": 427284,
+      "matches_remote": true
+    },
+    {
+      "path": "zsl-1/meshes/FL_FOOT_LINK.STL",
+      "url": "https://raw.githubusercontent.com/zsibot/genisom_model/e6aa98e22d38ae3fdf4d448f79820295e78e83a5/zsl-1/meshes/FL_FOOT_LINK.STL",
+      "sha256": "3a1da8fd732b6679cee143892e63d9dcf77092071f0558ffb807477e3db95dc1",
+      "remote_sha256": "3a1da8fd732b6679cee143892e63d9dcf77092071f0558ffb807477e3db95dc1",
+      "bytes": 1057084,
+      "matches_remote": true
+    },
+    {
+      "path": "zsl-1/meshes/FL_HIP_LINK.STL",
+      "url": "https://raw.githubusercontent.com/zsibot/genisom_model/e6aa98e22d38ae3fdf4d448f79820295e78e83a5/zsl-1/meshes/FL_HIP_LINK.STL",
+      "sha256": "cc3036aada22acbfe56ebbd3930639f47880e6c986fe67d6f386e5d67e951721",
+      "remote_sha256": "cc3036aada22acbfe56ebbd3930639f47880e6c986fe67d6f386e5d67e951721",
+      "bytes": 56584,
+      "matches_remote": true
+    },
+    {
+      "path": "zsl-1/meshes/FL_KNEE_LINK.STL",
+      "url": "https://raw.githubusercontent.com/zsibot/genisom_model/e6aa98e22d38ae3fdf4d448f79820295e78e83a5/zsl-1/meshes/FL_KNEE_LINK.STL",
+      "sha256": "0a2b3bbe4c3cec2eb15312b3ef036e52cde50e306d8ff493c34dedd410f4d15a",
+      "remote_sha256": "0a2b3bbe4c3cec2eb15312b3ef036e52cde50e306d8ff493c34dedd410f4d15a",
+      "bytes": 650684,
+      "matches_remote": true
+    },
+    {
+      "path": "zsl-1/meshes/FR_ABAD_LINK.STL",
+      "url": "https://raw.githubusercontent.com/zsibot/genisom_model/e6aa98e22d38ae3fdf4d448f79820295e78e83a5/zsl-1/meshes/FR_ABAD_LINK.STL",
+      "sha256": "7691e27794b177db4d018ab445456064c251e1b47e1cbc71f2791eb6fd1df844",
+      "remote_sha256": "7691e27794b177db4d018ab445456064c251e1b47e1cbc71f2791eb6fd1df844",
+      "bytes": 427284,
+      "matches_remote": true
+    },
+    {
+      "path": "zsl-1/meshes/FR_FOOT_LINK.STL",
+      "url": "https://raw.githubusercontent.com/zsibot/genisom_model/e6aa98e22d38ae3fdf4d448f79820295e78e83a5/zsl-1/meshes/FR_FOOT_LINK.STL",
+      "sha256": "3a1da8fd732b6679cee143892e63d9dcf77092071f0558ffb807477e3db95dc1",
+      "remote_sha256": "3a1da8fd732b6679cee143892e63d9dcf77092071f0558ffb807477e3db95dc1",
+      "bytes": 1057084,
+      "matches_remote": true
+    },
+    {
+      "path": "zsl-1/meshes/FR_HIP_LINK.STL",
+      "url": "https://raw.githubusercontent.com/zsibot/genisom_model/e6aa98e22d38ae3fdf4d448f79820295e78e83a5/zsl-1/meshes/FR_HIP_LINK.STL",
+      "sha256": "4c816659c647ea868f37edac10599aebfe9cbae7b137e0e16a4cfff71ee026fd",
+      "remote_sha256": "4c816659c647ea868f37edac10599aebfe9cbae7b137e0e16a4cfff71ee026fd",
+      "bytes": 56584,
+      "matches_remote": true
+    },
+    {
+      "path": "zsl-1/meshes/FR_KNEE_LINK.STL",
+      "url": "https://raw.githubusercontent.com/zsibot/genisom_model/e6aa98e22d38ae3fdf4d448f79820295e78e83a5/zsl-1/meshes/FR_KNEE_LINK.STL",
+      "sha256": "0a2b3bbe4c3cec2eb15312b3ef036e52cde50e306d8ff493c34dedd410f4d15a",
+      "remote_sha256": "0a2b3bbe4c3cec2eb15312b3ef036e52cde50e306d8ff493c34dedd410f4d15a",
+      "bytes": 650684,
+      "matches_remote": true
+    },
+    {
+      "path": "zsl-1/meshes/RL_ABAD_LINK.STL",
+      "url": "https://raw.githubusercontent.com/zsibot/genisom_model/e6aa98e22d38ae3fdf4d448f79820295e78e83a5/zsl-1/meshes/RL_ABAD_LINK.STL",
+      "sha256": "cff84d06b06b742d0f110e64bc545364c9849c2717c6c95b2cc756039938dc3e",
+      "remote_sha256": "cff84d06b06b742d0f110e64bc545364c9849c2717c6c95b2cc756039938dc3e",
+      "bytes": 427284,
+      "matches_remote": true
+    },
+    {
+      "path": "zsl-1/meshes/RL_FOOT_LINK.STL",
+      "url": "https://raw.githubusercontent.com/zsibot/genisom_model/e6aa98e22d38ae3fdf4d448f79820295e78e83a5/zsl-1/meshes/RL_FOOT_LINK.STL",
+      "sha256": "3a1da8fd732b6679cee143892e63d9dcf77092071f0558ffb807477e3db95dc1",
+      "remote_sha256": "3a1da8fd732b6679cee143892e63d9dcf77092071f0558ffb807477e3db95dc1",
+      "bytes": 1057084,
+      "matches_remote": true
+    },
+    {
+      "path": "zsl-1/meshes/RL_HIP_LINK.STL",
+      "url": "https://raw.githubusercontent.com/zsibot/genisom_model/e6aa98e22d38ae3fdf4d448f79820295e78e83a5/zsl-1/meshes/RL_HIP_LINK.STL",
+      "sha256": "cc3036aada22acbfe56ebbd3930639f47880e6c986fe67d6f386e5d67e951721",
+      "remote_sha256": "cc3036aada22acbfe56ebbd3930639f47880e6c986fe67d6f386e5d67e951721",
+      "bytes": 56584,
+      "matches_remote": true
+    },
+    {
+      "path": "zsl-1/meshes/RL_KNEE_LINK.STL",
+      "url": "https://raw.githubusercontent.com/zsibot/genisom_model/e6aa98e22d38ae3fdf4d448f79820295e78e83a5/zsl-1/meshes/RL_KNEE_LINK.STL",
+      "sha256": "0a2b3bbe4c3cec2eb15312b3ef036e52cde50e306d8ff493c34dedd410f4d15a",
+      "remote_sha256": "0a2b3bbe4c3cec2eb15312b3ef036e52cde50e306d8ff493c34dedd410f4d15a",
+      "bytes": 650684,
+      "matches_remote": true
+    },
+    {
+      "path": "zsl-1/meshes/RR_ABAD_LINK.STL",
+      "url": "https://raw.githubusercontent.com/zsibot/genisom_model/e6aa98e22d38ae3fdf4d448f79820295e78e83a5/zsl-1/meshes/RR_ABAD_LINK.STL",
+      "sha256": "15538786381b8ca78ff1bdccb215f495d46f6ec20d1ec56d45208684f7d62e06",
+      "remote_sha256": "15538786381b8ca78ff1bdccb215f495d46f6ec20d1ec56d45208684f7d62e06",
+      "bytes": 427284,
+      "matches_remote": true
+    },
+    {
+      "path": "zsl-1/meshes/RR_FOOT_LINK.STL",
+      "url": "https://raw.githubusercontent.com/zsibot/genisom_model/e6aa98e22d38ae3fdf4d448f79820295e78e83a5/zsl-1/meshes/RR_FOOT_LINK.STL",
+      "sha256": "3a1da8fd732b6679cee143892e63d9dcf77092071f0558ffb807477e3db95dc1",
+      "remote_sha256": "3a1da8fd732b6679cee143892e63d9dcf77092071f0558ffb807477e3db95dc1",
+      "bytes": 1057084,
+      "matches_remote": true
+    },
+    {
+      "path": "zsl-1/meshes/RR_HIP_LINK.STL",
+      "url": "https://raw.githubusercontent.com/zsibot/genisom_model/e6aa98e22d38ae3fdf4d448f79820295e78e83a5/zsl-1/meshes/RR_HIP_LINK.STL",
+      "sha256": "4c816659c647ea868f37edac10599aebfe9cbae7b137e0e16a4cfff71ee026fd",
+      "remote_sha256": "4c816659c647ea868f37edac10599aebfe9cbae7b137e0e16a4cfff71ee026fd",
+      "bytes": 56584,
+      "matches_remote": true
+    },
+    {
+      "path": "zsl-1/meshes/RR_KNEE_LINK.STL",
+      "url": "https://raw.githubusercontent.com/zsibot/genisom_model/e6aa98e22d38ae3fdf4d448f79820295e78e83a5/zsl-1/meshes/RR_KNEE_LINK.STL",
+      "sha256": "0a2b3bbe4c3cec2eb15312b3ef036e52cde50e306d8ff493c34dedd410f4d15a",
+      "remote_sha256": "0a2b3bbe4c3cec2eb15312b3ef036e52cde50e306d8ff493c34dedd410f4d15a",
+      "bytes": 650684,
+      "matches_remote": true
+    }
+  ]
+}

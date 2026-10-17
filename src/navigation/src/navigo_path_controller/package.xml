@@ -8,6 +8,7 @@
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>navigo_epoch_msgs</depend>
   <build_depend>nav2_common</build_depend>
   <depend>angles</depend>
   <depend>rclcpp</depend>
@@ -18,6 +19,7 @@
   <depend>nav_2d_utils</depend>
   <depend>nav_2d_msgs</depend>
   <depend>navigo_core</depend>
+  <depend>navigo_costmap_2d</depend>
   <depend>pluginlib</depend>
   <depend>robots_dog_msgs</depend>
   <depend>tf2_geometry_msgs</depend>
@@ -31,4 +33,5 @@
     <build_type>ament_cmake</build_type>
     <navigo_core plugin="${prefix}/plugins.xml" />
   </export>
+  <test_depend>ament_cmake_gtest</test_depend>
 </package>

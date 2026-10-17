@@ -1,0 +1,2883 @@
+{
+  "schema_version": 1,
+  "base_commit": "6942974",
+  "production_final_commit": "4b8cb03",
+  "artifact_root": "/home/charles/project/colcon_ws/analysis_outputs/epoch_navigation_20260910",
+  "final_scenarios": 16,
+  "final_verified": 16,
+  "audit_version": "strict final: exact authority plus unchanged raw provenance; execution330ms/intent430ms including30ms observer margin",
+  "unit_tests": "14 passed",
+  "scenarios": [
+    {
+      "scenario": "normal",
+      "artifact": "/home/charles/project/colcon_ws/analysis_outputs/epoch_navigation_20260910/normal_final",
+      "final_verified": true,
+      "original_result_success": true,
+      "original_error": null,
+      "action_statuses": [
+        4
+      ],
+      "goals": [
+        {
+          "uuid": [
+            169,
+            248,
+            215,
+            239,
+            228,
+            42,
+            73,
+            203,
+            166,
+            93,
+            61,
+            5,
+            207,
+            14,
+            14,
+            215
+          ],
+          "pose": [
+            4.817459926495081,
+            0.8539874986700582,
+            0.0
+          ]
+        }
+      ],
+      "final_map_pose": [
+        4.619384422343379,
+        0.8539874986700582,
+        0.0
+      ],
+      "goal": [
+        4.817459926495081,
+        0.8539874986700582,
+        0.0
+      ],
+      "xy_error_m": 0.19807550415170194,
+      "yaw_error_rad": 0.0,
+      "geometry_checked": true,
+      "goal_tolerances": {
+        "xy": 0.25,
+        "yaw": 0.25
+      },
+      "final_safe_velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "duration_sec": 31.344668116013054,
+      "injection": [],
+      "validation_events": [
+        {
+          "monotonic_ns": 241723609800645,
+          "event": "arrival_geometry_verified",
+          "data": {
+            "xy_error": 0.19807550415170194,
+            "yaw_error": 0.0,
+            "goal_checker": {
+              "stateful": false,
+              "plugin": "navigo_path_controller::StoppedGoalChecker",
+              "xy_goal_tolerance": 0.25,
+              "yaw_goal_tolerance": 0.25,
+              "trans_stopped_velocity": 0.01,
+              "rot_stopped_velocity": 0.01
+            }
+          }
+        },
+        {
+          "monotonic_ns": 241724716452012,
+          "event": "stop_assertion_pass",
+          "data": {
+            "after_ns": 241723609844082,
+            "settle_sec": 0.3,
+            "samples": 72
+          }
+        }
+      ],
+      "nonzero_safe_samples": 440,
+      "final_audit_failures": 0,
+      "auditor_sha256": "7628f72d0422728607cb0ac4ab1040a91289b5b8016948e85bf7c5773e03cb4b",
+      "original_wire_audit_sha256": "8930119840acaab8b17aba8a9a8eac9a2c1ecfafb50b5abc9140dd00629f6366",
+      "final_wire_audit_sha256": "7607ee94337a9a2337b0cfb3eb57781251fae41f74af5b2d00b02f3be0dd398e",
+      "raw_events_sha256": "c3b2cbced6289c1dfc74ea2c8899cf57da8dfe4f8811533335abe324b11efcdc",
+      "raw_result_sha256": "344b6e52a3ac84edeb019d3955b20cac10a60a989d82a3fc78a56a7e99befa38",
+      "source_and_binary_manifest_sha256": "a0a4fc93be37d283ee734a634f9b2acc8030311f88f86049568510f5610debaa",
+      "source_and_binary_manifest_after_sha256": "92cb31124022832fc121ea677f6170d28bd47e732a86e7be24ce8bb984eb3de5",
+      "source_and_binary_files_digest": "cb08343cbc383be225edb0a5694fa651d2dac2448c85376f7208c15aba2df3ba",
+      "runtime_inputs_unchanged": true,
+      "repository_head": "4b8cb0304c6f4b32c9bdcefa36b12f79a1aebcfc",
+      "installed_binaries": [
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_behavior_tree.so",
+          "sha256": "702c48fa224052634c7f47504c24a82fbc37955a231a2a919111487481de3c42"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_epoch_navigation_bt_node.so",
+          "sha256": "391ac756a4847dc8414cdd04a80545704a8ee8bac4e1b9f57ff3d8ff2d1e5e04"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/liblayers.so",
+          "sha256": "f768dbc70999714921fbb6f3e1275505a9778c390db7f63f83414424382797c4"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/libnav2_costmap_2d_core.so",
+          "sha256": "e4a69d473499c37249ed80384ba90abbf9bf1cf0fd5b654a95c41b5e034e8b8e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_generator_c.so",
+          "sha256": "d22cbcefa6acb7db96f83987e5f42a2bb6c780e7a1761bbe125ba0eec5750299"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "73ae2e75d54969368616970d30ce9535f8f20d9ee776fb1a4e8f304259490377"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/libplanner_server_core.so",
+          "sha256": "274de863b079376e080adef9c6d98702730107aa1e7cf88d600d0affbdd090d9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/navigo_path_planner/planner_server",
+          "sha256": "42379db42da0d04e7f5d5c006cef53f5330dc14bb134dbf79b0b51413b2a3fbb"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_util/lib/libnavigo_util_core.so",
+          "sha256": "bd1075421e890952b4b031f585de966914290db2526a6f275699fde6d4b720dc"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/libvelocity_smoother_core.so",
+          "sha256": "a88c96753815066d60fea25b9d90dcb293b580deef82a072005e98cb1f158c4d"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/navigo_velocity_optimizer/velocity_smoother",
+          "sha256": "7b3428e10c747eb4fdb9977a591238b68659bb052cb12fc5dc2723cfce0f009e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_generator_c.so",
+          "sha256": "d1a64a406aa28030352bfdb2acdcbfdbca0e1445fb20c8f1ae65ae1b1c8eeda9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "13fe48ae1c385f3d3edcde8645a5784a8552f1a67044316c60edf1a76021169c"
+        }
+      ]
+    },
+    {
+      "scenario": "loss_recovery",
+      "artifact": "/home/charles/project/colcon_ws/analysis_outputs/epoch_navigation_20260910/loss_recovery_v1",
+      "final_verified": true,
+      "original_result_success": true,
+      "original_error": null,
+      "action_statuses": [
+        4
+      ],
+      "goals": [
+        {
+          "uuid": [
+            83,
+            131,
+            172,
+            94,
+            126,
+            172,
+            65,
+            227,
+            147,
+            227,
+            165,
+            109,
+            121,
+            187,
+            88,
+            87
+          ],
+          "pose": [
+            4.817459926495081,
+            0.8539874986700582,
+            0.0
+          ]
+        }
+      ],
+      "final_map_pose": [
+        4.627528453112839,
+        0.8539874986700582,
+        0.0
+      ],
+      "goal": [
+        4.817459926495081,
+        0.8539874986700582,
+        0.0
+      ],
+      "xy_error_m": 0.18993147338224237,
+      "yaw_error_rad": 0.0,
+      "geometry_checked": true,
+      "goal_tolerances": {
+        "xy": 0.25,
+        "yaw": 0.25
+      },
+      "final_safe_velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "duration_sec": 31.960591667011613,
+      "injection": [
+        {
+          "monotonic_ns": 241026323656177,
+          "event": "localization_transition",
+          "data": {
+            "health": 3,
+            "epoch": 1,
+            "commits": 1,
+            "map_offset": [
+              -0.3,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        {
+          "monotonic_ns": 241027424106527,
+          "event": "localization_transition",
+          "data": {
+            "health": 1,
+            "epoch": 2,
+            "commits": 2,
+            "map_offset": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        }
+      ],
+      "validation_events": [
+        {
+          "monotonic_ns": 241027424077450,
+          "event": "stop_assertion_pass",
+          "data": {
+            "after_ns": 241026323665701,
+            "settle_sec": 0.3,
+            "samples": 81
+          }
+        },
+        {
+          "monotonic_ns": 241050690444513,
+          "event": "stop_assertion_pass",
+          "data": {
+            "after_ns": 241049588321380,
+            "settle_sec": 0.3,
+            "samples": 72
+          }
+        }
+      ],
+      "nonzero_safe_samples": 437,
+      "final_audit_failures": 0,
+      "auditor_sha256": "7628f72d0422728607cb0ac4ab1040a91289b5b8016948e85bf7c5773e03cb4b",
+      "original_wire_audit_sha256": "da99b39dfdaf8918099fc86c53d6c664a53a83e92c65aa2d4947ee49f7f0c4da",
+      "final_wire_audit_sha256": "12b6da67353aa5669482927d805695aad105861cd1714073f6b0ef36c64115ad",
+      "raw_events_sha256": "0d3f3c740ae79b6a0de6d8ccc036ef431b80c32cb4fbbf9ed63e0ac2fe7e3253",
+      "raw_result_sha256": "ba1b133b446ba08b5413c4cd4026e8fd0511050522080bf6baf3a9023bb2b51f",
+      "source_and_binary_manifest_sha256": "ea94f81a44c0f2d44ba4f02ec426f6b593c4e8faa9a21a873fd9fa64bc1d9ba1",
+      "source_and_binary_manifest_after_sha256": "be3f58094f6d974b3ccf6e0096a9039beb9810dc47ccb8a933c719a2ff87f90f",
+      "source_and_binary_files_digest": "89d10cba20dddf5316a77dd3b31dbc77a16a279e440cedbc71cabf052f9cb683",
+      "runtime_inputs_unchanged": true,
+      "repository_head": "01adaa049d07e6b5d58b88285a00fb0f0eeb172f",
+      "installed_binaries": [
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_behavior_tree.so",
+          "sha256": "702c48fa224052634c7f47504c24a82fbc37955a231a2a919111487481de3c42"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_epoch_navigation_bt_node.so",
+          "sha256": "a63f4d072cec19d66343235743c4d500a43a179b7ae78c3f66d717c8914e7388"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/liblayers.so",
+          "sha256": "f768dbc70999714921fbb6f3e1275505a9778c390db7f63f83414424382797c4"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/libnav2_costmap_2d_core.so",
+          "sha256": "e4a69d473499c37249ed80384ba90abbf9bf1cf0fd5b654a95c41b5e034e8b8e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_generator_c.so",
+          "sha256": "d22cbcefa6acb7db96f83987e5f42a2bb6c780e7a1761bbe125ba0eec5750299"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "73ae2e75d54969368616970d30ce9535f8f20d9ee776fb1a4e8f304259490377"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/libplanner_server_core.so",
+          "sha256": "274de863b079376e080adef9c6d98702730107aa1e7cf88d600d0affbdd090d9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/navigo_path_planner/planner_server",
+          "sha256": "42379db42da0d04e7f5d5c006cef53f5330dc14bb134dbf79b0b51413b2a3fbb"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_util/lib/libnavigo_util_core.so",
+          "sha256": "bd1075421e890952b4b031f585de966914290db2526a6f275699fde6d4b720dc"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/libvelocity_smoother_core.so",
+          "sha256": "a88c96753815066d60fea25b9d90dcb293b580deef82a072005e98cb1f158c4d"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/navigo_velocity_optimizer/velocity_smoother",
+          "sha256": "7b3428e10c747eb4fdb9977a591238b68659bb052cb12fc5dc2723cfce0f009e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_generator_c.so",
+          "sha256": "d1a64a406aa28030352bfdb2acdcbfdbca0e1445fb20c8f1ae65ae1b1c8eeda9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "13fe48ae1c385f3d3edcde8645a5784a8552f1a67044316c60edf1a76021169c"
+        }
+      ]
+    },
+    {
+      "scenario": "controller_silence",
+      "artifact": "/home/charles/project/colcon_ws/analysis_outputs/epoch_navigation_20260910/controller_silence_v1",
+      "final_verified": true,
+      "original_result_success": true,
+      "original_error": null,
+      "action_statuses": [
+        5
+      ],
+      "goals": [
+        {
+          "uuid": [
+            132,
+            113,
+            12,
+            252,
+            176,
+            138,
+            66,
+            85,
+            185,
+            110,
+            60,
+            53,
+            30,
+            183,
+            38,
+            97
+          ],
+          "pose": [
+            4.817459926495081,
+            0.8539874986700582,
+            0.0
+          ]
+        }
+      ],
+      "final_map_pose": [
+        2.881326710614292,
+        0.8539874986700582,
+        0.0
+      ],
+      "goal": [
+        4.817459926495081,
+        0.8539874986700582,
+        0.0
+      ],
+      "xy_error_m": 1.9361332158807891,
+      "yaw_error_rad": 0.0,
+      "geometry_checked": false,
+      "goal_tolerances": {
+        "xy": 0.25,
+        "yaw": 0.25
+      },
+      "final_safe_velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "duration_sec": 11.252603814005852,
+      "injection": [
+        {
+          "monotonic_ns": 241028479633377,
+          "event": "clock_paused_controller_suspended",
+          "data": {
+            "pid": 1040742,
+            "clock_paused": false
+          }
+        },
+        {
+          "monotonic_ns": 241029984304006,
+          "event": "cancel_requested",
+          "data": {}
+        }
+      ],
+      "validation_events": [
+        {
+          "monotonic_ns": 241029984170926,
+          "event": "stop_assertion_pass",
+          "data": {
+            "after_ns": 241028479692109,
+            "settle_sec": 0.5,
+            "samples": 89
+          }
+        },
+        {
+          "monotonic_ns": 241031143895281,
+          "event": "stop_assertion_pass",
+          "data": {
+            "after_ns": 241029984312841,
+            "settle_sec": 0.3,
+            "samples": 78
+          }
+        }
+      ],
+      "nonzero_safe_samples": 16,
+      "final_audit_failures": 0,
+      "auditor_sha256": "7628f72d0422728607cb0ac4ab1040a91289b5b8016948e85bf7c5773e03cb4b",
+      "original_wire_audit_sha256": "5e1b90a829046d307f3920ed2e658b8bcadd548250174132219f25f6f14e39b8",
+      "final_wire_audit_sha256": "ce49e1e38ea6d66d033eeb56cc1a8fe715db2c196f4cf028b00351d95a2d16a8",
+      "raw_events_sha256": "f37340722ea8ae6937008f64438fa6f27775fd2a0b41b9cc9c30e4087c973804",
+      "raw_result_sha256": "3d52c5b6d173ef415f28617887ef70aad50f3fc1d030fcfe4e3426fe9561265f",
+      "source_and_binary_manifest_sha256": "d60d94aa55bdda638b2ef0e5b08e56e973162615377092e53c81ce20bfff2b87",
+      "source_and_binary_manifest_after_sha256": "5c18527aad4976154757b10456f339941bff735ef0795e64ef16e6d51b7076b4",
+      "source_and_binary_files_digest": "89d10cba20dddf5316a77dd3b31dbc77a16a279e440cedbc71cabf052f9cb683",
+      "runtime_inputs_unchanged": true,
+      "repository_head": "01adaa049d07e6b5d58b88285a00fb0f0eeb172f",
+      "installed_binaries": [
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_behavior_tree.so",
+          "sha256": "702c48fa224052634c7f47504c24a82fbc37955a231a2a919111487481de3c42"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_epoch_navigation_bt_node.so",
+          "sha256": "a63f4d072cec19d66343235743c4d500a43a179b7ae78c3f66d717c8914e7388"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/liblayers.so",
+          "sha256": "f768dbc70999714921fbb6f3e1275505a9778c390db7f63f83414424382797c4"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/libnav2_costmap_2d_core.so",
+          "sha256": "e4a69d473499c37249ed80384ba90abbf9bf1cf0fd5b654a95c41b5e034e8b8e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_generator_c.so",
+          "sha256": "d22cbcefa6acb7db96f83987e5f42a2bb6c780e7a1761bbe125ba0eec5750299"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "73ae2e75d54969368616970d30ce9535f8f20d9ee776fb1a4e8f304259490377"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/libplanner_server_core.so",
+          "sha256": "274de863b079376e080adef9c6d98702730107aa1e7cf88d600d0affbdd090d9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/navigo_path_planner/planner_server",
+          "sha256": "42379db42da0d04e7f5d5c006cef53f5330dc14bb134dbf79b0b51413b2a3fbb"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_util/lib/libnavigo_util_core.so",
+          "sha256": "bd1075421e890952b4b031f585de966914290db2526a6f275699fde6d4b720dc"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/libvelocity_smoother_core.so",
+          "sha256": "a88c96753815066d60fea25b9d90dcb293b580deef82a072005e98cb1f158c4d"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/navigo_velocity_optimizer/velocity_smoother",
+          "sha256": "7b3428e10c747eb4fdb9977a591238b68659bb052cb12fc5dc2723cfce0f009e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_generator_c.so",
+          "sha256": "d1a64a406aa28030352bfdb2acdcbfdbca0e1445fb20c8f1ae65ae1b1c8eeda9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "13fe48ae1c385f3d3edcde8645a5784a8552f1a67044316c60edf1a76021169c"
+        }
+      ]
+    },
+    {
+      "scenario": "clock_pause",
+      "artifact": "/home/charles/project/colcon_ws/analysis_outputs/epoch_navigation_20260910/clock_pause_v1",
+      "final_verified": true,
+      "original_result_success": true,
+      "original_error": null,
+      "action_statuses": [
+        5
+      ],
+      "goals": [
+        {
+          "uuid": [
+            252,
+            244,
+            186,
+            84,
+            150,
+            49,
+            64,
+            65,
+            179,
+            210,
+            168,
+            97,
+            145,
+            103,
+            124,
+            92
+          ],
+          "pose": [
+            4.817459926495081,
+            0.8539874986700582,
+            0.0
+          ]
+        }
+      ],
+      "final_map_pose": [
+        2.855475017162728,
+        0.8539874986700582,
+        0.0
+      ],
+      "goal": [
+        4.817459926495081,
+        0.8539874986700582,
+        0.0
+      ],
+      "xy_error_m": 1.9619849093323531,
+      "yaw_error_rad": 0.0,
+      "geometry_checked": false,
+      "goal_tolerances": {
+        "xy": 0.25,
+        "yaw": 0.25
+      },
+      "final_safe_velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "duration_sec": 10.527498601994012,
+      "injection": [
+        {
+          "monotonic_ns": 241506876424122,
+          "event": "clock_paused_controller_suspended",
+          "data": {
+            "pid": 1055934,
+            "clock_paused": true
+          }
+        },
+        {
+          "monotonic_ns": 241508382487429,
+          "event": "cancel_requested",
+          "data": {}
+        }
+      ],
+      "validation_events": [
+        {
+          "monotonic_ns": 241508382375904,
+          "event": "stop_assertion_pass",
+          "data": {
+            "after_ns": 241506876464928,
+            "settle_sec": 0.5,
+            "samples": 80
+          }
+        },
+        {
+          "monotonic_ns": 241509545737455,
+          "event": "stop_assertion_pass",
+          "data": {
+            "after_ns": 241508382495228,
+            "settle_sec": 0.3,
+            "samples": 78
+          }
+        }
+      ],
+      "nonzero_safe_samples": 16,
+      "final_audit_failures": 0,
+      "auditor_sha256": "7628f72d0422728607cb0ac4ab1040a91289b5b8016948e85bf7c5773e03cb4b",
+      "original_wire_audit_sha256": "5cfec01538dba114c3381e6713a534eb75cff4ee53671048110e530d66983fdc",
+      "final_wire_audit_sha256": "f9a4f8a918e1cfd02fdb118fa2bd92eb5a780b406c55cc099acd23821463e9ea",
+      "raw_events_sha256": "626be3a6ef3637ac4e04f72a2c317f611bf6a1b8d2506773dda0a804c2b76683",
+      "raw_result_sha256": "48079fcafa831d104d9ffcd9985cd9e44daa8942394572b2272bc211ff46691a",
+      "source_and_binary_manifest_sha256": "2d1ad3ede7049e2f9af67d18d6b9708a02b536b00554a8730c6acfc1b8b3287b",
+      "source_and_binary_manifest_after_sha256": "f534e7448e57e9dbb5475919226a04ebac48f9c7adb6d2d0f4d21ac67af9de08",
+      "source_and_binary_files_digest": "63df5dacc8c8df9714421bde5881e72048094e2ba28f39491e277ae6ab13baec",
+      "runtime_inputs_unchanged": true,
+      "repository_head": "4b8cb0304c6f4b32c9bdcefa36b12f79a1aebcfc",
+      "installed_binaries": [
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_behavior_tree.so",
+          "sha256": "702c48fa224052634c7f47504c24a82fbc37955a231a2a919111487481de3c42"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_epoch_navigation_bt_node.so",
+          "sha256": "391ac756a4847dc8414cdd04a80545704a8ee8bac4e1b9f57ff3d8ff2d1e5e04"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/liblayers.so",
+          "sha256": "f768dbc70999714921fbb6f3e1275505a9778c390db7f63f83414424382797c4"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/libnav2_costmap_2d_core.so",
+          "sha256": "e4a69d473499c37249ed80384ba90abbf9bf1cf0fd5b654a95c41b5e034e8b8e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_generator_c.so",
+          "sha256": "d22cbcefa6acb7db96f83987e5f42a2bb6c780e7a1761bbe125ba0eec5750299"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "73ae2e75d54969368616970d30ce9535f8f20d9ee776fb1a4e8f304259490377"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/libplanner_server_core.so",
+          "sha256": "274de863b079376e080adef9c6d98702730107aa1e7cf88d600d0affbdd090d9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/navigo_path_planner/planner_server",
+          "sha256": "42379db42da0d04e7f5d5c006cef53f5330dc14bb134dbf79b0b51413b2a3fbb"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_util/lib/libnavigo_util_core.so",
+          "sha256": "bd1075421e890952b4b031f585de966914290db2526a6f275699fde6d4b720dc"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/libvelocity_smoother_core.so",
+          "sha256": "a88c96753815066d60fea25b9d90dcb293b580deef82a072005e98cb1f158c4d"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/navigo_velocity_optimizer/velocity_smoother",
+          "sha256": "7b3428e10c747eb4fdb9977a591238b68659bb052cb12fc5dc2723cfce0f009e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_generator_c.so",
+          "sha256": "d1a64a406aa28030352bfdb2acdcbfdbca0e1445fb20c8f1ae65ae1b1c8eeda9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "13fe48ae1c385f3d3edcde8645a5784a8552f1a67044316c60edf1a76021169c"
+        }
+      ]
+    },
+    {
+      "scenario": "cancel",
+      "artifact": "/home/charles/project/colcon_ws/analysis_outputs/epoch_navigation_20260910/cancel_v1",
+      "final_verified": true,
+      "original_result_success": true,
+      "original_error": null,
+      "action_statuses": [
+        5
+      ],
+      "goals": [
+        {
+          "uuid": [
+            34,
+            128,
+            198,
+            243,
+            219,
+            166,
+            79,
+            55,
+            137,
+            216,
+            181,
+            248,
+            198,
+            44,
+            231,
+            227
+          ],
+          "pose": [
+            4.817459926495081,
+            0.8539874986700582,
+            0.0
+          ]
+        }
+      ],
+      "final_map_pose": [
+        2.8613697058877205,
+        0.8539874986700582,
+        0.0
+      ],
+      "goal": [
+        4.817459926495081,
+        0.8539874986700582,
+        0.0
+      ],
+      "xy_error_m": 1.9560902206073605,
+      "yaw_error_rad": 0.0,
+      "geometry_checked": false,
+      "goal_tolerances": {
+        "xy": 0.25,
+        "yaw": 0.25
+      },
+      "final_safe_velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "duration_sec": 8.618977202975657,
+      "injection": [
+        {
+          "monotonic_ns": 241519125519974,
+          "event": "cancel_requested",
+          "data": {}
+        }
+      ],
+      "validation_events": [
+        {
+          "monotonic_ns": 241520262561298,
+          "event": "stop_assertion_pass",
+          "data": {
+            "after_ns": 241519125529578,
+            "settle_sec": 0.3,
+            "samples": 74
+          }
+        }
+      ],
+      "nonzero_safe_samples": 11,
+      "final_audit_failures": 0,
+      "auditor_sha256": "7628f72d0422728607cb0ac4ab1040a91289b5b8016948e85bf7c5773e03cb4b",
+      "original_wire_audit_sha256": "1d952214f583933c8493c786ef75933108c9b219c7efccff6d389631d251aa9a",
+      "final_wire_audit_sha256": "9abab7456185a1f83daa33c095f626e3ad2cc8afad6dd8c19df4a55e78bf4f45",
+      "raw_events_sha256": "9fb5fc2d6cdab1288fdfcb8075275a80f3d283bd2bffad9e98e8d9d34b329bb6",
+      "raw_result_sha256": "71ef99279b55261fd422e8ffcfe92a41ad31243b7ed0ea7dc5c3679bd897efe2",
+      "source_and_binary_manifest_sha256": "58f9ef35ccc18278910ba3e4d673f8f464aca4ee700d4d5705c5b751b5177a37",
+      "source_and_binary_manifest_after_sha256": "907ddd624bd43155a2957b327f0950ff89533515f1972e11ea6d95ca2d26705b",
+      "source_and_binary_files_digest": "63df5dacc8c8df9714421bde5881e72048094e2ba28f39491e277ae6ab13baec",
+      "runtime_inputs_unchanged": true,
+      "repository_head": "4b8cb0304c6f4b32c9bdcefa36b12f79a1aebcfc",
+      "installed_binaries": [
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_behavior_tree.so",
+          "sha256": "702c48fa224052634c7f47504c24a82fbc37955a231a2a919111487481de3c42"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_epoch_navigation_bt_node.so",
+          "sha256": "391ac756a4847dc8414cdd04a80545704a8ee8bac4e1b9f57ff3d8ff2d1e5e04"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/liblayers.so",
+          "sha256": "f768dbc70999714921fbb6f3e1275505a9778c390db7f63f83414424382797c4"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/libnav2_costmap_2d_core.so",
+          "sha256": "e4a69d473499c37249ed80384ba90abbf9bf1cf0fd5b654a95c41b5e034e8b8e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_generator_c.so",
+          "sha256": "d22cbcefa6acb7db96f83987e5f42a2bb6c780e7a1761bbe125ba0eec5750299"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "73ae2e75d54969368616970d30ce9535f8f20d9ee776fb1a4e8f304259490377"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/libplanner_server_core.so",
+          "sha256": "274de863b079376e080adef9c6d98702730107aa1e7cf88d600d0affbdd090d9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/navigo_path_planner/planner_server",
+          "sha256": "42379db42da0d04e7f5d5c006cef53f5330dc14bb134dbf79b0b51413b2a3fbb"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_util/lib/libnavigo_util_core.so",
+          "sha256": "bd1075421e890952b4b031f585de966914290db2526a6f275699fde6d4b720dc"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/libvelocity_smoother_core.so",
+          "sha256": "a88c96753815066d60fea25b9d90dcb293b580deef82a072005e98cb1f158c4d"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/navigo_velocity_optimizer/velocity_smoother",
+          "sha256": "7b3428e10c747eb4fdb9977a591238b68659bb052cb12fc5dc2723cfce0f009e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_generator_c.so",
+          "sha256": "d1a64a406aa28030352bfdb2acdcbfdbca0e1445fb20c8f1ae65ae1b1c8eeda9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "13fe48ae1c385f3d3edcde8645a5784a8552f1a67044316c60edf1a76021169c"
+        }
+      ]
+    },
+    {
+      "scenario": "pending_planner",
+      "artifact": "/home/charles/project/colcon_ws/analysis_outputs/epoch_navigation_20260910/pending_planner_v1",
+      "final_verified": true,
+      "original_result_success": true,
+      "original_error": null,
+      "action_statuses": [
+        4
+      ],
+      "goals": [
+        {
+          "uuid": [
+            67,
+            212,
+            206,
+            177,
+            110,
+            108,
+            65,
+            14,
+            168,
+            70,
+            138,
+            2,
+            198,
+            72,
+            195,
+            123
+          ],
+          "pose": [
+            4.817459926495081,
+            0.8539874986700582,
+            0.0
+          ]
+        }
+      ],
+      "final_map_pose": [
+        4.627781480413586,
+        0.8539874986700582,
+        0.0
+      ],
+      "goal": [
+        4.817459926495081,
+        0.8539874986700582,
+        0.0
+      ],
+      "xy_error_m": 0.1896784460814951,
+      "yaw_error_rad": 0.0,
+      "geometry_checked": true,
+      "goal_tolerances": {
+        "xy": 0.25,
+        "yaw": 0.25
+      },
+      "final_safe_velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "duration_sec": 32.24541933598812,
+      "injection": [
+        {
+          "monotonic_ns": 241214012239996,
+          "event": "localization_transition",
+          "data": {
+            "health": 3,
+            "epoch": 1,
+            "commits": 1,
+            "map_offset": [
+              -0.3,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        {
+          "monotonic_ns": 241215119621336,
+          "event": "localization_transition",
+          "data": {
+            "health": 1,
+            "epoch": 2,
+            "commits": 2,
+            "map_offset": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        {
+          "monotonic_ns": 241215639986597,
+          "event": "old_backend_result_released",
+          "data": {
+            "epoch": 2
+          }
+        }
+      ],
+      "validation_events": [
+        {
+          "monotonic_ns": 241215119554830,
+          "event": "stop_assertion_pass",
+          "data": {
+            "after_ns": 241214012252425,
+            "settle_sec": 0.3,
+            "samples": 80
+          }
+        },
+        {
+          "monotonic_ns": 241239587881295,
+          "event": "stop_assertion_pass",
+          "data": {
+            "after_ns": 241238486316948,
+            "settle_sec": 0.3,
+            "samples": 73
+          }
+        }
+      ],
+      "nonzero_safe_samples": 434,
+      "final_audit_failures": 0,
+      "auditor_sha256": "7628f72d0422728607cb0ac4ab1040a91289b5b8016948e85bf7c5773e03cb4b",
+      "original_wire_audit_sha256": "79adbdd70e2c270dedd5a995eb36115f825fb743fa09ea7cb64bde107fc129f3",
+      "final_wire_audit_sha256": "5799faa4bede2b5606b9b05b74f42a0c566b5a6d602c992744b5d91fb8809407",
+      "raw_events_sha256": "5d830b7edc0ee371e79c78320bfbb62c44c09b0fa860bea2039bfde30ed40920",
+      "raw_result_sha256": "577421886954c2e7606e5987fece2255db482756cebda59be21c53635e4f3d5b",
+      "source_and_binary_manifest_sha256": "d1fa3f60098cd7116e418b3514ff840688d0bb2c49c5c1dbf69de36179fbfdf3",
+      "source_and_binary_manifest_after_sha256": "8c2c8b8ee23aec60d583ffa15b1663b77129b52fa4f45e5593402335a00a334d",
+      "source_and_binary_files_digest": "4ef91467398d1a3b93bc737a16bff99177fa20fb45b84e47774693f539addaeb",
+      "runtime_inputs_unchanged": true,
+      "repository_head": "4b8cb0304c6f4b32c9bdcefa36b12f79a1aebcfc",
+      "installed_binaries": [
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_behavior_tree.so",
+          "sha256": "702c48fa224052634c7f47504c24a82fbc37955a231a2a919111487481de3c42"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_epoch_navigation_bt_node.so",
+          "sha256": "391ac756a4847dc8414cdd04a80545704a8ee8bac4e1b9f57ff3d8ff2d1e5e04"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/liblayers.so",
+          "sha256": "f768dbc70999714921fbb6f3e1275505a9778c390db7f63f83414424382797c4"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/libnav2_costmap_2d_core.so",
+          "sha256": "e4a69d473499c37249ed80384ba90abbf9bf1cf0fd5b654a95c41b5e034e8b8e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_generator_c.so",
+          "sha256": "d22cbcefa6acb7db96f83987e5f42a2bb6c780e7a1761bbe125ba0eec5750299"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "73ae2e75d54969368616970d30ce9535f8f20d9ee776fb1a4e8f304259490377"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/libplanner_server_core.so",
+          "sha256": "274de863b079376e080adef9c6d98702730107aa1e7cf88d600d0affbdd090d9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/navigo_path_planner/planner_server",
+          "sha256": "42379db42da0d04e7f5d5c006cef53f5330dc14bb134dbf79b0b51413b2a3fbb"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_util/lib/libnavigo_util_core.so",
+          "sha256": "bd1075421e890952b4b031f585de966914290db2526a6f275699fde6d4b720dc"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/libvelocity_smoother_core.so",
+          "sha256": "a88c96753815066d60fea25b9d90dcb293b580deef82a072005e98cb1f158c4d"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/navigo_velocity_optimizer/velocity_smoother",
+          "sha256": "7b3428e10c747eb4fdb9977a591238b68659bb052cb12fc5dc2723cfce0f009e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_generator_c.so",
+          "sha256": "d1a64a406aa28030352bfdb2acdcbfdbca0e1445fb20c8f1ae65ae1b1c8eeda9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "13fe48ae1c385f3d3edcde8645a5784a8552f1a67044316c60edf1a76021169c"
+        }
+      ]
+    },
+    {
+      "scenario": "pending_smoother",
+      "artifact": "/home/charles/project/colcon_ws/analysis_outputs/epoch_navigation_20260910/pending_smoother_v2",
+      "final_verified": true,
+      "original_result_success": true,
+      "original_error": null,
+      "action_statuses": [
+        4
+      ],
+      "goals": [
+        {
+          "uuid": [
+            111,
+            241,
+            6,
+            145,
+            136,
+            75,
+            72,
+            190,
+            129,
+            155,
+            43,
+            94,
+            136,
+            125,
+            94,
+            223
+          ],
+          "pose": [
+            4.817459926495081,
+            0.8539874986700582,
+            0.0
+          ]
+        }
+      ],
+      "final_map_pose": [
+        4.620998620879788,
+        0.8539874986700582,
+        0.0
+      ],
+      "goal": [
+        4.817459926495081,
+        0.8539874986700582,
+        0.0
+      ],
+      "xy_error_m": 0.1964613056152933,
+      "yaw_error_rad": 0.0,
+      "geometry_checked": true,
+      "goal_tolerances": {
+        "xy": 0.25,
+        "yaw": 0.25
+      },
+      "final_safe_velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "duration_sec": 32.94844689001911,
+      "injection": [
+        {
+          "monotonic_ns": 241432503500521,
+          "event": "localization_transition",
+          "data": {
+            "health": 3,
+            "epoch": 1,
+            "commits": 1,
+            "map_offset": [
+              -0.3,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        {
+          "monotonic_ns": 241433605815425,
+          "event": "localization_transition",
+          "data": {
+            "health": 1,
+            "epoch": 2,
+            "commits": 2,
+            "map_offset": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        {
+          "monotonic_ns": 241434145311764,
+          "event": "old_backend_result_released",
+          "data": {
+            "epoch": 2
+          }
+        }
+      ],
+      "validation_events": [
+        {
+          "monotonic_ns": 241433605761063,
+          "event": "stop_assertion_pass",
+          "data": {
+            "after_ns": 241432503512340,
+            "settle_sec": 0.3,
+            "samples": 80
+          }
+        },
+        {
+          "monotonic_ns": 241434148912647,
+          "event": "late_result_delivery_verified",
+          "data": {
+            "result_sha256": "302872d9a278e9a50aa45752ca3ab175245d45cd1a75ae9f0f4e0aecd69275c4",
+            "release_after_ns": 241434145267816
+          }
+        },
+        {
+          "monotonic_ns": 241456906828683,
+          "event": "arrival_geometry_verified",
+          "data": {
+            "xy_error": 0.1964613056152933,
+            "yaw_error": 0.0,
+            "goal_checker": {
+              "stateful": false,
+              "plugin": "navigo_path_controller::StoppedGoalChecker",
+              "xy_goal_tolerance": 0.25,
+              "yaw_goal_tolerance": 0.25,
+              "trans_stopped_velocity": 0.01,
+              "rot_stopped_velocity": 0.01
+            }
+          }
+        },
+        {
+          "monotonic_ns": 241458010984693,
+          "event": "stop_assertion_pass",
+          "data": {
+            "after_ns": 241456906879038,
+            "settle_sec": 0.3,
+            "samples": 72
+          }
+        }
+      ],
+      "nonzero_safe_samples": 432,
+      "final_audit_failures": 0,
+      "auditor_sha256": "7628f72d0422728607cb0ac4ab1040a91289b5b8016948e85bf7c5773e03cb4b",
+      "original_wire_audit_sha256": "3ce4c80d869abf2d7fb8a35f7a6ea874a10862eab1dff20eee0dd6f0001dd955",
+      "final_wire_audit_sha256": "3b4a91aba00bb88a609d28fa36191c59c8aa6687d13439bc5a7681eb3aa4ad18",
+      "raw_events_sha256": "69f59c14e75e69888949b5f147363e81da37fde4afa01d139b6d3878c10c21fc",
+      "raw_result_sha256": "05f6e60c0d82958bba34555a2e5446ead56cbe08125ed4e6343d3788336d0586",
+      "source_and_binary_manifest_sha256": "154a1cd552658d374f2769b2ed1105d34ce88376c4d06f7675bc7e5f845eaaeb",
+      "source_and_binary_manifest_after_sha256": "a5325ed25f21619b12c2416dae82ba6d5cbdb125c93015c9dd184c5dcefba4e8",
+      "source_and_binary_files_digest": "89a812ad521dce56845aa766c5c70d2c2274c2c7065413eaca023359813aa0de",
+      "runtime_inputs_unchanged": true,
+      "repository_head": "4b8cb0304c6f4b32c9bdcefa36b12f79a1aebcfc",
+      "installed_binaries": [
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_behavior_tree.so",
+          "sha256": "702c48fa224052634c7f47504c24a82fbc37955a231a2a919111487481de3c42"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_epoch_navigation_bt_node.so",
+          "sha256": "391ac756a4847dc8414cdd04a80545704a8ee8bac4e1b9f57ff3d8ff2d1e5e04"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/liblayers.so",
+          "sha256": "f768dbc70999714921fbb6f3e1275505a9778c390db7f63f83414424382797c4"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/libnav2_costmap_2d_core.so",
+          "sha256": "e4a69d473499c37249ed80384ba90abbf9bf1cf0fd5b654a95c41b5e034e8b8e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_generator_c.so",
+          "sha256": "d22cbcefa6acb7db96f83987e5f42a2bb6c780e7a1761bbe125ba0eec5750299"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "73ae2e75d54969368616970d30ce9535f8f20d9ee776fb1a4e8f304259490377"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/libplanner_server_core.so",
+          "sha256": "274de863b079376e080adef9c6d98702730107aa1e7cf88d600d0affbdd090d9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/navigo_path_planner/planner_server",
+          "sha256": "42379db42da0d04e7f5d5c006cef53f5330dc14bb134dbf79b0b51413b2a3fbb"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_util/lib/libnavigo_util_core.so",
+          "sha256": "bd1075421e890952b4b031f585de966914290db2526a6f275699fde6d4b720dc"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/libvelocity_smoother_core.so",
+          "sha256": "a88c96753815066d60fea25b9d90dcb293b580deef82a072005e98cb1f158c4d"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/navigo_velocity_optimizer/velocity_smoother",
+          "sha256": "7b3428e10c747eb4fdb9977a591238b68659bb052cb12fc5dc2723cfce0f009e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_generator_c.so",
+          "sha256": "d1a64a406aa28030352bfdb2acdcbfdbca0e1445fb20c8f1ae65ae1b1c8eeda9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "13fe48ae1c385f3d3edcde8645a5784a8552f1a67044316c60edf1a76021169c"
+        }
+      ]
+    },
+    {
+      "scenario": "through_poses",
+      "artifact": "/home/charles/project/colcon_ws/analysis_outputs/epoch_navigation_20260910/through_poses_v1",
+      "final_verified": true,
+      "original_result_success": true,
+      "original_error": null,
+      "action_statuses": [
+        4
+      ],
+      "goals": [
+        {
+          "uuid": [
+            144,
+            2,
+            216,
+            215,
+            203,
+            163,
+            72,
+            188,
+            131,
+            174,
+            68,
+            59,
+            238,
+            6,
+            134,
+            175
+          ],
+          "poses": [
+            [
+              3.517459926495081,
+              0.8539874986700582,
+              0.0
+            ],
+            [
+              4.817459926495081,
+              0.8539874986700582,
+              0.0
+            ]
+          ],
+          "action": "NavigateThroughPoses"
+        }
+      ],
+      "final_map_pose": [
+        4.619455296531549,
+        0.8539874986700582,
+        0.0
+      ],
+      "goal": [
+        4.817459926495081,
+        0.8539874986700582,
+        0.0
+      ],
+      "xy_error_m": 0.19800462996353208,
+      "yaw_error_rad": 0.0,
+      "geometry_checked": true,
+      "goal_tolerances": {
+        "xy": 0.25,
+        "yaw": 0.25
+      },
+      "final_safe_velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "duration_sec": 31.31304624900804,
+      "injection": [],
+      "validation_events": [
+        {
+          "monotonic_ns": 241458919041912,
+          "event": "through_pruning_verified",
+          "data": {
+            "min_remaining": 1,
+            "max_remaining": 2
+          }
+        },
+        {
+          "monotonic_ns": 241458932328918,
+          "event": "arrival_geometry_verified",
+          "data": {
+            "xy_error": 0.19800462996353208,
+            "yaw_error": 0.0,
+            "goal_checker": {
+              "stateful": false,
+              "plugin": "navigo_path_controller::StoppedGoalChecker",
+              "xy_goal_tolerance": 0.25,
+              "yaw_goal_tolerance": 0.25,
+              "trans_stopped_velocity": 0.01,
+              "rot_stopped_velocity": 0.01
+            }
+          }
+        },
+        {
+          "monotonic_ns": 241460038913331,
+          "event": "stop_assertion_pass",
+          "data": {
+            "after_ns": 241458932371853,
+            "settle_sec": 0.3,
+            "samples": 72
+          }
+        }
+      ],
+      "nonzero_safe_samples": 440,
+      "final_audit_failures": 0,
+      "auditor_sha256": "7628f72d0422728607cb0ac4ab1040a91289b5b8016948e85bf7c5773e03cb4b",
+      "original_wire_audit_sha256": "92a395630c5d25323625437cd3c773b4fd30a70f374083b57dc02734b7b5e2a4",
+      "final_wire_audit_sha256": "7f30dbe4780aefe01ed54c2f4fc4cdd7ac7325ec5dcd00fe5c63d6d722f10ee6",
+      "raw_events_sha256": "1fbc1f3bff385457b17c578fdfb4c65220f81d30266db2d365e732ef487edec4",
+      "raw_result_sha256": "7d01b7e35689a00b587760482efdf1c93f794a7c39f04f438320160cb2e88636",
+      "source_and_binary_manifest_sha256": "d4c16c154760ab14e02386c517b4023fcb9db35dc83968a07ccbe3234f7875b4",
+      "source_and_binary_manifest_after_sha256": "43a6eb30db929f45bc5f615510834818bd545fc3531c0c15382edbe5f4bb1e27",
+      "source_and_binary_files_digest": "89a812ad521dce56845aa766c5c70d2c2274c2c7065413eaca023359813aa0de",
+      "runtime_inputs_unchanged": true,
+      "repository_head": "4b8cb0304c6f4b32c9bdcefa36b12f79a1aebcfc",
+      "installed_binaries": [
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_behavior_tree.so",
+          "sha256": "702c48fa224052634c7f47504c24a82fbc37955a231a2a919111487481de3c42"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_epoch_navigation_bt_node.so",
+          "sha256": "391ac756a4847dc8414cdd04a80545704a8ee8bac4e1b9f57ff3d8ff2d1e5e04"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/liblayers.so",
+          "sha256": "f768dbc70999714921fbb6f3e1275505a9778c390db7f63f83414424382797c4"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/libnav2_costmap_2d_core.so",
+          "sha256": "e4a69d473499c37249ed80384ba90abbf9bf1cf0fd5b654a95c41b5e034e8b8e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_generator_c.so",
+          "sha256": "d22cbcefa6acb7db96f83987e5f42a2bb6c780e7a1761bbe125ba0eec5750299"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "73ae2e75d54969368616970d30ce9535f8f20d9ee776fb1a4e8f304259490377"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/libplanner_server_core.so",
+          "sha256": "274de863b079376e080adef9c6d98702730107aa1e7cf88d600d0affbdd090d9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/navigo_path_planner/planner_server",
+          "sha256": "42379db42da0d04e7f5d5c006cef53f5330dc14bb134dbf79b0b51413b2a3fbb"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_util/lib/libnavigo_util_core.so",
+          "sha256": "bd1075421e890952b4b031f585de966914290db2526a6f275699fde6d4b720dc"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/libvelocity_smoother_core.so",
+          "sha256": "a88c96753815066d60fea25b9d90dcb293b580deef82a072005e98cb1f158c4d"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/navigo_velocity_optimizer/velocity_smoother",
+          "sha256": "7b3428e10c747eb4fdb9977a591238b68659bb052cb12fc5dc2723cfce0f009e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_generator_c.so",
+          "sha256": "d1a64a406aa28030352bfdb2acdcbfdbca0e1445fb20c8f1ae65ae1b1c8eeda9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "13fe48ae1c385f3d3edcde8645a5784a8552f1a67044316c60edf1a76021169c"
+        }
+      ]
+    },
+    {
+      "scenario": "gate_restart",
+      "artifact": "/home/charles/project/colcon_ws/analysis_outputs/epoch_navigation_20260910/gate_restart_v1",
+      "final_verified": true,
+      "original_result_success": true,
+      "original_error": null,
+      "action_statuses": [
+        4
+      ],
+      "goals": [
+        {
+          "uuid": [
+            71,
+            208,
+            78,
+            232,
+            171,
+            151,
+            69,
+            197,
+            143,
+            93,
+            1,
+            39,
+            70,
+            167,
+            233,
+            80
+          ],
+          "pose": [
+            4.817459926495081,
+            0.8539874986700582,
+            0.0
+          ]
+        }
+      ],
+      "final_map_pose": [
+        4.625490409105476,
+        0.8539874986700582,
+        0.0
+      ],
+      "goal": [
+        4.817459926495081,
+        0.8539874986700582,
+        0.0
+      ],
+      "xy_error_m": 0.19196951738960522,
+      "yaw_error_rad": 0.0,
+      "geometry_checked": true,
+      "goal_tolerances": {
+        "xy": 0.25,
+        "yaw": 0.25
+      },
+      "final_safe_velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "duration_sec": 33.836106485978235,
+      "injection": [
+        {
+          "monotonic_ns": 241508689565522,
+          "event": "gate_restart",
+          "data": {
+            "old_session": "581de040-ca30-4ff1-8518-2917db466192"
+          }
+        }
+      ],
+      "validation_events": [
+        {
+          "monotonic_ns": 241533076494421,
+          "event": "arrival_geometry_verified",
+          "data": {
+            "xy_error": 0.19196951738960522,
+            "yaw_error": 0.0,
+            "goal_checker": {
+              "stateful": false,
+              "plugin": "navigo_path_controller::StoppedGoalChecker",
+              "xy_goal_tolerance": 0.25,
+              "yaw_goal_tolerance": 0.25,
+              "trans_stopped_velocity": 0.01,
+              "rot_stopped_velocity": 0.01
+            }
+          }
+        },
+        {
+          "monotonic_ns": 241534187703180,
+          "event": "stop_assertion_pass",
+          "data": {
+            "after_ns": 241533076531503,
+            "settle_sec": 0.3,
+            "samples": 72
+          }
+        }
+      ],
+      "nonzero_safe_samples": 425,
+      "final_audit_failures": 0,
+      "auditor_sha256": "7628f72d0422728607cb0ac4ab1040a91289b5b8016948e85bf7c5773e03cb4b",
+      "original_wire_audit_sha256": "118e3cb500ec8df92c5e06a0f6f11ef5439d87fa0864f03402030e6fc35e4cb4",
+      "final_wire_audit_sha256": "1ffca828aa07b636ed52dff1418d8d36a3418075b31729ef65e8625e41c5ae45",
+      "raw_events_sha256": "c810d1288aa92e339bbc3014c6dc89075e17eda4884e9b1f391633c1fd324ed9",
+      "raw_result_sha256": "0385296c37b085ba78cd9df55ccdb4f781d4673f860c03fcac3cf70e3f2def9d",
+      "source_and_binary_manifest_sha256": "1d597487e8f76cd047177e05549eef9572ec96d224ab8be693fe6e42654d7ea9",
+      "source_and_binary_manifest_after_sha256": "ef6a9a601a0d43bb209f5c57468404b209f3786ea727a5017da1830e686c61e5",
+      "source_and_binary_files_digest": "63df5dacc8c8df9714421bde5881e72048094e2ba28f39491e277ae6ab13baec",
+      "runtime_inputs_unchanged": true,
+      "repository_head": "4b8cb0304c6f4b32c9bdcefa36b12f79a1aebcfc",
+      "installed_binaries": [
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_behavior_tree.so",
+          "sha256": "702c48fa224052634c7f47504c24a82fbc37955a231a2a919111487481de3c42"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_epoch_navigation_bt_node.so",
+          "sha256": "391ac756a4847dc8414cdd04a80545704a8ee8bac4e1b9f57ff3d8ff2d1e5e04"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/liblayers.so",
+          "sha256": "f768dbc70999714921fbb6f3e1275505a9778c390db7f63f83414424382797c4"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/libnav2_costmap_2d_core.so",
+          "sha256": "e4a69d473499c37249ed80384ba90abbf9bf1cf0fd5b654a95c41b5e034e8b8e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_generator_c.so",
+          "sha256": "d22cbcefa6acb7db96f83987e5f42a2bb6c780e7a1761bbe125ba0eec5750299"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "73ae2e75d54969368616970d30ce9535f8f20d9ee776fb1a4e8f304259490377"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/libplanner_server_core.so",
+          "sha256": "274de863b079376e080adef9c6d98702730107aa1e7cf88d600d0affbdd090d9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/navigo_path_planner/planner_server",
+          "sha256": "42379db42da0d04e7f5d5c006cef53f5330dc14bb134dbf79b0b51413b2a3fbb"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_util/lib/libnavigo_util_core.so",
+          "sha256": "bd1075421e890952b4b031f585de966914290db2526a6f275699fde6d4b720dc"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/libvelocity_smoother_core.so",
+          "sha256": "a88c96753815066d60fea25b9d90dcb293b580deef82a072005e98cb1f158c4d"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/navigo_velocity_optimizer/velocity_smoother",
+          "sha256": "7b3428e10c747eb4fdb9977a591238b68659bb052cb12fc5dc2723cfce0f009e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_generator_c.so",
+          "sha256": "d1a64a406aa28030352bfdb2acdcbfdbca0e1445fb20c8f1ae65ae1b1c8eeda9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "13fe48ae1c385f3d3edcde8645a5784a8552f1a67044316c60edf1a76021169c"
+        }
+      ]
+    },
+    {
+      "scenario": "localization_session",
+      "artifact": "/home/charles/project/colcon_ws/analysis_outputs/epoch_navigation_20260910/localization_session_v1",
+      "final_verified": true,
+      "original_result_success": false,
+      "original_error": "Independent wire audit failed; inspect wire_audit.json",
+      "action_statuses": [
+        4
+      ],
+      "goals": [
+        {
+          "uuid": [
+            232,
+            206,
+            181,
+            156,
+            66,
+            56,
+            70,
+            146,
+            156,
+            187,
+            65,
+            221,
+            182,
+            151,
+            81,
+            198
+          ],
+          "pose": [
+            4.817459926495081,
+            0.8539874986700582,
+            0.0
+          ]
+        }
+      ],
+      "final_map_pose": [
+        4.623389108304368,
+        0.8539874986700582,
+        0.0
+      ],
+      "goal": [
+        4.817459926495081,
+        0.8539874986700582,
+        0.0
+      ],
+      "xy_error_m": 0.19407081819071337,
+      "yaw_error_rad": 0.0,
+      "geometry_checked": true,
+      "goal_tolerances": {
+        "xy": 0.25,
+        "yaw": 0.25
+      },
+      "final_safe_velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "duration_sec": 32.40287418398657,
+      "injection": [
+        {
+          "monotonic_ns": 241544144339815,
+          "event": "localization_transition",
+          "data": {
+            "health": 3,
+            "epoch": 1,
+            "commits": 1,
+            "map_offset": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        {
+          "monotonic_ns": 241545244990976,
+          "event": "localization_session_replaced",
+          "data": {
+            "old_session": "e820d587-c1c3-49e5-b188-2839821eb38a",
+            "new_session": "aba58862-1199-4719-a507-7819b98e43c6",
+            "map_instance_unchanged": "fixture-map-82410167-f689-4482-b0dd-b7537f6da9fa"
+          }
+        }
+      ],
+      "validation_events": [
+        {
+          "monotonic_ns": 241545244933993,
+          "event": "stop_assertion_pass",
+          "data": {
+            "after_ns": 241544144352355,
+            "settle_sec": 0.3,
+            "samples": 80
+          }
+        },
+        {
+          "monotonic_ns": 241567509983871,
+          "event": "arrival_geometry_verified",
+          "data": {
+            "xy_error": 0.19407081819071337,
+            "yaw_error": 0.0,
+            "goal_checker": {
+              "stateful": false,
+              "plugin": "navigo_path_controller::StoppedGoalChecker",
+              "xy_goal_tolerance": 0.25,
+              "yaw_goal_tolerance": 0.25,
+              "trans_stopped_velocity": 0.01,
+              "rot_stopped_velocity": 0.01
+            }
+          }
+        },
+        {
+          "monotonic_ns": 241568611656123,
+          "event": "stop_assertion_pass",
+          "data": {
+            "after_ns": 241567510030329,
+            "settle_sec": 0.3,
+            "samples": 72
+          }
+        }
+      ],
+      "nonzero_safe_samples": 439,
+      "final_audit_failures": 0,
+      "auditor_sha256": "7628f72d0422728607cb0ac4ab1040a91289b5b8016948e85bf7c5773e03cb4b",
+      "original_wire_audit_sha256": "5825ce0068b824728c806e8a81a59ba0af5e3b250bc91e76c5e0d122532e6ed6",
+      "final_wire_audit_sha256": "57d73773bbf47628a466493a1c8622212c0f15e4e0054e65d998a05fdaf7a53b",
+      "raw_events_sha256": "768c07b25dbaa6fb01514475d4da1efc980e7da7b159d346400ab17235f49bd1",
+      "raw_result_sha256": "da3d76e84b90a81117e00f525a475447268846054a6919a33a7be65036eec506",
+      "source_and_binary_manifest_sha256": "c032099339fa10e2d3d1f677e73b0d460ceae87036c0e2c26a579a7180d59010",
+      "source_and_binary_manifest_after_sha256": "6065789f8577967f72e0958f058a540e70d2ba0fde79f2ae70b010968e923bda",
+      "source_and_binary_files_digest": "63df5dacc8c8df9714421bde5881e72048094e2ba28f39491e277ae6ab13baec",
+      "runtime_inputs_unchanged": true,
+      "repository_head": "4b8cb0304c6f4b32c9bdcefa36b12f79a1aebcfc",
+      "installed_binaries": [
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_behavior_tree.so",
+          "sha256": "702c48fa224052634c7f47504c24a82fbc37955a231a2a919111487481de3c42"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_epoch_navigation_bt_node.so",
+          "sha256": "391ac756a4847dc8414cdd04a80545704a8ee8bac4e1b9f57ff3d8ff2d1e5e04"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/liblayers.so",
+          "sha256": "f768dbc70999714921fbb6f3e1275505a9778c390db7f63f83414424382797c4"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/libnav2_costmap_2d_core.so",
+          "sha256": "e4a69d473499c37249ed80384ba90abbf9bf1cf0fd5b654a95c41b5e034e8b8e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_generator_c.so",
+          "sha256": "d22cbcefa6acb7db96f83987e5f42a2bb6c780e7a1761bbe125ba0eec5750299"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "73ae2e75d54969368616970d30ce9535f8f20d9ee776fb1a4e8f304259490377"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/libplanner_server_core.so",
+          "sha256": "274de863b079376e080adef9c6d98702730107aa1e7cf88d600d0affbdd090d9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/navigo_path_planner/planner_server",
+          "sha256": "42379db42da0d04e7f5d5c006cef53f5330dc14bb134dbf79b0b51413b2a3fbb"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_util/lib/libnavigo_util_core.so",
+          "sha256": "bd1075421e890952b4b031f585de966914290db2526a6f275699fde6d4b720dc"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/libvelocity_smoother_core.so",
+          "sha256": "a88c96753815066d60fea25b9d90dcb293b580deef82a072005e98cb1f158c4d"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/navigo_velocity_optimizer/velocity_smoother",
+          "sha256": "7b3428e10c747eb4fdb9977a591238b68659bb052cb12fc5dc2723cfce0f009e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_generator_c.so",
+          "sha256": "d1a64a406aa28030352bfdb2acdcbfdbca0e1445fb20c8f1ae65ae1b1c8eeda9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "13fe48ae1c385f3d3edcde8645a5784a8552f1a67044316c60edf1a76021169c"
+        }
+      ]
+    },
+    {
+      "scenario": "command_reorder",
+      "artifact": "/home/charles/project/colcon_ws/analysis_outputs/epoch_navigation_20260910/command_reorder_v1",
+      "final_verified": true,
+      "original_result_success": true,
+      "original_error": null,
+      "action_statuses": [
+        5
+      ],
+      "goals": [
+        {
+          "uuid": [
+            5,
+            85,
+            216,
+            177,
+            10,
+            94,
+            73,
+            107,
+            173,
+            129,
+            117,
+            148,
+            109,
+            162,
+            152,
+            196
+          ],
+          "pose": [
+            4.817459926495081,
+            0.8539874986700582,
+            0.0
+          ]
+        }
+      ],
+      "final_map_pose": [
+        2.8835477521199473,
+        0.8539874986700582,
+        0.0
+      ],
+      "goal": [
+        4.817459926495081,
+        0.8539874986700582,
+        0.0
+      ],
+      "xy_error_m": 1.9339121743751337,
+      "yaw_error_rad": 0.0,
+      "geometry_checked": false,
+      "goal_tolerances": {
+        "xy": 0.25,
+        "yaw": 0.25
+      },
+      "final_safe_velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "duration_sec": 9.479548721021274,
+      "injection": [
+        {
+          "monotonic_ns": 241529526663410,
+          "event": "reordered_command_injection",
+          "data": {
+            "older_sequence": 8,
+            "accepted_sequence": 9,
+            "source_age_ms": 162.10342
+          }
+        },
+        {
+          "monotonic_ns": 241530186443170,
+          "event": "cancel_requested",
+          "data": {}
+        }
+      ],
+      "validation_events": [
+        {
+          "monotonic_ns": 241530186198454,
+          "event": "stop_assertion_pass",
+          "data": {
+            "after_ns": 241529526658623,
+            "settle_sec": 0.1,
+            "samples": 54
+          }
+        },
+        {
+          "monotonic_ns": 241530186376933,
+          "event": "fresh_reorder_stop_verified",
+          "data": {
+            "source_age_at_zero_ms": 163.697077,
+            "max_age_ms": 300
+          }
+        },
+        {
+          "monotonic_ns": 241531370477447,
+          "event": "stop_assertion_pass",
+          "data": {
+            "after_ns": 241530186457783,
+            "settle_sec": 0.3,
+            "samples": 80
+          }
+        }
+      ],
+      "nonzero_safe_samples": 17,
+      "final_audit_failures": 0,
+      "auditor_sha256": "7628f72d0422728607cb0ac4ab1040a91289b5b8016948e85bf7c5773e03cb4b",
+      "original_wire_audit_sha256": "7bac145c29438328805183306c672869a8f7eed3c5e62232e18f5121bf2266c1",
+      "final_wire_audit_sha256": "94bebe63b3ae9c76a106dbb399620fc2db94862c91f6bd9eddb94a7801fee7cf",
+      "raw_events_sha256": "7e2312661d546d913036086a7b85d5d2c8b258e5154118ad669f678414e190d4",
+      "raw_result_sha256": "2bf28f992c0131df5fec0181502847a0d9687a91ac624cdf8d32edb302efc10f",
+      "source_and_binary_manifest_sha256": "db30885aca880cb07be93127b199cda5244040c3c0ef40f0613497c05b63ed40",
+      "source_and_binary_manifest_after_sha256": "480d314c7abaf2bcc0371fc535a3c3376367bbbaadc8047e46ad432611988539",
+      "source_and_binary_files_digest": "63df5dacc8c8df9714421bde5881e72048094e2ba28f39491e277ae6ab13baec",
+      "runtime_inputs_unchanged": true,
+      "repository_head": "4b8cb0304c6f4b32c9bdcefa36b12f79a1aebcfc",
+      "installed_binaries": [
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_behavior_tree.so",
+          "sha256": "702c48fa224052634c7f47504c24a82fbc37955a231a2a919111487481de3c42"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_epoch_navigation_bt_node.so",
+          "sha256": "391ac756a4847dc8414cdd04a80545704a8ee8bac4e1b9f57ff3d8ff2d1e5e04"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/liblayers.so",
+          "sha256": "f768dbc70999714921fbb6f3e1275505a9778c390db7f63f83414424382797c4"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/libnav2_costmap_2d_core.so",
+          "sha256": "e4a69d473499c37249ed80384ba90abbf9bf1cf0fd5b654a95c41b5e034e8b8e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_generator_c.so",
+          "sha256": "d22cbcefa6acb7db96f83987e5f42a2bb6c780e7a1761bbe125ba0eec5750299"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "73ae2e75d54969368616970d30ce9535f8f20d9ee776fb1a4e8f304259490377"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/libplanner_server_core.so",
+          "sha256": "274de863b079376e080adef9c6d98702730107aa1e7cf88d600d0affbdd090d9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/navigo_path_planner/planner_server",
+          "sha256": "42379db42da0d04e7f5d5c006cef53f5330dc14bb134dbf79b0b51413b2a3fbb"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_util/lib/libnavigo_util_core.so",
+          "sha256": "bd1075421e890952b4b031f585de966914290db2526a6f275699fde6d4b720dc"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/libvelocity_smoother_core.so",
+          "sha256": "a88c96753815066d60fea25b9d90dcb293b580deef82a072005e98cb1f158c4d"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/navigo_velocity_optimizer/velocity_smoother",
+          "sha256": "7b3428e10c747eb4fdb9977a591238b68659bb052cb12fc5dc2723cfce0f009e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_generator_c.so",
+          "sha256": "d1a64a406aa28030352bfdb2acdcbfdbca0e1445fb20c8f1ae65ae1b1c8eeda9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "13fe48ae1c385f3d3edcde8645a5784a8552f1a67044316c60edf1a76021169c"
+        }
+      ]
+    },
+    {
+      "scenario": "preempt",
+      "artifact": "/home/charles/project/colcon_ws/analysis_outputs/epoch_navigation_20260910/preempt_v1",
+      "final_verified": true,
+      "original_result_success": true,
+      "original_error": null,
+      "action_statuses": [
+        4
+      ],
+      "goals": [
+        {
+          "uuid": [
+            146,
+            73,
+            146,
+            65,
+            35,
+            77,
+            66,
+            10,
+            142,
+            201,
+            42,
+            165,
+            89,
+            16,
+            249,
+            9
+          ],
+          "pose": [
+            4.817459926495081,
+            0.8539874986700582,
+            0.0
+          ]
+        },
+        {
+          "uuid": [
+            135,
+            122,
+            199,
+            57,
+            119,
+            85,
+            75,
+            13,
+            164,
+            247,
+            51,
+            218,
+            237,
+            205,
+            97,
+            41
+          ],
+          "pose": [
+            3.817459926495081,
+            1.3539874986700582,
+            0.0
+          ]
+        }
+      ],
+      "final_map_pose": [
+        3.760076087458081,
+        1.1707354739552385,
+        0.24404537840334992
+      ],
+      "goal": [
+        3.817459926495081,
+        1.3539874986700582,
+        0.0
+      ],
+      "xy_error_m": 0.19202658551540522,
+      "yaw_error_rad": 0.24404537840334992,
+      "geometry_checked": true,
+      "goal_tolerances": {
+        "xy": 0.25,
+        "yaw": 0.25
+      },
+      "final_safe_velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "duration_sec": 42.96963433799101,
+      "injection": [
+        {
+          "monotonic_ns": 241579227214798,
+          "event": "preempted_action_terminal",
+          "data": {
+            "status": 6,
+            "old_token": {
+              "localization": {
+                "process_session_id": "274ae6b4-7528-4ed3-9ec7-3f6473002748",
+                "map_loaded_instance": "fixture-map-5406e4cc-66ad-4b27-b869-b13ca6030cf9",
+                "epoch": 1,
+                "commits": 1
+              },
+              "navigation_session_id": "0d65f00f-de4e-469c-9f35-6552d383c37d",
+              "task_sequence": 1,
+              "plan_sequence": 1,
+              "gate_session_id": "a49bd0c3-ddb3-49f6-ad5b-a905e459ffab"
+            }
+          }
+        }
+      ],
+      "validation_events": [
+        {
+          "monotonic_ns": 241612233885112,
+          "event": "arrival_geometry_verified",
+          "data": {
+            "xy_error": 0.19202658551540522,
+            "yaw_error": 0.24404537840334992,
+            "goal_checker": {
+              "stateful": false,
+              "plugin": "navigo_path_controller::StoppedGoalChecker",
+              "xy_goal_tolerance": 0.25,
+              "yaw_goal_tolerance": 0.25,
+              "trans_stopped_velocity": 0.01,
+              "rot_stopped_velocity": 0.01
+            }
+          }
+        },
+        {
+          "monotonic_ns": 241613336995810,
+          "event": "stop_assertion_pass",
+          "data": {
+            "after_ns": 241612233931000,
+            "settle_sec": 0.3,
+            "samples": 72
+          }
+        }
+      ],
+      "nonzero_safe_samples": 637,
+      "final_audit_failures": 0,
+      "auditor_sha256": "7628f72d0422728607cb0ac4ab1040a91289b5b8016948e85bf7c5773e03cb4b",
+      "original_wire_audit_sha256": "bcb742be5ca5389e9b6cbde3944090e2f7ae59774f5c40965724e85bd7a084e0",
+      "final_wire_audit_sha256": "270acfc13e88349de8a81cf92a436f00fab22d13f543c0a2f8f864c99fee15c4",
+      "raw_events_sha256": "2631e63a3a232d40cf38f182ebc2df33f9820f1ca17ea087b9b0a0c1057ab919",
+      "raw_result_sha256": "6bc5e1f440ebfdb090b75fdfa2bc087e9249577968820320fb971e0d16bb8005",
+      "source_and_binary_manifest_sha256": "8928143d7954094b4e6700612d0255685648af07dd3e244cb5a3172ba92d1c54",
+      "source_and_binary_manifest_after_sha256": "5e27bea8403162d12ed4431092bc6427860983d12e3273907688e98ce1347a30",
+      "source_and_binary_files_digest": "63df5dacc8c8df9714421bde5881e72048094e2ba28f39491e277ae6ab13baec",
+      "runtime_inputs_unchanged": true,
+      "repository_head": "4b8cb0304c6f4b32c9bdcefa36b12f79a1aebcfc",
+      "installed_binaries": [
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_behavior_tree.so",
+          "sha256": "702c48fa224052634c7f47504c24a82fbc37955a231a2a919111487481de3c42"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_epoch_navigation_bt_node.so",
+          "sha256": "391ac756a4847dc8414cdd04a80545704a8ee8bac4e1b9f57ff3d8ff2d1e5e04"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/liblayers.so",
+          "sha256": "f768dbc70999714921fbb6f3e1275505a9778c390db7f63f83414424382797c4"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/libnav2_costmap_2d_core.so",
+          "sha256": "e4a69d473499c37249ed80384ba90abbf9bf1cf0fd5b654a95c41b5e034e8b8e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_generator_c.so",
+          "sha256": "d22cbcefa6acb7db96f83987e5f42a2bb6c780e7a1761bbe125ba0eec5750299"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "73ae2e75d54969368616970d30ce9535f8f20d9ee776fb1a4e8f304259490377"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/libplanner_server_core.so",
+          "sha256": "274de863b079376e080adef9c6d98702730107aa1e7cf88d600d0affbdd090d9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/navigo_path_planner/planner_server",
+          "sha256": "42379db42da0d04e7f5d5c006cef53f5330dc14bb134dbf79b0b51413b2a3fbb"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_util/lib/libnavigo_util_core.so",
+          "sha256": "bd1075421e890952b4b031f585de966914290db2526a6f275699fde6d4b720dc"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/libvelocity_smoother_core.so",
+          "sha256": "a88c96753815066d60fea25b9d90dcb293b580deef82a072005e98cb1f158c4d"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/navigo_velocity_optimizer/velocity_smoother",
+          "sha256": "7b3428e10c747eb4fdb9977a591238b68659bb052cb12fc5dc2723cfce0f009e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_generator_c.so",
+          "sha256": "d1a64a406aa28030352bfdb2acdcbfdbca0e1445fb20c8f1ae65ae1b1c8eeda9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "13fe48ae1c385f3d3edcde8645a5784a8552f1a67044316c60edf1a76021169c"
+        }
+      ]
+    },
+    {
+      "scenario": "pose_mismatch",
+      "artifact": "/home/charles/project/colcon_ws/analysis_outputs/epoch_navigation_20260910/pose_mismatch_v1",
+      "final_verified": true,
+      "original_result_success": true,
+      "original_error": null,
+      "action_statuses": [
+        4
+      ],
+      "goals": [
+        {
+          "uuid": [
+            121,
+            17,
+            43,
+            3,
+            70,
+            202,
+            74,
+            226,
+            149,
+            234,
+            155,
+            40,
+            94,
+            93,
+            15,
+            54
+          ],
+          "pose": [
+            4.817459926495081,
+            0.8539874986700582,
+            0.0
+          ]
+        }
+      ],
+      "final_map_pose": [
+        4.620606291092867,
+        0.8539874986700582,
+        0.0
+      ],
+      "goal": [
+        4.817459926495081,
+        0.8539874986700582,
+        0.0
+      ],
+      "xy_error_m": 0.19685363540221434,
+      "yaw_error_rad": 0.0,
+      "geometry_checked": true,
+      "goal_tolerances": {
+        "xy": 0.25,
+        "yaw": 0.25
+      },
+      "final_safe_velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "duration_sec": 32.03833254100755,
+      "injection": [
+        {
+          "monotonic_ns": 241541770871236,
+          "event": "typed_pose_bias_removed",
+          "data": {}
+        }
+      ],
+      "validation_events": [
+        {
+          "monotonic_ns": 241541770719175,
+          "event": "stop_assertion_pass",
+          "data": {
+            "after_ns": 241539469470879,
+            "settle_sec": 0.3,
+            "samples": 208
+          }
+        },
+        {
+          "monotonic_ns": 241564083261504,
+          "event": "arrival_geometry_verified",
+          "data": {
+            "xy_error": 0.19685363540221434,
+            "yaw_error": 0.0,
+            "goal_checker": {
+              "stateful": false,
+              "plugin": "navigo_path_controller::StoppedGoalChecker",
+              "xy_goal_tolerance": 0.25,
+              "yaw_goal_tolerance": 0.25,
+              "trans_stopped_velocity": 0.01,
+              "rot_stopped_velocity": 0.01
+            }
+          }
+        },
+        {
+          "monotonic_ns": 241565184597252,
+          "event": "stop_assertion_pass",
+          "data": {
+            "after_ns": 241564083305067,
+            "settle_sec": 0.3,
+            "samples": 72
+          }
+        }
+      ],
+      "nonzero_safe_samples": 433,
+      "final_audit_failures": 0,
+      "auditor_sha256": "7628f72d0422728607cb0ac4ab1040a91289b5b8016948e85bf7c5773e03cb4b",
+      "original_wire_audit_sha256": "d97a2534413d869d57a6c6598e94752891ed66d54f7beab6014aa430c05741b1",
+      "final_wire_audit_sha256": "2fd7146be500cc2204eeadd48a43f1edf14d6436819641a53ae29c288910711d",
+      "raw_events_sha256": "ef7f377985a48639a64bb71ecf679cd74f30419823a62f5363d4ceb4d3a3ceb1",
+      "raw_result_sha256": "bed0ee9f6f5c3b4a7e6c5f31e28389d995617a3b46492e0a130bf2ba2de3e5fa",
+      "source_and_binary_manifest_sha256": "574c3126352f9abb0de63490bf4bacbffc74b50cf4cfcb77e880865567a240b1",
+      "source_and_binary_manifest_after_sha256": "ae59fe3d555496d826e21666d06aa33c7e926310c92773a03415da539b8f18bf",
+      "source_and_binary_files_digest": "63df5dacc8c8df9714421bde5881e72048094e2ba28f39491e277ae6ab13baec",
+      "runtime_inputs_unchanged": true,
+      "repository_head": "4b8cb0304c6f4b32c9bdcefa36b12f79a1aebcfc",
+      "installed_binaries": [
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_behavior_tree.so",
+          "sha256": "702c48fa224052634c7f47504c24a82fbc37955a231a2a919111487481de3c42"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_epoch_navigation_bt_node.so",
+          "sha256": "391ac756a4847dc8414cdd04a80545704a8ee8bac4e1b9f57ff3d8ff2d1e5e04"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/liblayers.so",
+          "sha256": "f768dbc70999714921fbb6f3e1275505a9778c390db7f63f83414424382797c4"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/libnav2_costmap_2d_core.so",
+          "sha256": "e4a69d473499c37249ed80384ba90abbf9bf1cf0fd5b654a95c41b5e034e8b8e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_generator_c.so",
+          "sha256": "d22cbcefa6acb7db96f83987e5f42a2bb6c780e7a1761bbe125ba0eec5750299"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "73ae2e75d54969368616970d30ce9535f8f20d9ee776fb1a4e8f304259490377"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/libplanner_server_core.so",
+          "sha256": "274de863b079376e080adef9c6d98702730107aa1e7cf88d600d0affbdd090d9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/navigo_path_planner/planner_server",
+          "sha256": "42379db42da0d04e7f5d5c006cef53f5330dc14bb134dbf79b0b51413b2a3fbb"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_util/lib/libnavigo_util_core.so",
+          "sha256": "bd1075421e890952b4b031f585de966914290db2526a6f275699fde6d4b720dc"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/libvelocity_smoother_core.so",
+          "sha256": "a88c96753815066d60fea25b9d90dcb293b580deef82a072005e98cb1f158c4d"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/navigo_velocity_optimizer/velocity_smoother",
+          "sha256": "7b3428e10c747eb4fdb9977a591238b68659bb052cb12fc5dc2723cfce0f009e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_generator_c.so",
+          "sha256": "d1a64a406aa28030352bfdb2acdcbfdbca0e1445fb20c8f1ae65ae1b1c8eeda9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "13fe48ae1c385f3d3edcde8645a5784a8552f1a67044316c60edf1a76021169c"
+        }
+      ]
+    },
+    {
+      "scenario": "future_tf",
+      "artifact": "/home/charles/project/colcon_ws/analysis_outputs/epoch_navigation_20260910/future_tf_v1",
+      "final_verified": true,
+      "original_result_success": true,
+      "original_error": null,
+      "action_statuses": [
+        4
+      ],
+      "goals": [
+        {
+          "uuid": [
+            204,
+            178,
+            95,
+            191,
+            224,
+            87,
+            70,
+            152,
+            180,
+            231,
+            250,
+            218,
+            89,
+            16,
+            131,
+            79
+          ],
+          "pose": [
+            4.817459926495081,
+            0.8539874986700582,
+            0.0
+          ]
+        }
+      ],
+      "final_map_pose": [
+        4.62327224682507,
+        0.8539874986700582,
+        0.0
+      ],
+      "goal": [
+        4.817459926495081,
+        0.8539874986700582,
+        0.0
+      ],
+      "xy_error_m": 0.19418767967001127,
+      "yaw_error_rad": 0.0,
+      "geometry_checked": true,
+      "goal_tolerances": {
+        "xy": 0.25,
+        "yaw": 0.25
+      },
+      "final_safe_velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "duration_sec": 31.402868895005668,
+      "injection": [
+        {
+          "monotonic_ns": 241574703726366,
+          "event": "old_future_tf_inserted",
+          "data": {
+            "future_sec": 3.0,
+            "wrong_x": 1.0
+          }
+        }
+      ],
+      "validation_events": [
+        {
+          "monotonic_ns": 241576212804293,
+          "event": "source_pose_under_future_tf_verified",
+          "data": {
+            "samples": 13
+          }
+        },
+        {
+          "monotonic_ns": 241596980804198,
+          "event": "arrival_geometry_verified",
+          "data": {
+            "xy_error": 0.19418767967001127,
+            "yaw_error": 0.0,
+            "goal_checker": {
+              "stateful": false,
+              "plugin": "navigo_path_controller::StoppedGoalChecker",
+              "xy_goal_tolerance": 0.25,
+              "yaw_goal_tolerance": 0.25,
+              "trans_stopped_velocity": 0.01,
+              "rot_stopped_velocity": 0.01
+            }
+          }
+        },
+        {
+          "monotonic_ns": 241598082759263,
+          "event": "stop_assertion_pass",
+          "data": {
+            "after_ns": 241596980846925,
+            "settle_sec": 0.3,
+            "samples": 72
+          }
+        }
+      ],
+      "nonzero_safe_samples": 446,
+      "final_audit_failures": 0,
+      "auditor_sha256": "7628f72d0422728607cb0ac4ab1040a91289b5b8016948e85bf7c5773e03cb4b",
+      "original_wire_audit_sha256": "83688452f62429210ffbbe1d9095dfad900506f421caca8456fe5b18441d271d",
+      "final_wire_audit_sha256": "179b18b986900ef029baa4248fd924bb001b27bb5b3ae62d303c16def4aed816",
+      "raw_events_sha256": "611990994b93a88c4de9c7cd8108b3db8e82660c0b3445ca1a626b04f3611ee4",
+      "raw_result_sha256": "a36a457e4c0fe1f7da1c464e18b1f073453b73fc1f38e35c485a0fae5212f9bd",
+      "source_and_binary_manifest_sha256": "c1c55d3074e3d09dcf9329a89a3bda11f9602d600b5e595083280046e449270d",
+      "source_and_binary_manifest_after_sha256": "1bc9902e1a2083e3b9234172625eabc463abfa3d348052c1db25d6f240b25cfb",
+      "source_and_binary_files_digest": "63df5dacc8c8df9714421bde5881e72048094e2ba28f39491e277ae6ab13baec",
+      "runtime_inputs_unchanged": true,
+      "repository_head": "4b8cb0304c6f4b32c9bdcefa36b12f79a1aebcfc",
+      "installed_binaries": [
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_behavior_tree.so",
+          "sha256": "702c48fa224052634c7f47504c24a82fbc37955a231a2a919111487481de3c42"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_epoch_navigation_bt_node.so",
+          "sha256": "391ac756a4847dc8414cdd04a80545704a8ee8bac4e1b9f57ff3d8ff2d1e5e04"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/liblayers.so",
+          "sha256": "f768dbc70999714921fbb6f3e1275505a9778c390db7f63f83414424382797c4"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/libnav2_costmap_2d_core.so",
+          "sha256": "e4a69d473499c37249ed80384ba90abbf9bf1cf0fd5b654a95c41b5e034e8b8e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_generator_c.so",
+          "sha256": "d22cbcefa6acb7db96f83987e5f42a2bb6c780e7a1761bbe125ba0eec5750299"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "73ae2e75d54969368616970d30ce9535f8f20d9ee776fb1a4e8f304259490377"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/libplanner_server_core.so",
+          "sha256": "274de863b079376e080adef9c6d98702730107aa1e7cf88d600d0affbdd090d9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/navigo_path_planner/planner_server",
+          "sha256": "42379db42da0d04e7f5d5c006cef53f5330dc14bb134dbf79b0b51413b2a3fbb"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_util/lib/libnavigo_util_core.so",
+          "sha256": "bd1075421e890952b4b031f585de966914290db2526a6f275699fde6d4b720dc"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/libvelocity_smoother_core.so",
+          "sha256": "a88c96753815066d60fea25b9d90dcb293b580deef82a072005e98cb1f158c4d"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/navigo_velocity_optimizer/velocity_smoother",
+          "sha256": "7b3428e10c747eb4fdb9977a591238b68659bb052cb12fc5dc2723cfce0f009e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_generator_c.so",
+          "sha256": "d1a64a406aa28030352bfdb2acdcbfdbca0e1445fb20c8f1ae65ae1b1c8eeda9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "13fe48ae1c385f3d3edcde8645a5784a8552f1a67044316c60edf1a76021169c"
+        }
+      ]
+    },
+    {
+      "scenario": "bare_recovery",
+      "artifact": "/home/charles/project/colcon_ws/analysis_outputs/epoch_navigation_20260910/bare_recovery_v1",
+      "final_verified": true,
+      "original_result_success": true,
+      "original_error": null,
+      "action_statuses": [
+        5
+      ],
+      "goals": [
+        {
+          "uuid": [
+            227,
+            165,
+            24,
+            179,
+            64,
+            131,
+            78,
+            60,
+            163,
+            28,
+            245,
+            57,
+            62,
+            15,
+            204,
+            21
+          ],
+          "pose": [
+            4.817459926495081,
+            0.8539874986700582,
+            0.0
+          ]
+        }
+      ],
+      "final_map_pose": [
+        2.857189981210374,
+        0.8539874986700582,
+        0.0
+      ],
+      "goal": [
+        4.817459926495081,
+        0.8539874986700582,
+        0.0
+      ],
+      "xy_error_m": 1.9602699452847072,
+      "yaw_error_rad": 0.0,
+      "geometry_checked": false,
+      "goal_tolerances": {
+        "xy": 0.25,
+        "yaw": 0.25
+      },
+      "final_safe_velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "duration_sec": 11.862755298003322,
+      "injection": [
+        {
+          "monotonic_ns": 241622614918802,
+          "event": "localization_transition",
+          "data": {
+            "health": 3,
+            "epoch": 1,
+            "commits": 1,
+            "map_offset": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        {
+          "monotonic_ns": 241623125858412,
+          "event": "bare_behavior_started",
+          "data": {
+            "action": "/spin"
+          }
+        },
+        {
+          "monotonic_ns": 241624338199521,
+          "event": "bare_behavior_started",
+          "data": {
+            "action": "/backup"
+          }
+        },
+        {
+          "monotonic_ns": 241625543007799,
+          "event": "cancel_requested",
+          "data": {}
+        }
+      ],
+      "validation_events": [
+        {
+          "monotonic_ns": 241624126894695,
+          "event": "stop_assertion_pass",
+          "data": {
+            "after_ns": 241623125857263,
+            "settle_sec": 0.2,
+            "samples": 80
+          }
+        },
+        {
+          "monotonic_ns": 241624127742391,
+          "event": "bare_behavior_blocked",
+          "data": {
+            "action": "/spin",
+            "raw_samples": 10
+          }
+        },
+        {
+          "monotonic_ns": 241625338734175,
+          "event": "stop_assertion_pass",
+          "data": {
+            "after_ns": 241624338198379,
+            "settle_sec": 0.2,
+            "samples": 80
+          }
+        },
+        {
+          "monotonic_ns": 241625339457358,
+          "event": "bare_behavior_blocked",
+          "data": {
+            "action": "/backup",
+            "raw_samples": 10
+          }
+        },
+        {
+          "monotonic_ns": 241626695283466,
+          "event": "stop_assertion_pass",
+          "data": {
+            "after_ns": 241625543017040,
+            "settle_sec": 0.3,
+            "samples": 75
+          }
+        }
+      ],
+      "nonzero_safe_samples": 11,
+      "final_audit_failures": 0,
+      "auditor_sha256": "7628f72d0422728607cb0ac4ab1040a91289b5b8016948e85bf7c5773e03cb4b",
+      "original_wire_audit_sha256": "f2934a9a30b59adb26c58639007658b5fcbcd63b0db568fd6bb9e99e1424d3f9",
+      "final_wire_audit_sha256": "3a49fa6e2cd082ca15cef7aed17cdba043881b2d97f5a6c1b7b150f6a5730e77",
+      "raw_events_sha256": "0b3da9f22bcfdc7e5916e4ff12724cae3b66789bcf118ab5a9183c77f676dfee",
+      "raw_result_sha256": "ed2f84d6e42fa124c4eeae2c1abd5acd6075d75ceac0b7262d6a157b5e80e266",
+      "source_and_binary_manifest_sha256": "e2628c00751cf7f8173633d77c618067ac0d66aa5bc5f50c7992a833cfe5fc6a",
+      "source_and_binary_manifest_after_sha256": "7d71cec0c39b4af51bd3f270c31d5bde59311db0c8cd38735625032e1c5f8bb6",
+      "source_and_binary_files_digest": "63df5dacc8c8df9714421bde5881e72048094e2ba28f39491e277ae6ab13baec",
+      "runtime_inputs_unchanged": true,
+      "repository_head": "4b8cb0304c6f4b32c9bdcefa36b12f79a1aebcfc",
+      "installed_binaries": [
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_behavior_tree.so",
+          "sha256": "702c48fa224052634c7f47504c24a82fbc37955a231a2a919111487481de3c42"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_epoch_navigation_bt_node.so",
+          "sha256": "391ac756a4847dc8414cdd04a80545704a8ee8bac4e1b9f57ff3d8ff2d1e5e04"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/liblayers.so",
+          "sha256": "f768dbc70999714921fbb6f3e1275505a9778c390db7f63f83414424382797c4"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/libnav2_costmap_2d_core.so",
+          "sha256": "e4a69d473499c37249ed80384ba90abbf9bf1cf0fd5b654a95c41b5e034e8b8e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_generator_c.so",
+          "sha256": "d22cbcefa6acb7db96f83987e5f42a2bb6c780e7a1761bbe125ba0eec5750299"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "73ae2e75d54969368616970d30ce9535f8f20d9ee776fb1a4e8f304259490377"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/libplanner_server_core.so",
+          "sha256": "274de863b079376e080adef9c6d98702730107aa1e7cf88d600d0affbdd090d9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/navigo_path_planner/planner_server",
+          "sha256": "42379db42da0d04e7f5d5c006cef53f5330dc14bb134dbf79b0b51413b2a3fbb"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_util/lib/libnavigo_util_core.so",
+          "sha256": "bd1075421e890952b4b031f585de966914290db2526a6f275699fde6d4b720dc"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/libvelocity_smoother_core.so",
+          "sha256": "a88c96753815066d60fea25b9d90dcb293b580deef82a072005e98cb1f158c4d"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/navigo_velocity_optimizer/velocity_smoother",
+          "sha256": "7b3428e10c747eb4fdb9977a591238b68659bb052cb12fc5dc2723cfce0f009e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_generator_c.so",
+          "sha256": "d1a64a406aa28030352bfdb2acdcbfdbca0e1445fb20c8f1ae65ae1b1c8eeda9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "13fe48ae1c385f3d3edcde8645a5784a8552f1a67044316c60edf1a76021169c"
+        }
+      ]
+    },
+    {
+      "scenario": "stuck_replan",
+      "artifact": "/home/charles/project/colcon_ws/analysis_outputs/epoch_navigation_20260910/stuck_replan_v1",
+      "final_verified": true,
+      "original_result_success": true,
+      "original_error": null,
+      "action_statuses": [
+        5
+      ],
+      "goals": [
+        {
+          "uuid": [
+            131,
+            196,
+            119,
+            41,
+            82,
+            46,
+            78,
+            165,
+            173,
+            138,
+            30,
+            64,
+            170,
+            187,
+            229,
+            93
+          ],
+          "pose": [
+            4.817459926495081,
+            0.8539874986700582,
+            0.0
+          ]
+        }
+      ],
+      "final_map_pose": [
+        2.8554955033756246,
+        0.8539874986700582,
+        0.0
+      ],
+      "goal": [
+        4.817459926495081,
+        0.8539874986700582,
+        0.0
+      ],
+      "xy_error_m": 1.9619644231194564,
+      "yaw_error_rad": 0.0,
+      "geometry_checked": false,
+      "goal_tolerances": {
+        "xy": 0.25,
+        "yaw": 0.25
+      },
+      "final_safe_velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "duration_sec": 24.183692589984275,
+      "injection": [
+        {
+          "monotonic_ns": 241636640277653,
+          "event": "plant_motion_blocked",
+          "data": {}
+        },
+        {
+          "monotonic_ns": 241651118513778,
+          "event": "cancel_requested",
+          "data": {}
+        }
+      ],
+      "validation_events": [
+        {
+          "monotonic_ns": 241651118487578,
+          "event": "stuck_timeout_verified",
+          "data": {
+            "distinct_plans": 11,
+            "elapsed_sec": 14.478207314
+          }
+        },
+        {
+          "monotonic_ns": 241652311582993,
+          "event": "stop_assertion_pass",
+          "data": {
+            "after_ns": 241651118520016,
+            "settle_sec": 0.3,
+            "samples": 80
+          }
+        }
+      ],
+      "nonzero_safe_samples": 300,
+      "final_audit_failures": 0,
+      "auditor_sha256": "7628f72d0422728607cb0ac4ab1040a91289b5b8016948e85bf7c5773e03cb4b",
+      "original_wire_audit_sha256": "ff0815b19a6c4d51f08ae23021328898ce012d990938fdc45b9c18a956d26fce",
+      "final_wire_audit_sha256": "7b75cc1d40786120dd56c6f7a8d328cf2248eebe312810ee06a9e9d7f1c6835a",
+      "raw_events_sha256": "36e22163c3d650afc51f81c31900d4882975086bc4d47dea53c1bfe10a3b0e4a",
+      "raw_result_sha256": "c490d83c0d8bbb9f9d9aabcd7d2b721cd888f63782b231a390b089340040a03d",
+      "source_and_binary_manifest_sha256": "945821d0cd6fd03c74efd0055f1cc2bc2f1f1e5b599b15f194b39814daef5c68",
+      "source_and_binary_manifest_after_sha256": "85d13e1971be010d27fe198a8914082f1f3ceeb2ce324c24c2530751eb07e2ee",
+      "source_and_binary_files_digest": "63df5dacc8c8df9714421bde5881e72048094e2ba28f39491e277ae6ab13baec",
+      "runtime_inputs_unchanged": true,
+      "repository_head": "4b8cb0304c6f4b32c9bdcefa36b12f79a1aebcfc",
+      "installed_binaries": [
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_behavior_tree.so",
+          "sha256": "702c48fa224052634c7f47504c24a82fbc37955a231a2a919111487481de3c42"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_behavior_tree/lib/libnavigo_epoch_navigation_bt_node.so",
+          "sha256": "391ac756a4847dc8414cdd04a80545704a8ee8bac4e1b9f57ff3d8ff2d1e5e04"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/liblayers.so",
+          "sha256": "f768dbc70999714921fbb6f3e1275505a9778c390db7f63f83414424382797c4"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_costmap_2d/lib/libnav2_costmap_2d_core.so",
+          "sha256": "e4a69d473499c37249ed80384ba90abbf9bf1cf0fd5b654a95c41b5e034e8b8e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_generator_c.so",
+          "sha256": "d22cbcefa6acb7db96f83987e5f42a2bb6c780e7a1761bbe125ba0eec5750299"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_epoch_msgs/lib/libnavigo_epoch_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "73ae2e75d54969368616970d30ce9535f8f20d9ee776fb1a4e8f304259490377"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/libplanner_server_core.so",
+          "sha256": "274de863b079376e080adef9c6d98702730107aa1e7cf88d600d0affbdd090d9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_path_planner/lib/navigo_path_planner/planner_server",
+          "sha256": "42379db42da0d04e7f5d5c006cef53f5330dc14bb134dbf79b0b51413b2a3fbb"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_util/lib/libnavigo_util_core.so",
+          "sha256": "bd1075421e890952b4b031f585de966914290db2526a6f275699fde6d4b720dc"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/libvelocity_smoother_core.so",
+          "sha256": "a88c96753815066d60fea25b9d90dcb293b580deef82a072005e98cb1f158c4d"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/navigo_velocity_optimizer/lib/navigo_velocity_optimizer/velocity_smoother",
+          "sha256": "7b3428e10c747eb4fdb9977a591238b68659bb052cb12fc5dc2723cfce0f009e"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_generator_c.so",
+          "sha256": "d1a64a406aa28030352bfdb2acdcbfdbca0e1445fb20c8f1ae65ae1b1c8eeda9"
+        },
+        {
+          "path": "/home/charles/project/colcon_ws/install/robots_dog_msgs/lib/librobots_dog_msgs__rosidl_typesupport_cpp.so",
+          "sha256": "13fe48ae1c385f3d3edcde8645a5784a8552f1a67044316c60edf1a76021169c"
+        }
+      ]
+    }
+  ],
+  "failed_development_runs": [
+    {
+      "artifact": "/home/charles/project/colcon_ws/analysis_outputs/epoch_navigation_20260910/normal_v1",
+      "result": {
+        "scenario": "normal",
+        "domain": 188,
+        "success": false,
+        "error": "TypeError('Object of type uint8 is not JSON serializable')",
+        "duration_sec": 6.935931766987778,
+        "wire_audit_failures": 0
+      }
+    },
+    {
+      "artifact": "/home/charles/project/colcon_ws/analysis_outputs/epoch_navigation_20260910/normal_v2",
+      "result": {
+        "scenario": "normal",
+        "domain": 188,
+        "success": false,
+        "error": "TimeoutError('Real NavigateToPose completion')",
+        "duration_sec": 97.41371690598316,
+        "wire_audit_failures": 0
+      }
+    },
+    {
+      "artifact": "/home/charles/project/colcon_ws/analysis_outputs/epoch_navigation_20260910/pending_smoother_v1",
+      "result": {
+        "scenario": "pending_smoother",
+        "domain": 190,
+        "success": false,
+        "error": "TimeoutError('Real backend result captured and held')",
+        "duration_sec": 20.750082148006186,
+        "final_map_pose": [
+          3.5789059368794645,
+          0.8539874986700582,
+          0.0
+        ],
+        "final_odom_pose": [
+          3.8789059368794643,
+          0.8539874986700582,
+          0.0
+        ],
+        "final_safe_velocity": [
+          0.08273905515670776,
+          0.0,
+          0.0
+        ],
+        "goal": [
+          4.817459926495081,
+          0.8539874986700582,
+          0.0
+        ],
+        "xy_error_m": 1.2385539896156166,
+        "yaw_error_rad": 0.0,
+        "accepted_goals": [
+          {
+            "uuid": [
+              61,
+              199,
+              119,
+              210,
+              117,
+              82,
+              73,
+              189,
+              190,
+              118,
+              40,
+              254,
+              2,
+              215,
+              212,
+              42
+            ],
+            "pose": [
+              4.817459926495081,
+              0.8539874986700582,
+              0.0
+            ]
+          }
+        ],
+        "action_statuses": [],
+        "injection_evidence": [],
+        "runtime_inputs_unchanged": true,
+        "wire_audit_failures": 0
+      }
+    }
+  ],
+  "limitations": [
+    "Sensor/localization typed fixture replaces Lightning estimator; no end-to-end relocalization accuracy evidence.",
+    "Planar kinematic plant, no gait, inertia, wheel/foot slip, collision dynamics or measured physical stopping distance.",
+    "No independent full-stack SAT collision scoring; prior459 controller-feedback trials remain separate.",
+    "No actual controller delayed-ACK/current-pending cancel race evidence.",
+    "Map-loaded instance constant; explicit map-switch halt/reload and second loss during pending recovery not covered.",
+    "No controller/smoother process restart case; gate restart and localization identity replacement are covered."
+  ]
+}

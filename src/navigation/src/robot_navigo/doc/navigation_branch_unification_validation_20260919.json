@@ -1,0 +1,68 @@
+{
+  "feature_base": "09f6cf8",
+  "deploy_base": "d732767",
+  "built_packages": 9,
+  "python_tests_passed": 45,
+  "cpp_tests_passed": 57,
+  "cpp_suites": [
+    {
+      "suite": "test_motion_phase.gtest.xml",
+      "tests": 11
+    },
+    {
+      "suite": "test_epoch_bt_selection.gtest.xml",
+      "tests": 4
+    },
+    {
+      "suite": "test_epoch_bt_lineage.gtest.xml",
+      "tests": 12
+    },
+    {
+      "suite": "test_bt_terminal_preempt.gtest.xml",
+      "tests": 1
+    },
+    {
+      "suite": "test_livox_scan_projection.gtest.xml",
+      "tests": 4
+    },
+    {
+      "suite": "test_motion_limits.gtest.xml",
+      "tests": 2
+    },
+    {
+      "suite": "test_velocity_deadband_critic.gtest.xml",
+      "tests": 2
+    },
+    {
+      "suite": "test_forward_alignment.gtest.xml",
+      "tests": 7
+    },
+    {
+      "suite": "test_epoch_authority.gtest.xml",
+      "tests": 8
+    },
+    {
+      "suite": "test_backup_limits.gtest.xml",
+      "tests": 6
+    }
+  ],
+  "navigation_contract_passed": true,
+  "forward_profile_epoch_explicitly_disabled": true,
+  "feedback": {
+    "legacy": {
+      "successes": 13,
+      "trials": 18,
+      "reverse_distance_m": 6.78108303628847
+    },
+    "forward": {
+      "successes": 18,
+      "trials": 18,
+      "reverse_distance_m": 0.0
+    }
+  },
+  "smoother_samples": 80,
+  "smoother_passed": true,
+  "hardware_tested": false,
+  "artifacts": "/home/charles/project/colcon_ws/analysis_outputs/unify_navigation_branches_20260919",
+  "source_note": "Runtime built from feature plus staged deployment profile integration; production algorithms unchanged from feature."
+}

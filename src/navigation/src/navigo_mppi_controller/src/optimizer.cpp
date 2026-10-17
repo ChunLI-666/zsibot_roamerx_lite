@@ -25,6 +25,7 @@
 #include <xtensor/xnoalias.hpp>
 
 #include "navigo_costmap_2d/costmap_filters/filter_values.hpp"
+#include "navigo_mppi_controller/tools/forward_alignment.hpp"
 
 namespace mppi
 {
@@ -83,6 +84,19 @@ void Optimizer::getParams()
 
   getParam(motion_model_name, "motion_model", std::string("DiffDrive"));
 
+  getParam(s.forward_alignment, "forward_alignment.enabled", false, ParameterType::Static);
+  getParam(s.minimum_forward_velocity, "forward_alignment.minimum_forward_velocity", 0.05,
+    ParameterType::Static);
+  getParam(s.minimum_angular_velocity, "forward_alignment.min_angular_velocity", 0.02,
+    ParameterType::Static);
+  if (s.forward_alignment && (!std::isfinite(s.minimum_forward_velocity) ||
+    !std::isfinite(s.minimum_angular_velocity) || !std::isfinite(s.base_constraints.vx_max) ||
+    !std::isfinite(s.base_constraints.wz) || !(s.minimum_angular_velocity > 0.0f) ||
+    !(s.minimum_forward_velocity > 0.0f) ||
+    s.base_constraints.vx_max < s.minimum_forward_velocity || s.base_constraints.wz <= 0.0f))
+  {
+    throw std::invalid_argument("Invalid forward alignment speed bounds");
+  }
   s.constraints = s.base_constraints;
   setMotionModel(motion_model_name);
   parameters_handler_->addPostCallback([this]() {reset();});
@@ -122,8 +136,17 @@ void Optimizer::reset()
   control_history_[2] = {0.0, 0.0, 0.0};
   control_history_[3] = {0.0, 0.0, 0.0};
 
-  settings_.constraints = settings_.base_constraints;
-
+  // Reapply the original limit semantics to updated base parameters. An
+  // absolute speed zone must not grow when vx_max is dynamically increased.
+  setSpeedLimit(settings_.speed_limit, settings_.speed_limit_percentage);
+  if (settings_.forward_alignment &&
+    settings_.constraints.vx_max >= settings_.minimum_forward_velocity)
+  {
+    // A zero-centered Gaussian clipped to {0, minimum} averages below minimum/2
+    // when a speed zone equals the executable floor. Seed the optimization with
+    // one feasible moving trajectory; measured state/history remain unchanged.
+    control_sequence_.vx.fill(settings_.minimum_forward_velocity);
+  }
   costs_ = xt::zeros<float>({settings_.batch_size});
   generated_trajectories_.reset(settings_.batch_size, settings_.time_steps);
 
@@ -145,6 +168,23 @@ geometry_msgs::msg::TwistStamped Optimizer::evalControl(
   } while (fallback(critics_data_.fail_flag));
 
   utils::savitskyGolayFilter(control_sequence_, control_history_, settings_);
+  if (settings_.forward_alignment) {
+    // Filtering/weighted averaging can leave the sampled feasible set. Project
+    // again and verify the resulting trajectory before exposing its first action.
+    applyControlSequenceConstraints();
+    const auto trajectory = getOptimizedTrajectory();
+    double x = robot_pose.pose.position.x, y = robot_pose.pose.position.y;
+    double yaw = tf2::getYaw(robot_pose.pose.orientation);
+    const auto footprint = costmap_ros_->getRobotFootprint();
+    for (size_t i = 0; i < trajectory.shape(0); ++i) {
+      if (!forward_alignment::sweepFree(*costmap_, footprint, x, y, yaw,
+        trajectory(i, 0), trajectory(i, 1), trajectory(i, 2)))
+      {
+        throw std::runtime_error("Forward control trajectory footprint is blocked");
+      }
+      x = trajectory(i, 0); y = trajectory(i, 1); yaw = trajectory(i, 2);
+    }
+  }
   auto control = getControlFromSequenceAsTwist(plan.header.stamp);
 
   if (settings_.shift_control_sequence) {
@@ -228,6 +268,23 @@ void Optimizer::generateNoisedTrajectories()
 {
   noise_generator_.setNoisedControls(state_, control_sequence_);
   noise_generator_.generateNextNoises();
+  if (settings_.forward_alignment) {
+    const auto & c = settings_.constraints;
+    state_.cvx = xt::clip(state_.cvx, 0.0f, c.vx_max);
+    // Project onto {0} U [minimum, limit]. Always flooring the weighted
+    // average to zero traps a zero-initialized optimizer below the deadband.
+    state_.cvx = xt::where(
+      (state_.cvx >= 0.5f * settings_.minimum_forward_velocity) &&
+      (c.vx_max >= settings_.minimum_forward_velocity),
+      xt::maximum(state_.cvx, settings_.minimum_forward_velocity), 0.0f);
+    state_.cvy.fill(0.0f);
+    state_.cwz = xt::clip(state_.cwz, -c.wz, c.wz);
+    state_.cwz = xt::where(
+      (xt::abs(state_.cwz) >= 0.5f * settings_.minimum_angular_velocity) &&
+      (c.wz >= settings_.minimum_angular_velocity),
+      xt::sign(state_.cwz) * xt::maximum(xt::abs(state_.cwz), settings_.minimum_angular_velocity),
+      0.0f);
+  }
   updateStateVelocities(state_);
   integrateStateVelocities(generated_trajectories_, state_);
 }
@@ -245,6 +302,18 @@ void Optimizer::applyControlSequenceConstraints()
   control_sequence_.vx = xt::clip(control_sequence_.vx, s.constraints.vx_min, s.constraints.vx_max);
   control_sequence_.wz = xt::clip(control_sequence_.wz, -s.constraints.wz, s.constraints.wz);
 
+  if (s.forward_alignment) {
+    control_sequence_.vx = xt::where(
+      (control_sequence_.vx >= 0.5f * s.minimum_forward_velocity) &&
+      (s.constraints.vx_max >= s.minimum_forward_velocity),
+      xt::maximum(control_sequence_.vx, s.minimum_forward_velocity), 0.0f);
+    control_sequence_.vy.fill(0.0f);
+    control_sequence_.wz = xt::where(
+      (xt::abs(control_sequence_.wz) >= 0.5f * s.minimum_angular_velocity) &&
+      (s.constraints.wz >= s.minimum_angular_velocity),
+      xt::sign(control_sequence_.wz) * xt::maximum(
+      xt::abs(control_sequence_.wz), s.minimum_angular_velocity), 0.0f);
+  }
   motion_model_->applyConstraints(control_sequence_);
 }
 
@@ -428,28 +497,15 @@ void Optimizer::setMotionModel(const std::string & model)
 void Optimizer::setSpeedLimit(double speed_limit, bool percentage)
 {
   auto & s = settings_;
-  if (speed_limit == navigo_costmap_2d::NO_SPEED_LIMIT) {
-    s.constraints.vx_max = s.base_constraints.vx_max;
-    s.constraints.vx_min = s.base_constraints.vx_min;
-    s.constraints.vy = s.base_constraints.vy;
-    s.constraints.wz = s.base_constraints.wz;
-  } else {
-    if (percentage) {
-      // Speed limit is expressed in % from maximum speed of robot
-      double ratio = speed_limit / 100.0;
-      s.constraints.vx_max = s.base_constraints.vx_max * ratio;
-      s.constraints.vx_min = s.base_constraints.vx_min * ratio;
-      s.constraints.vy = s.base_constraints.vy * ratio;
-      s.constraints.wz = s.base_constraints.wz * ratio;
-    } else {
-      // Speed limit is expressed in absolute value
-      double ratio = speed_limit / s.base_constraints.vx_max;
-      s.constraints.vx_max = s.base_constraints.vx_max * ratio;
-      s.constraints.vx_min = s.base_constraints.vx_min * ratio;
-      s.constraints.vy = s.base_constraints.vy * ratio;
-      s.constraints.wz = s.base_constraints.wz * ratio;
-    }
-  }
+  s.speed_limit = speed_limit;
+  s.speed_limit_percentage = percentage;
+  const double ratio = speed_limit == navigo_costmap_2d::NO_SPEED_LIMIT ? 1.0 :
+    std::clamp(percentage ? speed_limit / 100.0 : speed_limit / s.base_constraints.vx_max,
+    0.0, 1.0);
+  s.constraints.vx_max = s.base_constraints.vx_max * ratio;
+  s.constraints.vx_min = s.base_constraints.vx_min * ratio;
+  s.constraints.vy = s.base_constraints.vy * ratio;
+  s.constraints.wz = s.base_constraints.wz * ratio;
 }
 
 models::Trajectories & Optimizer::getGeneratedTrajectories()

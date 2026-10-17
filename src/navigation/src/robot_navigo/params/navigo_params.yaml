@@ -255,6 +255,9 @@ controller_server:
     # MPPI parameters
     FollowPath:
       plugin: "navigo_mppi_controller::MPPIController"
+      # Enable only through the reviewable forward_alignment_experiment overlay.
+      forward_alignment:
+        enabled: false
       visualize: true
       time_steps: 30
       model_dt: 0.1

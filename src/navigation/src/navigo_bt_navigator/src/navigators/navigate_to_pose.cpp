@@ -22,6 +22,27 @@
 namespace navigo_bt_navigator
 {
 
+void
+NavigateToPoseNavigator::configureEpochTree(rclcpp_lifecycle::LifecycleNode::SharedPtr node)
+{
+  if (!node->has_parameter("enable_epoch_contract")) {
+    node->declare_parameter("enable_epoch_contract", false);
+  }
+  if (!node->has_parameter("enable_epoch_backup_recovery")) {
+    node->declare_parameter("enable_epoch_backup_recovery", false);
+  }
+  enable_epoch_contract_ = node->get_parameter("enable_epoch_contract").as_bool();
+  const bool backup = node->get_parameter("enable_epoch_backup_recovery").as_bool();
+  if (backup && !enable_epoch_contract_) {
+    throw std::invalid_argument("Epoch BackUp recovery requires enable_epoch_contract");
+  }
+  // Only these packaged, reviewed trees can acquire epoch motion authority.
+  // A user-supplied default BT path never broadens the epoch allowlist.
+  strict_bt_path_ = ament_index_cpp::get_package_share_directory("navigo_bt_navigator") +
+    (backup ? "/behavior_trees/navigate_to_pose_with_epoch_backup.xml" :
+    "/behavior_trees/navigate_to_pose_with_epoch.xml");
+}
+
 bool
 NavigateToPoseNavigator::configure(
   rclcpp_lifecycle::LifecycleNode::WeakPtr parent_node,
@@ -29,6 +50,7 @@ NavigateToPoseNavigator::configure(
 {
   start_time_ = rclcpp::Time(0);
   auto node = parent_node.lock();
+  configureEpochTree(node);
 
   if (!node->has_parameter("goal_blackboard_id")) {
     node->declare_parameter("goal_blackboard_id", std::string("goal"));
@@ -60,6 +82,7 @@ NavigateToPoseNavigator::getDefaultBTFilepath(
 {
   std::string default_bt_xml_filename;
   auto node = parent_node.lock();
+  configureEpochTree(node);
 
   if (!node->has_parameter("default_nav_to_pose_bt_xml")) {
     std::string pkg_share_dir =
@@ -72,7 +95,7 @@ NavigateToPoseNavigator::getDefaultBTFilepath(
 
   node->get_parameter("default_nav_to_pose_bt_xml", default_bt_xml_filename);
 
-  return default_bt_xml_filename;
+  return enable_epoch_contract_ ? strict_bt_path_ : default_bt_xml_filename;
 }
 
 bool
@@ -86,7 +109,11 @@ NavigateToPoseNavigator::cleanup()
 bool
 NavigateToPoseNavigator::goalReceived(ActionT::Goal::ConstSharedPtr goal)
 {
-  auto bt_xml_filename = goal->behavior_tree;
+  if (enable_epoch_contract_ && !goal->behavior_tree.empty() && goal->behavior_tree != strict_bt_path_) {
+    RCLCPP_ERROR(logger_, "Epoch navigation rejects an unverified custom behavior tree");
+    return false;
+  }
+  auto bt_xml_filename = enable_epoch_contract_ ? strict_bt_path_ : goal->behavior_tree;
 
   if (!bt_action_server_->loadBehaviorTree(bt_xml_filename)) {
     RCLCPP_ERROR(
@@ -219,6 +246,10 @@ NavigateToPoseNavigator::initializeGoalPose(ActionT::Goal::ConstSharedPtr goal)
   start_time_ = clock_->now();
   auto blackboard = bt_action_server_->getBlackboard();
   blackboard->set<int>("number_recoveries", 0);  // NOLINT
+  uint64_t revision = 0;
+  blackboard->get("epoch_goal_revision", revision);
+  blackboard->set("epoch_goal_revision", revision + 1);
+
 
   // Update the goal pose on the blackboard
   blackboard->set<geometry_msgs::msg::PoseStamped>(goal_blackboard_id_, goal->pose);

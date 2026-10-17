@@ -218,7 +218,7 @@ def generate_launch_description():
         executable='nav_safety_gate.py',
         name='nav_safety_gate',
         output='both',
-        parameters=[{
+        parameters=[params_file, {
             'watchdog_timeout_ms': 200,
             'cmd_vel_input_topic': '/cmd_vel',
             'cmd_vel_output_topic': '/cmd_vel_safe',

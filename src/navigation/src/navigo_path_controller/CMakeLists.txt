@@ -2,7 +2,9 @@ cmake_minimum_required(VERSION 3.5)
 project(navigo_path_controller)
 
 find_package(ament_cmake REQUIRED)
+find_package(navigo_epoch_msgs REQUIRED)
 find_package(navigo_core REQUIRED)
+find_package(navigo_costmap_2d REQUIRED)
 find_package(nav2_common REQUIRED)
 find_package(angles REQUIRED)
 find_package(rclcpp REQUIRED)
@@ -41,6 +43,8 @@ add_library(${library_name} SHARED
 )
 
 set(dependencies
+  navigo_costmap_2d
+  navigo_epoch_msgs
   angles
   rclcpp
   rclcpp_action
@@ -104,5 +108,13 @@ ament_export_libraries(simple_progress_checker
   ${library_name})
 ament_export_dependencies(${dependencies})
 pluginlib_export_plugin_description_file(navigo_core plugins.xml)
+
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_backup_limits test/test_backup_limits.cpp)
+  ament_target_dependencies(test_backup_limits navigo_core navigo_epoch_msgs navigo_costmap_2d)
+  ament_add_gtest(test_epoch_authority test/test_epoch_authority.cpp)
+  ament_target_dependencies(test_epoch_authority navigo_core navigo_epoch_msgs)
+endif()
 
 ament_package()

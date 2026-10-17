@@ -1,0 +1,158 @@
+{
+  "date": "2026-09-11",
+  "scope": "User directed simulation to replace unavailable robot access for the current milestone; pd1 remains selected.",
+  "goal_complete": false,
+  "merged": false,
+  "hardware_io": false,
+  "development_worktrees_created_or_used": false,
+  "snapshot_note": "Implementation commits are frozen. The commit containing this file adds goal/milestone/handoff documentation only; experiment manifests pin source and binary hashes and need not have the later commit ID.",
+  "repositories": [
+    {
+      "repository": "/home/charles/project/colcon_ws/src/zsibot/zsibot_roamerx_lite",
+      "branch": "feature/forward-aligned-navigation",
+      "base_commit": "25ecf4f67d4499625e587ab04aceeaa388966131",
+      "implementation_head": "b534c2a6e7dda160cd55a88467f6386f34b0479f",
+      "new_commits": [
+        {
+          "commit": "8ec79d38e9540b8a47e2337e2c75c8328b0c7d68",
+          "subject": "fix: account for full wall time and watchdog expiry in navigation plant"
+        },
+        {
+          "commit": "04c8551da0dc3bff71c60aa367fa2f4d0f6d2477",
+          "subject": "test(navigation): propagate publication time intervals through audits"
+        },
+        {
+          "commit": "08cee4c2baba3d217d79cb7ef8fdc26631e85d1f",
+          "subject": "fix: settle watchdog motion before final simulation audits"
+        },
+        {
+          "commit": "dfa82150b1ca07fa10202f627c86af34d3f41d53",
+          "subject": "test(navigation): audit exact body-twist footprint sweeps"
+        },
+        {
+          "commit": "b534c2a6e7dda160cd55a88467f6386f34b0479f",
+          "subject": "fix(navigation): close epoch BackUp recovery loop and validate full-wall faults"
+        }
+      ],
+      "diff_summary": "33 files changed, 1893 insertions(+), 115 deletions(-)",
+      "changed_files": [
+        "src/navigation/src/navigo_behavior_tree/plugins/action/epoch_navigation.cpp",
+        "src/navigation/src/navigo_behavior_tree/test/test_epoch_bt_lineage.cpp",
+        "src/navigation/src/navigo_bt_navigator/CMakeLists.txt",
+        "src/navigation/src/navigo_bt_navigator/include/navigo_bt_navigator/navigators/navigate_to_pose.hpp",
+        "src/navigation/src/navigo_bt_navigator/package.xml",
+        "src/navigation/src/navigo_bt_navigator/src/navigators/navigate_to_pose.cpp",
+        "src/navigation/src/navigo_bt_navigator/test/test_epoch_bt_selection.cpp",
+        "src/navigation/src/navigo_path_controller/src/controller_server.cpp",
+        "src/navigation/src/robot_navigo/doc/epoch_backup_followup_results_20260911.json",
+        "src/navigation/src/robot_navigo/doc/epoch_backup_followup_review_20260911.md",
+        "src/navigation/src/robot_navigo/doc/epoch_interval_audit_results_20260911.json",
+        "src/navigation/src/robot_navigo/doc/epoch_interval_audit_review_20260911.md",
+        "src/navigation/src/robot_navigo/params/epoch_backup_experiment.yaml",
+        "src/navigation/src/robot_navigo/scripts/epoch_backup_validation/README.md",
+        "src/navigation/src/robot_navigo/scripts/epoch_backup_validation/recovery_scenarios.py",
+        "src/navigation/src/robot_navigo/scripts/epoch_backup_validation/run_auto_recovery.py",
+        "src/navigation/src/robot_navigo/scripts/epoch_backup_validation/run_backup_stack.py",
+        "src/navigation/src/robot_navigo/scripts/epoch_backup_validation/test_recovery_scenarios.py",
+        "src/navigation/src/robot_navigo/scripts/epoch_navigation_validation/audit_events.py",
+        "src/navigation/src/robot_navigo/scripts/epoch_navigation_validation/execution_audit.py",
+        "src/navigation/src/robot_navigo/scripts/epoch_navigation_validation/fixture.py",
+        "src/navigation/src/robot_navigo/scripts/epoch_navigation_validation/geometry_audit.py",
+        "src/navigation/src/robot_navigo/scripts/epoch_navigation_validation/plant_time.py",
+        "src/navigation/src/robot_navigo/scripts/epoch_navigation_validation/publication_clock.py",
+        "src/navigation/src/robot_navigo/scripts/epoch_navigation_validation/run_stack.py",
+        "src/navigation/src/robot_navigo/scripts/epoch_navigation_validation/scene.py",
+        "src/navigation/src/robot_navigo/scripts/epoch_navigation_validation/test_geometry_audit.py",
+        "src/navigation/src/robot_navigo/scripts/epoch_navigation_validation/test_interval_audit.py",
+        "src/navigation/src/robot_navigo/scripts/epoch_navigation_validation/test_plant_time.py",
+        "src/navigation/src/robot_navigo/scripts/epoch_navigation_validation/test_publication_clock.py",
+        "src/navigation/src/robot_navigo/scripts/epoch_navigation_validation/test_trial_shutdown.py",
+        "src/navigation/src/robot_navigo/scripts/nav_safety_gate.py",
+        "src/navigation/src/robot_navigo/test/test_epoch_gate.py"
+      ]
+    },
+    {
+      "repository": "/home/charles/project/colcon_ws/src/lightning-lm",
+      "branch": "feature/descriptor-relocalization-verification",
+      "base_commit": "f0f41f948b431be0643ed65cfaac65dc5f1d5e0d",
+      "implementation_head": "04a5b816e614e38b998b91efbcf6772a13284398",
+      "new_commits": [
+        {
+          "commit": "04a5b816e614e38b998b91efbcf6772a13284398",
+          "subject": "test(sim): audit independent Gazebo sensors and pd1 localization limits"
+        }
+      ],
+      "diff_summary": "12 files changed, 2048 insertions(+)",
+      "changed_files": [
+        "config/simulation/pd1_gazebo_query_protocol.json",
+        "config/simulation/pd1_gazebo_rig.yaml",
+        "doc/pd1_gazebo_simulation_provenance_20260911.json",
+        "doc/pd1_gazebo_simulation_report_20260911.md",
+        "doc/pd1_gazebo_simulation_results_20260911.json",
+        "scripts/simulation/analyze_gazebo_pd1_smoke.py",
+        "scripts/simulation/make_gazebo_rig_world.py",
+        "scripts/simulation/record_gazebo_sensors.py",
+        "scripts/simulation/replay_pd1_gazebo_si.py",
+        "scripts/simulation/run_gazebo_sensor_smoke.py",
+        "scripts/simulation/run_pd1_gazebo_queries.py",
+        "scripts/simulation/test_gazebo_rig_contract.py"
+      ]
+    }
+  ],
+  "tests": {
+    "python_combined": {
+      "passed": 98,
+      "command": "source /opt/ros/jazzy/setup.bash; source /home/charles/project/colcon_ws/install/setup.bash; ROS_DOMAIN_ID=192 ROS_LOCALHOST_ONLY=1 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST python3 -m pytest -q src/navigation/src/robot_navigo/scripts/epoch_navigation_validation/test_*.py src/navigation/src/robot_navigo/scripts/epoch_backup_validation/test_recovery_scenarios.py src/navigation/src/robot_navigo/test/test_epoch_gate.py",
+      "cwd": "/home/charles/project/colcon_ws/src/zsibot/zsibot_roamerx_lite"
+    },
+    "bt_plugin": 12,
+    "bt_selection": 4,
+    "gazebo_rig_contract": 3,
+    "gazebo_captures_verified": 7,
+    "builds": [
+      "navigo_bt_navigator",
+      "navigo_behavior_tree",
+      "navigo_path_controller"
+    ],
+    "codacy": "Unavailable; not executed"
+  },
+  "evidence": {
+    "automatic_recovery_result": "/home/charles/project/colcon_ws/analysis_outputs/epoch_backup_followup_20260911/automatic_bt_feedback_fixed/result.json",
+    "automatic_recovery_source_inputs_unchanged": true,
+    "automatic_recovery_contiguous_segments": 3481,
+    "automatic_recovery_wall_duration_s": 36.995849387,
+    "automatic_recovery_reverse_m": 0.15594872802810608,
+    "automatic_recovery_final_xy_error_m": 0.1936546444788528,
+    "goal_xy_tolerance_m": 0.25,
+    "goal_yaw_tolerance_rad": 0.25,
+    "geometry_collisions": 0,
+    "geometry_uncertainties": 0,
+    "wire_failures": 0,
+    "nonzero_negative_track": 0,
+    "legacy_publication_traces_rescored": 21,
+    "pd1_gazebo_correct_queries": 0,
+    "pd1_gazebo_total_queries": 4,
+    "pd1_gazebo_wrong_commits": 0,
+    "pd1_gazebo_map_keyframes": 1,
+    "force_sensor_acceleration_consistency": true,
+    "force_sensor_localization_tested": false
+  },
+  "reports": [
+    "/home/charles/project/colcon_ws/src/zsibot/zsibot_roamerx_lite/src/navigation/src/robot_navigo/doc/simulation_milestone_20260911.md",
+    "/home/charles/project/colcon_ws/src/zsibot/zsibot_roamerx_lite/src/navigation/src/robot_navigo/doc/epoch_backup_followup_review_20260911.md",
+    "/home/charles/project/colcon_ws/src/zsibot/zsibot_roamerx_lite/src/navigation/src/robot_navigo/doc/epoch_interval_audit_review_20260911.md",
+    "/home/charles/project/colcon_ws/src/lightning-lm/doc/pd1_gazebo_simulation_report_20260911.md"
+  ],
+  "remaining": [
+    "Build a force-driven sensor trajectory with a stationary IMU initialization prefix; verify GT/IMU/LIO consistency before multi-keyframe mapping and localization.",
+    "Frozen Gazebo queries remain 0/4; previous real-data new positions remain 0/9. Do not replace these with static smoke success.",
+    "Dynamic rear obstacle triggered the stopping check, but observed costmap visibility while residual reverse motion was still present is not established.",
+    "Actual pd1 localization and full navigation are not yet coupled in one Gazebo feedback run.",
+    "Earlier uninstrumented ~336ms stall cause remains unknown; current recorded-map free success is not a retrospective diagnosis.",
+    "Plant is an ideal velocity follower; no quadruped gait/contact/SDK dynamics validation. RK3588 and field validation are deferred per user instruction.",
+    "The 1ms callback pump budget is non-preemptive and not a hard realtime bound. Lost terminal classification conservatively revokes and can interrupt recovery.",
+    "Automatic BT success is one final deterministic simulation case, not a reliability estimate."
+  ],
+  "legacy_worktree_inventory": "/home/charles/project/colcon_ws/src/zsibot/zsibot_roamerx_lite/src/navigation/src/robot_navigo/doc/feature_branch_handoff_20260911.json",
+  "legacy_worktree_action": "Unrelated prior g2p5 worktrees left untouched; no development or cleanup in them."
+}

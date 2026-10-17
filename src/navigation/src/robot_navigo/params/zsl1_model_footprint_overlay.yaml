@@ -1,0 +1,15 @@
+# Model-only collision overlay; not a measured gait envelope.
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      footprint: '[[-0.3597869945979023,-0.188144226321578],[0.28218671679496765,-0.188144226321578],[0.28218671679496765,0.18816181053173542],[-0.3597869945979023,0.18816181053173542]]'
+      footprint_padding: 0.01
+      inflation_layer:
+        inflation_radius: 0.5
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      footprint: '[[-0.3597869945979023,-0.188144226321578],[0.28218671679496765,-0.188144226321578],[0.28218671679496765,0.18816181053173542],[-0.3597869945979023,0.18816181053173542]]'
+      footprint_padding: 0.01
+      inflation_layer:
+        inflation_radius: 0.5

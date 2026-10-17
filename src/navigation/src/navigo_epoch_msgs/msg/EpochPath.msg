@@ -1,0 +1,4 @@
+navigo_epoch_msgs/NavigationToken token
+nav_msgs/Path path
+geometry_msgs/PoseStamped planning_start
+uint64 planning_heartbeat_sequence

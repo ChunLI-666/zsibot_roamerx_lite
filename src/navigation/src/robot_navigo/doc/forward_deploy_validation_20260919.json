@@ -1,0 +1,25 @@
+{
+  "deploy_base": "71aa8e9",
+  "feature_base": "6942974",
+  "feature_head_retained": "f259fc4",
+  "squashed_head": "09f6cf8",
+  "tree_identical": true,
+  "original_untracked_document_unchanged": true,
+  "gtests_passed": 9,
+  "profile_tests_passed": 6,
+  "smoother_runtime_samples": 81,
+  "feedback": {
+    "legacy": {
+      "trials": 18,
+      "successes": 13,
+      "reverse_distance_m": 6.78108303628847
+    },
+    "forward": {
+      "trials": 18,
+      "successes": 18,
+      "reverse_distance_m": 0.0
+    }
+  },
+  "hardware_tested": false,
+  "artifacts": "/home/charles/project/colcon_ws/analysis_outputs/deploy_forward_review_20260919"
+}

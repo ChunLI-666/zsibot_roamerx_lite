@@ -239,7 +239,12 @@ void BtActionServer<ActionT>::executeCallback()
     };
 
   auto on_loop = [&]() {
-      if (action_server_->is_preempt_requested() && on_preempt_callback_) {
+      // run() invokes on_loop after tickRoot. A terminal tick belongs to the
+      // current goal; accepting a pending goal here would credit the old tree's
+      // result to that unexecuted goal. SimpleActionServer executes the pending
+      // goal in its next worker iteration after the current result is sent.
+      if (tree_.rootNode()->status() == BT::NodeStatus::RUNNING &&
+        action_server_->is_preempt_requested() && on_preempt_callback_) {
         on_preempt_callback_(action_server_->get_pending_goal());
       }
       topic_logger_->flush();

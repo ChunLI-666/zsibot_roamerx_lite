@@ -1,0 +1,329 @@
+{
+  "trials": 36,
+  "groups": [
+    {
+      "scenario": "aligned",
+      "arm": "legacy",
+      "successes": 3,
+      "trials": 3,
+      "success_time_range_sec": [
+        28.1,
+        35.5
+      ],
+      "reverse_distance_range_m": [
+        0.0,
+        0.0
+      ],
+      "longest_reverse_range_sec": [
+        0.0,
+        0.0
+      ],
+      "final_xy_range_m": [
+        0.041685818014,
+        0.0697634945585
+      ],
+      "final_yaw_range_rad": [
+        0.00912817772478,
+        0.05306144692
+      ],
+      "collision_failures": 0
+    },
+    {
+      "scenario": "aligned",
+      "arm": "forward",
+      "successes": 3,
+      "trials": 3,
+      "success_time_range_sec": [
+        44.2,
+        46.0
+      ],
+      "reverse_distance_range_m": [
+        0.0,
+        0.0
+      ],
+      "longest_reverse_range_sec": [
+        0.0,
+        0.0
+      ],
+      "final_xy_range_m": [
+        0.192072978243,
+        0.197549292073
+      ],
+      "final_yaw_range_rad": [
+        0.0,
+        0.0
+      ],
+      "collision_failures": 0
+    },
+    {
+      "scenario": "back_facing",
+      "arm": "legacy",
+      "successes": 2,
+      "trials": 3,
+      "success_time_range_sec": [
+        36.1,
+        57.9
+      ],
+      "reverse_distance_range_m": [
+        1.2567683510479701,
+        2.27853914424781
+      ],
+      "longest_reverse_range_sec": [
+        14.200000000000001,
+        21.3
+      ],
+      "final_xy_range_m": [
+        0.0586725105357,
+        1.15014814001
+      ],
+      "final_yaw_range_rad": [
+        0.00384678845342,
+        1.56943337749
+      ],
+      "collision_failures": 0
+    },
+    {
+      "scenario": "back_facing",
+      "arm": "forward",
+      "successes": 3,
+      "trials": 3,
+      "success_time_range_sec": [
+        89.4,
+        90.0
+      ],
+      "reverse_distance_range_m": [
+        0.0,
+        0.0
+      ],
+      "longest_reverse_range_sec": [
+        0.0,
+        0.0
+      ],
+      "final_xy_range_m": [
+        0.194947411715,
+        0.197538246803
+      ],
+      "final_yaw_range_rad": [
+        0.248629342335,
+        0.249785449854
+      ],
+      "collision_failures": 0
+    },
+    {
+      "scenario": "side_offset",
+      "arm": "legacy",
+      "successes": 1,
+      "trials": 3,
+      "success_time_range_sec": [
+        33.7,
+        33.7
+      ],
+      "reverse_distance_range_m": [
+        0.0,
+        0.0
+      ],
+      "longest_reverse_range_sec": [
+        0.0,
+        0.0
+      ],
+      "final_xy_range_m": [
+        0.0696824345359,
+        0.106122898791
+      ],
+      "final_yaw_range_rad": [
+        0.0115497371182,
+        0.674258872494
+      ],
+      "collision_failures": 0
+    },
+    {
+      "scenario": "side_offset",
+      "arm": "forward",
+      "successes": 3,
+      "trials": 3,
+      "success_time_range_sec": [
+        81.2,
+        81.9
+      ],
+      "reverse_distance_range_m": [
+        0.0,
+        0.0
+      ],
+      "longest_reverse_range_sec": [
+        0.0,
+        0.0
+      ],
+      "final_xy_range_m": [
+        0.195741232805,
+        0.199982637886
+      ],
+      "final_yaw_range_rad": [
+        0.167599374171,
+        0.181939861385
+      ],
+      "collision_failures": 0
+    },
+    {
+      "scenario": "side_facing",
+      "arm": "legacy",
+      "successes": 1,
+      "trials": 3,
+      "success_time_range_sec": [
+        48.7,
+        48.7
+      ],
+      "reverse_distance_range_m": [
+        0.0,
+        0.03698082342745
+      ],
+      "longest_reverse_range_sec": [
+        0.0,
+        0.6000000000000001
+      ],
+      "final_xy_range_m": [
+        0.06956407861,
+        0.120071085929
+      ],
+      "final_yaw_range_rad": [
+        0.0139710948479,
+        1.06716450925
+      ],
+      "collision_failures": 0
+    },
+    {
+      "scenario": "side_facing",
+      "arm": "forward",
+      "successes": 3,
+      "trials": 3,
+      "success_time_range_sec": [
+        73.8,
+        74.3
+      ],
+      "reverse_distance_range_m": [
+        0.0,
+        0.0
+      ],
+      "longest_reverse_range_sec": [
+        0.0,
+        0.0
+      ],
+      "final_xy_range_m": [
+        0.194079894134,
+        0.199072079675
+      ],
+      "final_yaw_range_rad": [
+        0.248197377688,
+        0.248776781203
+      ],
+      "collision_failures": 0
+    },
+    {
+      "scenario": "overshoot_inside",
+      "arm": "legacy",
+      "successes": 3,
+      "trials": 3,
+      "success_time_range_sec": [
+        2.3,
+        5.4
+      ],
+      "reverse_distance_range_m": [
+        0.09031052589417,
+        0.13891530781987
+      ],
+      "longest_reverse_range_sec": [
+        1.1,
+        1.4000000000000001
+      ],
+      "final_xy_range_m": [
+        0.0204178124666,
+        0.0596918274388
+      ],
+      "final_yaw_range_rad": [
+        0.0,
+        0.00889769345522
+      ],
+      "collision_failures": 0
+    },
+    {
+      "scenario": "overshoot_inside",
+      "arm": "forward",
+      "successes": 3,
+      "trials": 3,
+      "success_time_range_sec": [
+        0.5,
+        0.5
+      ],
+      "reverse_distance_range_m": [
+        0.0,
+        0.0
+      ],
+      "longest_reverse_range_sec": [
+        0.0,
+        0.0
+      ],
+      "final_xy_range_m": [
+        0.15,
+        0.15
+      ],
+      "final_yaw_range_rad": [
+        0.0,
+        0.0
+      ],
+      "collision_failures": 0
+    },
+    {
+      "scenario": "overshoot_outside",
+      "arm": "legacy",
+      "successes": 3,
+      "trials": 3,
+      "success_time_range_sec": [
+        4.2,
+        4.8
+      ],
+      "reverse_distance_range_m": [
+        0.29348065182566,
+        0.35497327491655
+      ],
+      "longest_reverse_range_sec": [
+        3.0,
+        3.6
+      ],
+      "final_xy_range_m": [
+        0.0329040458328,
+        0.0567627774032
+      ],
+      "final_yaw_range_rad": [
+        7.98728317022e-05,
+        0.0146956723183
+      ],
+      "collision_failures": 0
+    },
+    {
+      "scenario": "overshoot_outside",
+      "arm": "forward",
+      "successes": 3,
+      "trials": 3,
+      "success_time_range_sec": [
+        62.6,
+        62.7
+      ],
+      "reverse_distance_range_m": [
+        0.0,
+        0.0
+      ],
+      "longest_reverse_range_sec": [
+        0.0,
+        0.0
+      ],
+      "final_xy_range_m": [
+        0.192250239284,
+        0.198025500177
+      ],
+      "final_yaw_range_rad": [
+        0.24981462719,
+        0.24981462719
+      ],
+      "collision_failures": 0
+    }
+  ]
+}
