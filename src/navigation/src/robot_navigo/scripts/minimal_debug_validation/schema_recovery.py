@@ -17,6 +17,8 @@ from common import mcap_summary_schemas, sha256, write_json, message_stamp_ns, t
 
 
 MAGIC = b'\x89MCAP0\r\n'
+GENERATOR_SOURCE_PATH = Path(__file__).resolve()
+GENERATOR_SOURCE_SHA256 = sha256(GENERATOR_SOURCE_PATH)
 
 
 def u16(value):
@@ -208,6 +210,52 @@ def native_class(name):
     return get_message(name)
 
 
+class UnsupportedHeaderRepresentation(ValueError):
+    """The native decoder must handle this representation instead."""
+
+
+def cdr_header_stamps(data):
+    """Read a leading ROS Header without constructing a LiDAR point array."""
+    if len(data) < 16:
+        raise ValueError('Truncated CDR Header')
+    if data[0] != 0 or data[1] not in (0, 1):
+        raise UnsupportedHeaderRepresentation('Unsupported CDR Header endianness/representation')
+    endian = '<' if data[1] == 1 else '>'
+    seconds, nanoseconds, frame_size = struct.unpack_from(endian + 'iII', data, 4)
+    if nanoseconds >= 1_000_000_000:
+        raise ValueError('Invalid CDR Header timestamp nanoseconds')
+    if frame_size < 1 or 16 + frame_size > len(data):
+        raise ValueError('Truncated CDR Header frame_id')
+    frame = data[16:16 + frame_size]
+    if frame[-1] != 0:
+        raise ValueError('Unterminated CDR Header frame_id')
+    bytes(frame[:-1]).decode('utf-8')
+    return [seconds * 1_000_000_000 + nanoseconds] if seconds or nanoseconds else []
+
+
+def delivery_message_stamps(data, type_name, cls, header_validated_types, deserialize):
+    """Keep full native decoding except for a validated CustomMsg Header path."""
+    header_type = 'livox_ros_driver2/msg/CustomMsg'
+    if type_name == header_type and type_name in header_validated_types:
+        try:
+            return None, cdr_header_stamps(data), True
+        except UnsupportedHeaderRepresentation:
+            pass  # Preserve native support for representations outside this fast path.
+    decoded = deserialize(data, cls)
+    stamps = message_stamp_ns(decoded)
+    if type_name == header_type:
+        if not 0 <= decoded.header.stamp.nanosec < 1_000_000_000:
+            raise ValueError('Invalid native CustomMsg Header timestamp nanoseconds')
+        try:
+            serialized_stamps = cdr_header_stamps(data)
+        except UnsupportedHeaderRepresentation:
+            return decoded, stamps, False
+        if stamps != serialized_stamps:
+            raise AssertionError('CustomMsg native and serialized Header stamps differ')
+        header_validated_types.add(type_name)
+    return decoded, stamps, False
+
+
 def self_contained(output):
     """Create a complete single-file viewing ROSbag; leave recorder originals intact."""
     import copy
@@ -265,9 +313,16 @@ def self_contained(output):
     source_domain = json.loads(source_domain_path.read_text()) if source_domain_path.is_file() else {}
     source_window_ns = source_domain.get('source_window_ns')
     timing, domain_errors, goals = {}, [], []
+    header_validated_types = set()
+    native_decoded, header_audited = Counter(), Counter()
     for row in restored:
-        decoded = deserialize_message(row.data, classes[types[row.topic]])
-        sources_ns = message_stamp_ns(decoded)
+        type_name = types[row.topic]
+        decoded, sources_ns, header_only = delivery_message_stamps(
+            row.data, type_name, classes[type_name], header_validated_types, deserialize_message)
+        if header_only:
+            header_audited[row.topic] += 1
+        else:
+            native_decoded[type_name] += 1
         if sources_ns:
             entry = timing.setdefault(row.topic, dict(samples=0, min_log_ns=row.log,
                 max_log_ns=row.log, min_source_ns=min(sources_ns), max_source_ns=max(sources_ns),
@@ -328,13 +383,26 @@ def self_contained(output):
     result = dict(success=True, directory=str(destination), mcap=str(path), sha256=sha256(path),
         metadata_sha256=sha256(destination / 'metadata.yaml'), original_files_modified=False,
         sources=sources, preserved=['topic', 'CDR', 'log_time', 'publish_time', 'sequence'],
-        raw_records_identical=True, native_decoded_records=len(restored),
+        raw_records_identical=True, native_decoded_records=sum(native_decoded.values()),
+        native_decoded_by_type=dict(native_decoded),
+        cdr_header_audited_records=sum(header_audited.values()),
+        cdr_header_audited_by_topic=dict(header_audited),
+        cdr_header_native_validated_types=sorted(header_validated_types),
+        validated_records=sum(native_decoded.values()) + sum(header_audited.values()),
+        validation_scope='Every record retains original CDR/time/sequence and independent reader comparison; '
+            'CustomMsg is natively decoded first, then every remaining serialized Header is time-domain audited '
+            'without constructing point objects; all other records retain full native decoding',
         time_domain_valid=domain_valid, goal_messages=goals,
         independent_reader_records=sum(independently_read.values()),
         topics={topic: dict(type=types[topic], message_count=counts[topic]) for topic in sorted(counts)},
         generated_schema_types=sorted(missing), generated_feedback_class_checks=generated.class_checks,
         schema_sources=[dict(path=str(p), sha256=sha256(p)) for p in sorted(generated.sources)],
-        generator_sha256=sha256(__file__), ros_distro=os.environ.get('ROS_DISTRO'))
+        generator_sha256=GENERATOR_SOURCE_SHA256, generator_source_path=str(GENERATOR_SOURCE_PATH),
+        timestamp_audit_method='native_decode_all_other_records; '
+            'CustomMsg_native_first_then_supported_CDR_Header_v1_with_native_fallback',
+        generator_scope='Offline postprocess module identity at import; lazy import may differ from '
+            'the session-start runtime manifest. Native runtime CPU/quality and original CDR are unchanged.',
+        ros_distro=os.environ.get('ROS_DISTRO'))
     write_json(output / 'delivery_bag_report.json', result)
     return result
 

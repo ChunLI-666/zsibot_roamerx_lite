@@ -1,15 +1,57 @@
 """Full-source playback evidence and scheduling; no navigation policy."""
 import hashlib
 import math
+import os
+from pathlib import Path
+import shutil
 import struct
+
+
+def localization_command(command, effective_config):
+    """Apply an optional CPU mask before the native executable loads libraries.
+
+    Only the localization command is wrapped. The harness and unrelated ROS
+    processes retain their original masks; an empty policy keeps the command
+    unchanged and needs neither Linux affinity support nor taskset.
+    """
+    import yaml
+    config = yaml.safe_load(Path(effective_config).read_text())
+    if not isinstance(config, dict):
+        raise ValueError('Lightning configuration must be a mapping')
+    performance = config.get('performance', {})
+    if not isinstance(performance, dict):
+        raise ValueError('performance must be a mapping')
+    cpus = performance.get('cpu_affinity', [])
+    if not isinstance(cpus, list) or any(type(cpu) is not int for cpu in cpus):
+        raise ValueError('performance.cpu_affinity must be a list of integer CPU IDs')
+    if len(set(cpus)) != len(cpus):
+        raise ValueError('performance.cpu_affinity contains a duplicate CPU')
+    if not cpus:
+        return command
+    if not hasattr(os, 'sched_getaffinity'):
+        raise RuntimeError('performance.cpu_affinity requires Linux affinity support')
+    allowed = os.sched_getaffinity(0)
+    if not set(cpus).issubset(allowed):
+        raise ValueError('performance.cpu_affinity requests CPUs outside the caller allowed affinity')
+    taskset = shutil.which('taskset')
+    if taskset is None:
+        raise RuntimeError('performance.cpu_affinity requires taskset before localization startup')
+    return [taskset, '--cpu-list', ','.join(map(str, cpus)), *command]
+
+
+def raw_sensor_qos(sensors):
+    """Capture/playback queueing only; production subscribers are untouched."""
+    return {topic: dict(history='keep_last', depth=2000, reliability='reliable',
+                        durability='volatile') for topic in sensors}
 
 
 class CdrStreamDigest:
     """Hash ordered original serialized samples without retaining point arrays."""
-    def __init__(self):
+    def __init__(self, keep_stamps=False):
         self.digest = hashlib.sha256()
         self.count = 0
         self.first_header_ns = self.last_header_ns = None
+        self.header_stamps_ns = [] if keep_stamps else None
 
     def add(self, data):
         data = bytes(data)
@@ -22,11 +64,16 @@ class CdrStreamDigest:
             self.first_header_ns = timestamp
         self.last_header_ns = timestamp
         self.count += 1
+        if self.header_stamps_ns is not None:
+            self.header_stamps_ns.append(timestamp)
 
     def snapshot(self):
-        return dict(count=self.count, first_header_ns=self.first_header_ns,
-                    last_header_ns=self.last_header_ns,
-                    ordered_cdr_sha256=self.digest.hexdigest())
+        result = dict(count=self.count, first_header_ns=self.first_header_ns,
+                      last_header_ns=self.last_header_ns,
+                      ordered_cdr_sha256=self.digest.hexdigest())
+        if self.header_stamps_ns is not None:
+            result['header_stamps_ns'] = self.header_stamps_ns
+        return result
 
 
 def source_evidence(bag, sensors):
@@ -93,6 +140,8 @@ def validate_playback_options(args):
 def player_command(args, sensors):
     command = ['ros2', 'bag', 'play', str(args.bag), '--clock', '100',
         '--disable-keyboard-controls', '--rate', str(args.rate)]
+    if getattr(args, 'raw_playback_qos', None) is not None:
+        command += ['--qos-profile-overrides-path', str(args.raw_playback_qos)]
     if args.full_bag_mode:
         # The paused player publishes its real initial /clock. Establish all
         # recorder/auditor subscriptions before resuming the first raw sample.

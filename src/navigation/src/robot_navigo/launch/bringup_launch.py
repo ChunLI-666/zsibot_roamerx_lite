@@ -9,7 +9,7 @@ from launch.actions import (
     IncludeLaunchDescription,
     SetEnvironmentVariable,
 )
-from launch.conditions import IfCondition
+from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node, PushRosNamespace
@@ -30,6 +30,8 @@ def generate_launch_description():
     params_file = LaunchConfiguration('params_file')
     autostart = LaunchConfiguration('autostart')
     use_composition = LaunchConfiguration('use_composition')
+    use_bounded_component_container = LaunchConfiguration('use_bounded_component_container')
+    component_executor_threads = LaunchConfiguration('component_executor_threads')
     use_respawn = LaunchConfiguration('use_respawn')
     log_level = LaunchConfiguration('log_level')
     waypoint_follower_package = LaunchConfiguration('waypoint_follower_package')
@@ -98,6 +100,15 @@ def generate_launch_description():
         description='Whether to use composed bringup',
     )
 
+    declare_use_bounded_container_cmd = DeclareLaunchArgument(
+        'use_bounded_component_container', default_value='false',
+        description='Use the isolated container with an explicit per-component worker budget',
+    )
+    declare_component_executor_threads_cmd = DeclareLaunchArgument(
+        'component_executor_threads', default_value='2',
+        description='Workers per component in the bounded container; 0 uses CPU auto detection',
+    )
+
     declare_use_respawn_cmd = DeclareLaunchArgument(
         'use_respawn',
         default_value='False',
@@ -123,15 +134,32 @@ def generate_launch_description():
     bringup_cmd_group = GroupAction(
         [
             PushRosNamespace(condition=IfCondition(use_namespace), namespace=namespace),
-            Node(
+            GroupAction(
                 condition=IfCondition(use_composition),
-                name='navigo_container',
-                package='rclcpp_components',
-                executable='component_container_isolated',
-                parameters=[configured_params, {'autostart': autostart}],
-                arguments=['--use_multi_threaded_executor', '--ros-args', '--log-level', log_level],
-                remappings=remappings,
-                output='screen',
+                actions=[
+                    Node(
+                        condition=UnlessCondition(use_bounded_component_container),
+                        name='navigo_container',
+                        package='rclcpp_components',
+                        executable='component_container_isolated',
+                        parameters=[configured_params, {'autostart': autostart}],
+                        arguments=['--use_multi_threaded_executor', '--ros-args',
+                                   '--log-level', log_level],
+                        remappings=remappings,
+                        output='screen',
+                    ),
+                    Node(
+                        condition=IfCondition(use_bounded_component_container),
+                        name='navigo_container',
+                        package='robot_navigo',
+                        executable='bounded_component_container',
+                        parameters=[configured_params, {'autostart': autostart}],
+                        arguments=['--executor-threads', component_executor_threads,
+                                   '--ros-args', '--log-level', log_level],
+                        remappings=remappings,
+                        output='screen',
+                    ),
+                ],
             ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
@@ -170,6 +198,8 @@ def generate_launch_description():
     ld.add_action(declare_params_file_cmd)
     ld.add_action(declare_autostart_cmd)
     ld.add_action(declare_use_composition_cmd)
+    ld.add_action(declare_use_bounded_container_cmd)
+    ld.add_action(declare_component_executor_threads_cmd)
     ld.add_action(declare_use_respawn_cmd)
     ld.add_action(declare_log_level_cmd)
     ld.add_action(declare_waypoint_follower_package_cmd)

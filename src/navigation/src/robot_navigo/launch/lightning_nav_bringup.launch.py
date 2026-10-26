@@ -83,6 +83,8 @@ def generate_launch_description():
     params_file = LaunchConfiguration('params_file')
     autostart = LaunchConfiguration('autostart')
     use_composition = LaunchConfiguration('use_composition')
+    use_bounded_component_container = LaunchConfiguration('use_bounded_component_container')
+    component_executor_threads = LaunchConfiguration('component_executor_threads')
     nav2_delay = LaunchConfiguration('nav2_delay')
     nav_cmd_timeout_ms = LaunchConfiguration('nav_cmd_timeout_ms')
 
@@ -119,6 +121,13 @@ def generate_launch_description():
         'use_composition',
         default_value='true',
         description='Run Nav2 servers in a component container')
+
+    declare_use_bounded_container_cmd = DeclareLaunchArgument(
+        'use_bounded_component_container', default_value='false',
+        description='Use the isolated container with an explicit per-component worker budget')
+    declare_component_executor_threads_cmd = DeclareLaunchArgument(
+        'component_executor_threads', default_value='2',
+        description='Workers per component in the bounded container; 0 uses CPU auto detection')
 
     declare_nav2_delay_cmd = DeclareLaunchArgument(
         'nav2_delay',
@@ -232,6 +241,8 @@ def generate_launch_description():
                     'params_file': params_file,
                     'autostart': autostart,
                     'use_composition': use_composition,
+                    'use_bounded_component_container': use_bounded_component_container,
+                    'component_executor_threads': component_executor_threads,
                     'waypoint_follower_package': waypoint_follower_package,
                     'waypoint_follower_executable': waypoint_follower_executable,
                     'waypoint_follower_plugin': waypoint_follower_plugin,
@@ -259,6 +270,8 @@ def generate_launch_description():
     ld.add_action(declare_params_file_cmd)
     ld.add_action(declare_autostart_cmd)
     ld.add_action(declare_use_composition_cmd)
+    ld.add_action(declare_use_bounded_container_cmd)
+    ld.add_action(declare_component_executor_threads_cmd)
     ld.add_action(declare_nav2_delay_cmd)
     ld.add_action(declare_nav_cmd_timeout_cmd)
     ld.add_action(declare_enable_livox_converter_cmd)
