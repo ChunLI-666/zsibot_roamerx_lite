@@ -6,11 +6,17 @@ find_package(rclcpp REQUIRED)
 find_package(robot_debug_msgs REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 include(cmake/robot_debug_build_stamp.cmake)
+_robot_debug_source_manifest_args("navigation" _observer_manifest_args _observer_manifest)
+set(_observer_proof_output "")
+if(_observer_manifest)
+  set(_observer_proof_output "${CMAKE_CURRENT_BINARY_DIR}/source_manifest.json")
+endif()
 add_custom_target(observer_debug_stamp ALL
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_build_stamp.py
     --repo ${CMAKE_CURRENT_SOURCE_DIR} --repository-id navigation
+    ${_observer_manifest_args}
     --artifact robot_debug_tools/debug_observer --json ${CMAKE_CURRENT_BINARY_DIR}/debug_build.json
-  BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/debug_build.json VERBATIM)
+  BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/debug_build.json ${_observer_proof_output} VERBATIM)
 add_library(robot_debug_recorder INTERFACE)
 target_include_directories(robot_debug_recorder INTERFACE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -23,6 +29,9 @@ install(PROGRAMS scripts/generate_build_stamp.py DESTINATION share/${PROJECT_NAM
 install(PROGRAMS scripts/debug_observer DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY launch/ DESTINATION share/${PROJECT_NAME}/launch)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/debug_build.json DESTINATION share/${PROJECT_NAME})
+if(_observer_manifest)
+  install(FILES "${_observer_proof_output}" DESTINATION share/${PROJECT_NAME})
+endif()
 install(TARGETS robot_debug_recorder EXPORT robot_debug_recorder)
 ament_export_targets(robot_debug_recorder)
 ament_export_include_directories(include)
@@ -30,6 +39,7 @@ ament_export_dependencies(rclcpp robot_debug_msgs)
 if(BUILD_TESTING)
   find_package(ament_cmake_pytest REQUIRED)
   ament_add_pytest_test(test_build_stamp test/test_build_stamp.py)
+  ament_add_pytest_test(test_source_manifest test/test_source_manifest.py TIMEOUT 120)
   ament_add_pytest_test(test_debug_tools test/test_debug_tools.py)
   ament_add_pytest_test(test_publication_isolation test/test_publication_isolation.py)
 endif()
