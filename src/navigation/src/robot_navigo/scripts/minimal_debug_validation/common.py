@@ -367,6 +367,45 @@ def _profile_budget_script(package):
     return str(path.resolve())
 
 
+def _profile_daily_localization_entry(selected_env):
+    """Recognize an installed, policy-bound shim without preloading Python."""
+    if selected_env.get('AMENT_PREFIX_PATH', '') != os.environ.get('AMENT_PREFIX_PATH', ''):
+        raise RuntimeError('Native profiling entry resolution requires matching parent/child AMENT_PREFIX_PATH')
+    from ament_index_python.packages import get_package_prefix
+    prefix = Path(get_package_prefix('lightning'))
+    entry = prefix / 'lib/lightning/run_loc_online'
+    if not entry.is_file() or not os.access(entry, os.X_OK):
+        raise RuntimeError('Localization entry is unavailable: ' + str(entry))
+    with entry.open('rb') as stream:
+        if stream.read(4) == b'\x7fELF':
+            return None  # Preserve the existing direct-native profiling path.
+    actual_sha = sha256(entry)
+    identity = prefix / 'share/lightning/daily_entry.sha256'
+    if not identity.is_file() or identity.read_text().strip() != actual_sha:
+        raise RuntimeError('Non-native localization entry has no matching installed identity')
+    policy_path = prefix / 'share/lightning/daily_startup.json'
+    if not policy_path.exists() and not policy_path.is_symlink():
+        legacy = prefix / 'libexec/lightning/run_loc_online'
+        profiler = prefix / 'lib/lightning/profile_workload'
+        if not legacy.is_file() or not os.access(legacy, os.X_OK) or not profiler.is_file() or not os.access(profiler, os.X_OK):
+            raise RuntimeError('Daily legacy profiling boundary is unavailable')
+        with legacy.open('rb') as stream:
+            if stream.read(4) != b'\x7fELF':
+                raise RuntimeError('Daily legacy profiling boundary is not native ELF')
+        return dict(entry=str(entry), entry_sha256=actual_sha, policy=None,
+                    installed_identity=str(identity), installed_identity_sha256=sha256(identity),
+                    selected_mode='legacy_no_policy', legacy_native=str(legacy))
+    try:
+        policy = json.loads(policy_path.read_text())
+    except (OSError, ValueError) as error:
+        raise RuntimeError('Non-native localization entry has no valid daily policy') from error
+    if policy.get('schema') != 'lightning.daily_startup.policy.v1' or policy.get('entry_sha256') != actual_sha:
+        raise RuntimeError('Daily localization entry differs from its installed policy')
+    return dict(entry=str(entry), entry_sha256=actual_sha,
+                installed_identity=str(identity), installed_identity_sha256=sha256(identity),
+                policy=str(policy_path), policy_sha256=sha256(policy_path), selected_mode='policy_bound')
+
+
 def native_profile_command(name, command, output, selected_env):
     """Keep launchers clean and inject the CPU profiler at selected native execs."""
     import shlex
@@ -411,6 +450,20 @@ def native_profile_command(name, command, output, selected_env):
     if not command or Path(command[0]).name != 'ros2':
         raise RuntimeError('Unsupported CPU-profile launcher; use a validated native prefix')
     if name == 'localization' and command[1:5] == ['run', 'lightning', 'run_loc_online', '--config']:
+        daily = _profile_daily_localization_entry(selected_env)
+        if daily is not None:
+            key = 'LIGHTNING_STARTUP_PROFILE_OUTPUT_ROOT'
+            if selected_env.get(key):
+                raise RuntimeError('Conflicting daily native profile output root')
+            # The shim validates the policy and hands this output path to the
+            # budget's final native exec. ros2/Python/taskset stay unpreloaded.
+            daily_root = str(Path(output_root).absolute())
+            return [*outer, *command], dict(
+                scope='native-only CPU plus outer resource tree', requested_backend='gperftools',
+                outer_backend='resources', native_output_root=daily_root,
+                requested_command=original, daily_entry=daily,
+                environment_patch={key: daily_root},
+                native_boundary='daily entry verifies policy; budget injects profiler only at final ELF')
         executable = _profile_native_executable('lightning', 'run_loc_online')
         prefix = shlex.join([*base_prefix, '--native-allow-executable', executable, '--'])
         command[2:2] = ['--prefix', prefix]
@@ -468,6 +521,8 @@ class Processes:
         native_profile = None
         if profiling and selected_env.get('LOCNAV_PROFILE_BACKEND', 'gperftools') == 'gperftools':
             command, native_profile = native_profile_command(name, command, self.output, selected_env)
+            if native_profile.get('environment_patch'):
+                env = dict(selected_env, **native_profile['environment_patch'])
             command = ['/usr/bin/python3', str(HERE.parent / 'performance/run.py'),
                        '--output', str(self.output / 'performance' / name),
                        '--backend', 'resources',

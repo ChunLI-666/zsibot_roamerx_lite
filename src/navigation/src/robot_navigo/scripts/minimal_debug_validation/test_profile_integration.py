@@ -179,3 +179,128 @@ def test_bounded_executor_budget_forwarded_without_navigation_parameter_changes(
     assert ('use_bounded_component_container:=true' in command) == (workers is not None)
     if workers is not None:
         assert 'component_executor_threads:=' + str(workers) in command
+
+
+def daily_profile_fixture(monkeypatch, tmp_path, native=False):
+    monkeypatch.delenv('AMENT_PREFIX_PATH', raising=False)
+    prefix = tmp_path / 'installed'
+    entry = prefix / 'lib/lightning/run_loc_online'
+    entry.parent.mkdir(parents=True)
+    entry.write_bytes(b'\x7fELFfixture' if native else b'#!/usr/bin/python3\n# daily entry fixture\n')
+    entry.chmod(0o755)
+    policy = prefix / 'share/lightning/daily_startup.json'
+    policy.parent.mkdir(parents=True)
+    (policy.parent / 'daily_entry.sha256').write_text(common.sha256(entry) + '\n')
+    policy.write_text(json.dumps(dict(schema='lightning.daily_startup.policy.v1',
+                                      entry_sha256=common.sha256(entry))))
+    monkeypatch.setitem(sys.modules, 'ament_index_python.packages',
+                        SimpleNamespace(get_package_prefix=lambda name: str(prefix)))
+    return entry, policy
+
+
+def test_daily_shim_profiling_keeps_ros2_and_python_clean(monkeypatch, tmp_path):
+    entry, _ = daily_profile_fixture(monkeypatch, tmp_path)
+    command = ['ros2', 'run', 'lightning', 'run_loc_online', '--config', '/fixture/base.yaml',
+               '--ros-args', '-p', 'use_sim_time:=true']
+    env = dict(LOCNAV_PROFILE='1', LOCNAV_PROFILE_BACKEND='gperftools')
+    manager, calls = capture_starts(monkeypatch, tmp_path)
+    try:
+        manager.start('localization', command, env=env)
+        actual, kwargs = calls[-1]
+        assert actual[-len(command):] == command
+        assert '--prefix' not in actual and '--native-allow-executable' not in actual
+        assert '--backend' in actual and 'resources' in actual  # Outer tree monitor only.
+        patch = kwargs['env']
+        assert patch['LIGHTNING_STARTUP_PROFILE_OUTPUT_ROOT'] == str(
+            tmp_path / 'performance/localization/native')
+        assert not any(patch.get(k) for k in ('LD_PRELOAD', 'CPUPROFILE', 'HEAPPROFILE'))
+        assert 'LIGHTNING_STARTUP_PROFILE_OUTPUT_ROOT' not in env
+        detail = manager.stages['localization']['native_CPU_profiling']
+        assert detail['daily_entry']['entry_sha256'] == common.sha256(entry)
+    finally:
+        close_streams(manager)
+
+
+@pytest.mark.parametrize('change', ['missing-identity', 'wrong-schema', 'wrong-sha', 'changed-entry'])
+def test_unbound_daily_script_cannot_receive_profiler(monkeypatch, tmp_path, change):
+    entry, policy = daily_profile_fixture(monkeypatch, tmp_path)
+    if change == 'missing-identity':
+        (policy.parent / 'daily_entry.sha256').unlink()
+    elif change == 'changed-entry':
+        entry.write_text('# changed script\n')
+    else:
+        value = json.loads(policy.read_text())
+        value['schema' if change == 'wrong-schema' else 'entry_sha256'] = 'invalid'
+        policy.write_text(json.dumps(value))
+    with pytest.raises(RuntimeError, match='policy|differs|identity'):
+        common.native_profile_command('localization',
+            ['ros2', 'run', 'lightning', 'run_loc_online', '--config', '/fixture/base.yaml'],
+            tmp_path, dict(LOCNAV_PROFILE='1'))
+
+
+def test_direct_elf_profile_prefix_remains_native_only(monkeypatch, tmp_path):
+    entry, _ = daily_profile_fixture(monkeypatch, tmp_path, native=True)
+    command, detail = common.native_profile_command('localization',
+        ['ros2', 'run', 'lightning', 'run_loc_online', '--config', '/fixture/base.yaml'],
+        tmp_path, dict(LOCNAV_PROFILE='1'))
+    assert '--prefix' in command
+    assert str(entry.resolve()) in command[command.index('--prefix') + 1]
+    assert 'environment_patch' not in detail
+
+
+def test_daily_profile_output_override_is_rejected(monkeypatch, tmp_path):
+    daily_profile_fixture(monkeypatch, tmp_path)
+    with pytest.raises(RuntimeError, match='Conflicting daily'):
+        common.native_profile_command('localization',
+            ['ros2', 'run', 'lightning', 'run_loc_online', '--config', '/fixture/base.yaml'],
+            tmp_path, dict(LOCNAV_PROFILE='1', LIGHTNING_STARTUP_PROFILE_OUTPUT_ROOT='/other'))
+
+
+def test_parent_child_entry_resolution_mismatch_is_rejected(monkeypatch, tmp_path):
+    daily_profile_fixture(monkeypatch, tmp_path)
+    monkeypatch.setenv('AMENT_PREFIX_PATH', '/parent/selected/prefix')
+    with pytest.raises(RuntimeError, match='matching parent/child'):
+        common.native_profile_command('localization',
+            ['ros2', 'run', 'lightning', 'run_loc_online', '--config', '/fixture/base.yaml'],
+            tmp_path, dict(LOCNAV_PROFILE='1', AMENT_PREFIX_PATH='/child/other/prefix'))
+
+
+def test_known_shim_without_ci6_policy_preserves_native_profile_boundary(monkeypatch, tmp_path):
+    entry, policy = daily_profile_fixture(monkeypatch, tmp_path)
+    policy.unlink()
+    prefix = entry.parents[2]
+    legacy = prefix / 'libexec/lightning/run_loc_online'
+    legacy.parent.mkdir(parents=True)
+    legacy.write_bytes(b'\x7fELFlegacy fixture')
+    legacy.chmod(0o755)
+    profiler = prefix / 'lib/lightning/profile_workload'
+    profiler.write_text('#!/usr/bin/python3\n# fixture\n')
+    profiler.chmod(0o755)
+    original = ['ros2', 'run', 'lightning', 'run_loc_online', '--config', '/fixture/base.yaml']
+    command, detail = common.native_profile_command('localization', original, tmp_path, dict(LOCNAV_PROFILE='1'))
+    assert command == original and '--prefix' not in command
+    assert detail['daily_entry']['selected_mode'] == 'legacy_no_policy'
+    assert detail['daily_entry']['legacy_native'] == str(legacy)
+    assert detail['environment_patch'] == dict(
+        LIGHTNING_STARTUP_PROFILE_OUTPUT_ROOT=str(tmp_path / 'performance/localization/native'))
+
+
+@pytest.mark.parametrize('state', ['valid', 'broken', 'wrong-sha'])
+def test_symlink_install_entry_identity_is_checked_by_actual_content(monkeypatch, tmp_path, state):
+    entry, policy = daily_profile_fixture(monkeypatch, tmp_path)
+    identity = policy.parent / 'daily_entry.sha256'
+    identity.unlink()
+    generated = tmp_path / 'generated-entry.sha256'
+    if state != 'broken':
+        generated.write_text((common.sha256(entry) if state == 'valid' else '0' * 64) + '\n')
+    identity.symlink_to(generated)
+    call = lambda: common.native_profile_command('localization',
+        ['ros2', 'run', 'lightning', 'run_loc_online', '--config', '/fixture/base.yaml'],
+        tmp_path, dict(LOCNAV_PROFILE='1'))
+    if state == 'valid':
+        command, detail = call()
+        assert '--prefix' not in command
+        assert detail['daily_entry']['entry_sha256'] == common.sha256(entry)
+    else:
+        with pytest.raises(RuntimeError, match='identity'):
+            call()
