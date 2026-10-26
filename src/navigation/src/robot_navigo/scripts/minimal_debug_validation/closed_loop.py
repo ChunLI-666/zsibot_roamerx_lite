@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Actual ordinary Nav stack drives a sensor-only SE2 plant; never hardware IO."""
 import math
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -38,10 +39,14 @@ def main():
                 command += ['--config', str(args.config.resolve())]
             if args.no_composition:
                 command += ['--no-composition']
+            if args.component_executor_threads is not None:
+                command += ['--component-executor-threads', str(args.component_executor_threads)]
             if args.observer_off:
                 command += ['--observer-off']
             if args.observations_off:
                 command += ['--observations-off']
+            if args.cleanup_diagnostics:
+                command += ['--cleanup-diagnostics']
             with (args.output / (scenario + '.log')).open('w') as log:
                 try:
                     # Inner stages have bounded waits and own their ROS process
@@ -64,7 +69,10 @@ def main():
     monitor, processes = Monitor(args, plant=True), Processes(args.output)
     processes.pump = lambda: rclpy.spin_once(monitor, timeout_sec=.01)
     result = dict(success=False, scenario=args.scenario, hardware_io=False,
-        default_environment=True, composition_enabled=not args.no_composition,
+        default_environment=os.environ.get('LOCNAV_PROFILE', '0') != '1',
+        profiling_enabled=os.environ.get('LOCNAV_PROFILE', '0') == '1',
+        composition_enabled=not args.no_composition,
+        cleanup_diagnostics=bool(args.cleanup_diagnostics),
         plant='SE2 constant body twist; 350ms command watchdog; scan is raycast map geometry',
         tested='actual ordinary planner/smoother/BT/controller/velocity_smoother/gate',
         not_tested=['Lightning algorithm', 'real physics', 'SDK/mux', 'Matrix'])

@@ -35,6 +35,7 @@ set(CMAKE_C_STANDARD 99)
 #############################################################################
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_components REQUIRED)
 find_package(robot_debug_tools REQUIRED)
 find_package(robot_debug_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
@@ -71,6 +72,10 @@ add_subdirectory(udp)
 #############################################################################
 # some exe lib
 #############################################################################
+
+add_executable(bounded_component_container src/bounded_component_container.cpp)
+ament_target_dependencies(bounded_component_container rclcpp rclcpp_components)
+install(TARGETS bounded_component_container DESTINATION lib/${PROJECT_NAME})
 
 #==========================>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 add_executable(odom_to_tf_broadcaster
@@ -342,9 +347,64 @@ install(DIRECTORY launch params map rviz doc routes regression
         WORLD_READ WORLD_WRITE WORLD_EXECUTE
 )
 
+# Same opt-in interface as Lightning; disabled runs directly exec the workload.
+install(PROGRAMS scripts/performance/run_budget.py DESTINATION lib/${PROJECT_NAME}
+        RENAME run_budget)
+install(FILES config/performance/ci6_udp_loopback.xml
+        DESTINATION lib/${PROJECT_NAME}/config/performance
+        PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
+install(PROGRAMS scripts/performance/run.py DESTINATION lib/${PROJECT_NAME}
+        RENAME profile_workload)
+install(PROGRAMS scripts/performance/report.py DESTINATION lib/${PROJECT_NAME}
+        RENAME profile_report)
+install(FILES scripts/performance/README.md DESTINATION share/${PROJECT_NAME}/performance)
+install(DIRECTORY scripts/performance/heap_sampled
+        DESTINATION share/${PROJECT_NAME}/performance
+        PATTERN "__pycache__" EXCLUDE)
+
 if(BUILD_TESTING)
     find_package(ament_cmake_gtest REQUIRED)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    find_package(composition_interfaces REQUIRED)
+    find_package(rmw_fastrtps_shared_cpp REQUIRED)
+    # Exercise the included product source, not a duplicated response policy.
+    ament_add_gtest(test_bounded_load_reply_policy
+            test/test_bounded_load_reply_policy.cpp
+            SKIP_LINKING_MAIN_LIBRARIES TIMEOUT 30
+            ENV "ROS_DOMAIN_ID=184" "ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST"
+                "RMW_IMPLEMENTATION=rmw_fastrtps_cpp")
+    ament_add_gtest(test_bounded_load_same_handle_service
+            test/test_bounded_load_same_handle_service.cpp
+            SKIP_LINKING_MAIN_LIBRARIES TIMEOUT 30
+            ENV "ROS_DOMAIN_ID=184" "ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST"
+                "RMW_IMPLEMENTATION=rmw_fastrtps_cpp")
+    foreach(reply_test test_bounded_load_reply_policy test_bounded_load_same_handle_service)
+        if(TARGET ${reply_test})
+            ament_target_dependencies(${reply_test}
+                    rclcpp rclcpp_components composition_interfaces)
+            target_link_options(${reply_test} PRIVATE "-Wl,--wrap=rcl_send_response")
+            set_tests_properties(${reply_test} PROPERTIES RUN_SERIAL TRUE)
+        endif()
+    endforeach()
+    if(TARGET test_bounded_load_same_handle_service)
+        ament_target_dependencies(test_bounded_load_same_handle_service rmw_fastrtps_shared_cpp)
+    endif()
+    add_test(NAME test_nav_run_budget
+            COMMAND ${Python3_EXECUTABLE} -B -m unittest -v
+                    test_run_budget test_run_budget_dds)
+    set_tests_properties(test_nav_run_budget PROPERTIES
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/scripts/performance"
+            TIMEOUT 30)
+    add_test(
+            NAME test_bounded_component_container_cli
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_bounded_component_container_cli.py
+                    $<TARGET_FILE:bounded_component_container>)
+    add_test(
+            NAME test_bounded_component_launch
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_bounded_component_launch.py
+                    ${CMAKE_CURRENT_SOURCE_DIR})
     ament_add_gtest(test_livox_scan_projection
             test/test_livox_scan_projection.cpp)
     target_include_directories(test_livox_scan_projection PRIVATE include)

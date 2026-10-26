@@ -11,7 +11,45 @@ from common import (arguments, bootstrap, prepare_navigation, runtime_manifest,
                     Processes, start_stack, start_recording, audit_bag, write_json, sha256,
                     isolate_recovery_seed)
 from replay_support import (validate_playback_options, player_command, full_schedule,
-                            source_evidence, finish_original_source)
+                            source_evidence, finish_original_source, coverage_report,
+                            raw_sensor_qos, localization_command)
+
+
+def write_raw_playback_qos(output, sensors):
+    path = output / 'raw_playback_qos.yaml'
+    path.write_text(yaml.safe_dump(raw_sensor_qos(sensors)))
+    return path
+
+
+def shutdown_navigation_once(monitor, processes, navigation_finalized=False):
+    """Do not send SHUTDOWN again after the full-source tail has failed.
+
+    finish_original_source finalizes navigation before waiting for source EOF
+    and coverage. Its later failure must not repeat an already successful
+    lifecycle transition (some lifecycle managers cannot handle that request).
+    """
+    if navigation_finalized or monitor.counts.get('lifecycle_finalized', 0):
+        return False
+    monitor.lifecycle_shutdown(processes)
+    return True
+
+
+def full_source_snapshot(monitor, player, schedule, expected, *,
+                         drain_completed=False, validation_error=None):
+    """Keep raw count/hash evidence even when the strict drain check fails."""
+    actual = monitor.raw_source_report() if hasattr(monitor, 'raw_sources') else {}
+    report = coverage_report(expected, actual)
+    code = player.poll() if player is not None else None
+    finalized = [row['data'] for row in monitor.events
+                 if row['event'] == 'full_source_navigation_finalized']
+    report.update(player_returncode=code, natural_eof=code == 0,
+        original_start_ns=schedule['start_ns'], original_end_ns=schedule['end_ns'],
+        last_clock_ns=monitor.get_clock().now().nanoseconds,
+        navigation_finalized_before_eof=any(row.get('player_still_running') is True
+                                          for row in finalized),
+        timestamps_edited=False, synthetic_clock=False,
+        drain_completed=drain_completed, validation_error=validation_error)
+    return report
 
 
 def main():
@@ -48,6 +86,7 @@ def main():
     if int(config.get('fasterlio', {}).get('lidar_type', 1)) != 1:
         raise ValueError('This historical replay fixture expects Livox CustomMsg input')
     sensors = [common.get('livox_lidar_topic', '/livox/lidar'), common.get('imu_topic', '/livox/imu')]
+    args.raw_playback_qos = write_raw_playback_qos(args.output, sensors)
     args.record_topics_extra = sensors if args.record_raw_sensors else []
     metadata = yaml.safe_load((args.bag / 'metadata.yaml').read_text())['rosbag2_bagfile_information']
     types = {item['topic_metadata']['name']: item['topic_metadata']['type']
@@ -70,10 +109,17 @@ def main():
     recovery = isolate_recovery_seed(config, args.output)
     effective = args.output / 'lightning_config.yaml'
     effective.write_text(yaml.safe_dump(config, sort_keys=False))
+    localization_launch = localization_command(
+        ['ros2', 'run', 'lightning', 'run_loc_online', '--config', str(effective),
+         '--ros-args', '-p', 'use_sim_time:=true', '-p',
+         'enable_debug_observations:=' + str(not args.observations_off).lower()], effective)
     write_json(args.output / 'replay_inputs.json', dict(bag=str(args.bag),
         metadata_sha256=sha256(args.bag / 'metadata.yaml'), sensors=sensors,
         map=str(args.map), map_sha256=sha256(args.map), source_config=str(args.config),
         source_config_sha256=sha256(args.config), effective_config_sha256=sha256(effective),
+        localization_command=localization_launch,
+        raw_playback_qos=str(args.raw_playback_qos),
+        raw_playback_qos_sha256=sha256(args.raw_playback_qos),
         recovery_seed=recovery,
         original_sensors_copied_to_output=args.record_raw_sensors,
         rate=args.rate, source_duration=schedule['duration_seconds'] if schedule else
@@ -90,9 +136,10 @@ def main():
     monitor, processes = Monitor(args), Processes(args.output)
     processes.pump = lambda: rclpy.spin_once(monitor, timeout_sec=.01)
     result = dict(success=False, mode='sensor_only_open_loop', arrival='N/A', hardware_io=False,
-        goal_input=args.goal_input, default_environment=True,
+        goal_input=args.goal_input, default_environment=os.environ.get('LOCNAV_PROFILE', '0') != '1',
+        profiling_enabled=os.environ.get('LOCNAV_PROFILE', '0') == '1',
         composition_enabled=not args.no_composition)
-    handle = action_result = None
+    handle = action_result = player = None
     navigation_finalized = False
     try:
         others = [name for name, _ in monitor.get_node_names_and_namespaces()
@@ -107,9 +154,7 @@ def main():
         # added only when available in this canonical workspace.
         if pangolin.is_dir():
             env['LD_LIBRARY_PATH'] = str(pangolin) + ':' + env.get('LD_LIBRARY_PATH', '')
-        processes.start('localization', ['ros2', 'run', 'lightning', 'run_loc_online',
-            '--config', str(effective), '--ros-args', '-p', 'use_sim_time:=true',
-            '-p', 'enable_debug_observations:=' + str(not args.observations_off).lower()], env=env)
+        processes.start('localization', localization_launch, env=env)
         player = processes.start('player', player_command(args, sensors))
         monitor.spin_until(lambda: monitor.get_clock().now().nanoseconds > 0,
             15., 'historical bag /clock before recorder startup', processes)
@@ -117,10 +162,20 @@ def main():
         monitor.recorder_ready(processes)
         start_stack(processes, args, params, scan=True)
         if args.full_bag_mode:
+            if getattr(args, 'require_preplay_consumers', False):
+                processes.stage('preplay_consumers', 'RUNNING')
+                try:
+                    monitor.preplay_consumers_ready(processes, sensors, types, schedule['start_ns'])
+                except Exception as error:
+                    processes.stage('preplay_consumers', 'FAIL', error=repr(error))
+                    raise
+                processes.stage('preplay_consumers', 'PASS')
             monitor.resume_source(sensors, processes)
         processes.stage('readiness', 'RUNNING')
         monitor.readiness(processes)
+        monitor.record('provenance_audit_start', dict(sim_time_ns=monitor.get_clock().now().nanoseconds))
         processes.loaded_libraries(args.install_prefix)
+        monitor.record('provenance_audit_complete', dict(sim_time_ns=monitor.get_clock().now().nanoseconds))
         processes.stage('readiness', 'PASS')
         if args.full_bag_mode:
             monitor.until_source_time(schedule['goal_ns'], args.rate, processes)
@@ -175,6 +230,10 @@ def main():
     except Exception as error:
         result.update(error=type(error).__name__ + ': ' + str(error))
         processes.stage('validation', 'FAIL', error=result['error'])
+        if args.full_bag_mode:
+            write_json(args.output / 'full_source_coverage_failure.json',
+                full_source_snapshot(monitor, player, schedule, original,
+                                     validation_error=result['error']))
         if handle and action_result and not action_result.done():
             try:
                 monitor.cancel(handle, action_result, processes, allow=('player',))
@@ -183,12 +242,19 @@ def main():
                 result['cancel_cleanup_error'] = str(cancel_error)
         monitor.report()
     finally:
-        if not navigation_finalized:
-            try:
-                monitor.lifecycle_shutdown(processes)
-            except Exception as error:
-                result.update(success=False, lifecycle_shutdown_error=str(error))
+        try:
+            shutdown_navigation_once(monitor, processes, navigation_finalized)
+        except Exception as error:
+            result.update(success=False, lifecycle_shutdown_error=str(error))
         processes.close()
+        if args.full_bag_mode:
+            # Cleanup pumps the monitor and can drain already queued samples.
+            # A late match is evidence only: it never clears the prior failure
+            # or turns a failed strict drain into full_source_valid=True.
+            write_json(args.output / 'full_source_coverage.json',
+                full_source_snapshot(monitor, player, schedule, original,
+                    drain_completed=result.get('full_source_valid', False),
+                    validation_error=result.get('error')))
         monitor.finish()
         final_report = monitor.report()
         result['observations'] = final_report['counts']

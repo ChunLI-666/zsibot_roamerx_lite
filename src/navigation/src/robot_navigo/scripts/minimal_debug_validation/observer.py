@@ -46,6 +46,63 @@ def yaw(rotation):
                       1 - 2 * (rotation.y ** 2 + rotation.z ** 2))
 
 
+def recorder_endpoint_evidence(info):
+    """Serialize the actual ROS graph endpoint, without synthesizing traffic."""
+    qos = info.qos_profile
+    fields = {}
+    for name in ('history', 'depth', 'reliability', 'durability', 'liveliness',
+                 'avoid_ros_namespace_conventions'):
+        value = getattr(qos, name, None)
+        fields[name] = getattr(value, 'name', value)
+    for name in ('deadline', 'lifespan', 'liveliness_lease_duration'):
+        value = getattr(qos, name, None)
+        fields[name + '_ns'] = getattr(value, 'nanoseconds', None)
+    return dict(node_name=info.node_name, node_namespace=info.node_namespace,
+                topic_type=info.topic_type, endpoint_type=getattr(info.endpoint_type, 'name',
+                    str(info.endpoint_type)), endpoint_gid=[int(value) for value in info.endpoint_gid], qos=fields)
+
+
+def preplay_endpoint_matches(info, requirement):
+    """Match the real named endpoint; observers/recorders cannot substitute."""
+    # RMW graph APIs expose the native DDS 16-byte GUID on this FastDDS build;
+    # others expose the 24-byte rmw_gid storage. Preserve either actual form.
+    gid = list(info.endpoint_gid)
+    if len(gid) not in (16, 24) or not any(gid) or not all(
+            type(byte) is int and 0 <= byte <= 255 for byte in gid):
+        return False
+    value = recorder_endpoint_evidence(info)
+    if any(value[name] != requirement[name] for name in
+           ('node_name', 'node_namespace', 'topic_type', 'endpoint_type')):
+        return False
+    qos = value['qos']
+    if any(qos[name] != requirement[name] for name in ('reliability', 'durability')):
+        return False
+    # FastDDS discovery may not advertise history/depth (UNKNOWN/0). Retain
+    # that limit explicitly; reject a known contradictory value.
+    return (qos['history'] in ('UNKNOWN', 'KEEP_LAST') and
+            qos['depth'] in (0, requirement['depth']))
+
+
+def preplay_list_nodes_type():
+    # Optional harness barrier only; keep the default observer import unchanged.
+    from composition_interfaces.srv import ListNodes
+    return ListNodes
+
+
+def preplay_component_names():
+    return ['/map_server', '/controller_server', '/planner_server', '/behavior_server',
+            '/velocity_smoother', '/bt_navigator', '/waypoint_follower',
+            '/lifecycle_manager_navigation']
+
+
+def preplay_component_response_matches(names, ids):
+    expected = preplay_component_names()
+    return (len(names) == len(ids) == len(expected) and
+            all(type(name) is str for name in names) and set(names) == set(expected) and
+            all(type(value) is int and 0 < value < 2**64 for value in ids) and
+            len(set(ids)) == len(ids))
+
+
 class ObservedTopicGoal:
     """A real BT-created goal, adopted from status; never sends an Action goal."""
     def __init__(self, node, goal_uuid):
@@ -119,6 +176,79 @@ class Monitor(Node):
             self.tick_timer = self.create_timer(.02, self.tick,
                 clock=Clock(clock_type=ClockType.STEADY_TIME))
         self.record('monitor_start', dict(plant=plant, pose=self.pose, hardware_io=False))
+        self.cleanup_diagnostics = bool(getattr(args, 'cleanup_diagnostics', False))
+        if self.cleanup_diagnostics:
+            self._prepare_cleanup_diagnostics()
+
+    def _cleanup_diagnostic_record(self, event, data):
+        # Diagnostics must never replace the original shutdown result/exception.
+        try:
+            self.record(event, data)
+        except Exception:
+            pass
+
+    def _prepare_cleanup_diagnostics(self):
+        try:
+            self._lifecycle_shutdown_client = self.create_client(
+                ManageLifecycleNodes, '/lifecycle_manager_navigation/manage_nodes')
+            self._cleanup_state_clients = {name: self.create_client(GetState, '/' + name + '/get_state')
+                for name in ('map_server', 'controller_server', 'smoother_server', 'planner_server',
+                             'behavior_server', 'velocity_smoother', 'bt_navigator', 'waypoint_follower')}
+            self._cleanup_diagnostic_record('lifecycle_diagnostics_prepared', dict(
+                service='/lifecycle_manager_navigation/manage_nodes',
+                state_services=sorted(self._cleanup_state_clients),
+                manages_request_sent=False))
+        except Exception as error:
+            self._cleanup_diagnostic_record('lifecycle_diagnostics_prepare_error', dict(error=repr(error)))
+
+    def _cleanup_future_snapshot(self, future, phase):
+        try:
+            data = dict(phase=phase, service='/lifecycle_manager_navigation/manage_nodes',
+                        command=4, local_request_ordinal=1, done=future.done(), cancelled=future.cancelled())
+            if data['done'] and not data['cancelled']:
+                error = future.exception()
+                data['exception'] = repr(error) if error else None
+                if not error:
+                    response = future.result()
+                    data['response_success'] = bool(response and response.success)
+            self._cleanup_diagnostic_record('lifecycle_diagnostic_future', data)
+        except Exception as error:
+            self._cleanup_diagnostic_record('lifecycle_diagnostic_future_error', dict(phase=phase, error=repr(error)))
+
+    def _diagnose_lifecycle_timeout(self, future, processes):
+        """Observe a failed RPC for at most five more seconds; never retry or pass it."""
+        try:
+            self._cleanup_future_snapshot(future, 'original_wait_failed')
+            clients = getattr(self, '_cleanup_state_clients', {})
+            pending, states = {}, {}
+            def collect():
+                for name, client in clients.items():
+                    if name in states:
+                        continue
+                    if name in pending:
+                        if pending[name].done():
+                            try:
+                                answer = pending[name].result()
+                                states[name] = dict(state_id=answer.current_state.id,
+                                                    label=answer.current_state.label) if answer else dict(error='empty response')
+                            except Exception as error:
+                                states[name] = dict(error=repr(error))
+                    elif client.service_is_ready():
+                        pending[name] = client.call_async(GetState.Request())
+                return bool(clients) and len(states) == len(clients)
+            diagnostic_error = None
+            try:
+                self.spin_until(collect, 5., 'diagnostic lifecycle state snapshots', processes)
+            except Exception as error:
+                diagnostic_error = repr(error)
+            for name in clients:
+                states.setdefault(name, dict(status='pending' if name in pending else 'service_not_ready'))
+            self._cleanup_diagnostic_record('lifecycle_diagnostic_states', dict(
+                states=states, error=diagnostic_error, original_shutdown_failed=True,
+                diagnostic_only=True, maximum_extra_wait_seconds=5.))
+            self._cleanup_future_snapshot(future, 'after_failure_state_diagnostics')
+        except Exception as error:
+            self._cleanup_diagnostic_record('lifecycle_diagnostics_error', dict(error=repr(error)))
 
     def record(self, event, data, observation=None):
         import json
@@ -236,7 +366,10 @@ class Monitor(Node):
     def watch_raw_sources(self, sources, types):
         """Audit serialized input only; never republish or alter a sensor sample."""
         from replay_support import CdrStreamDigest
-        self.raw_sources = {topic: CdrStreamDigest() for topic in sources}
+        # A lightweight stamp ledger makes count/hash failures diagnosable
+        # without retaining LiDAR point arrays or changing source messages.
+        self.raw_sources = {topic: CdrStreamDigest(keep_stamps=True) for topic in sources}
+        self.raw_source_types = {topic: types[topic] for topic in sources}
         def callback(name):
             def receive(data):
                 self.raw_sources[name].add(data)
@@ -260,6 +393,179 @@ class Monitor(Node):
         if future.exception():
             raise future.exception()
         self.record('full_source_resumed', dict(sim_time_ns=self.get_clock().now().nanoseconds))
+
+    def preplay_consumer_requirements(self, sensors, types):
+        import yaml
+        config = yaml.safe_load((self.args.output / 'lightning_config.yaml').read_text())
+        nav = yaml.safe_load((self.args.output / 'navigation_params.yaml').read_text())
+        if nav.get('nav_safety_gate', {}).get('ros__parameters', {}).get('enable_epoch_contract', False):
+            raise ValueError('Preplay consumer gate requires the standalone safety gate contract')
+        expected = ('livox_ros_driver2/msg/CustomMsg', 'sensor_msgs/msg/Imu')
+        if len(sensors) != 2 or tuple(types.get(topic) for topic in sensors) != expected:
+            raise ValueError('Preplay gate requires the selected original CustomMsg/IMU topics')
+        best_effort = config.get('common', {}).get('qos_best_effort', False)
+        if type(best_effort) is not bool:
+            raise ValueError('qos_best_effort must be a YAML boolean')
+        performance = config.get('performance', {})
+        rows = []
+        def add(node, topic, kind, endpoint, reliability, depth):
+            rows.append(dict(node_name=node, node_namespace='/', topic=topic,
+                topic_type=kind, endpoint_type=endpoint, reliability=reliability,
+                durability='VOLATILE', depth=depth))
+        for topic, kind, key in zip(sensors, expected, ('lidar_queue_depth', 'imu_queue_depth')):
+            add('lightning_slam', topic, kind, 'SUBSCRIPTION',
+                'BEST_EFFORT' if best_effort else 'RELIABLE', performance.get(key, 10))
+        add('livox_scan_projector', sensors[0], expected[0], 'SUBSCRIPTION', 'BEST_EFFORT', 1)
+        add('livox_scan_projector', '/laser_scan', 'sensor_msgs/msg/LaserScan', 'PUBLISHER', 'BEST_EFFORT', 1)
+        for topic, kind, endpoint, depth in (
+            ('/cmd_vel', 'geometry_msgs/msg/Twist', 'SUBSCRIPTION', 1),
+            ('/lightning/loc_status', 'std_msgs/msg/UInt8', 'SUBSCRIPTION', 1),
+            ('/emergency_stop', 'std_msgs/msg/Bool', 'SUBSCRIPTION', 1),
+            ('/cmd_vel_safe', 'geometry_msgs/msg/Twist', 'PUBLISHER', 10),
+            ('/nav_safety_gate/gate_status', 'std_msgs/msg/UInt8', 'PUBLISHER', 1)):
+            add('nav_safety_gate', topic, kind, endpoint, 'RELIABLE', depth)
+        return rows
+
+    def preplay_consumers_ready(self, processes, sensors, types, expected_clock_ns):
+        """Data-free discovery while the original source is still paused."""
+        if not getattr(self.args, 'full_bag_mode', False) or self.plant:
+            raise ValueError('Preplay consumer gate requires full real-sensor replay')
+        begin, cpu_begin = time.monotonic_ns(), time.process_time_ns()
+        before = self.get_clock().now().nanoseconds
+        report = dict(schema='locnav.preplay_consumers.v2', status='RUNNING',
+            started_monotonic_ns=begin, expected_paused_clock_ns=expected_clock_ns,
+            paused_clock_before_ns=before, source_resume_called_by_gate=False,
+            waits_for_good_tf_or_sensor_data=False, initialization_cpu_cost_must_be_reported_separately=True,
+            semantics='Startup dependency normalization, not algorithm CPU work saved or CPU-idle proof; report full-capture costs separately from source-window costs.',
+            qos_discovery_limit='UNKNOWN history/zero depth is unadvertised; known contradictory values fail. Reliability/durability, node/type/direction/GID are mandatory.',
+            requirements=[], endpoints=[], construction_required=True,
+            component_container=dict(node_name='navigo_container', node_namespace='/',
+                service='/navigo_container/_container/list_nodes',
+                service_type='composition_interfaces/srv/ListNodes',
+                expected_full_node_names=preplay_component_names(), request_count=0,
+                request_minimum_interval_ns=100000000, request_rate_limit_hz=10,
+                request_timeout_ns=2000000000, request_timeout_count=0,
+                last_request_timeout_monotonic_ns=None,
+                pending_cancelled_at_gate_end=False,
+                last_request_monotonic_ns=None, minimum_observed_request_interval_ns=None,
+                response_received=False, matches=False),
+            standalone_smoother_service=dict(node_name='smoother_server', node_namespace='/',
+                service='/smoother_server/get_state', service_type='lifecycle_msgs/srv/GetState',
+                service_ready=False, state_requested=False,
+                evidence_limit='Service discovery/readiness only; derived constructor completion, ACTIVE and TF readiness are not inferred.'))
+        self.record('preplay_consumers_waiting', dict(expected_paused_clock_ns=expected_clock_ns,
+            started_monotonic_ns=begin))
+        pending = None
+        component_client = None
+        try:
+            if before <= 0 or before != expected_clock_ns:
+                raise RuntimeError('Paused source clock differs from original source start')
+            requirements = self.preplay_consumer_requirements(sensors, types)
+            report['requirements'] = requirements
+            list_type = preplay_list_nodes_type()
+            component = report['component_container']
+            smoother = report['standalone_smoother_service']
+            component_client = self.create_client(list_type, component['service'])
+            smoother_client = self.create_client(GetState, smoother['service'])
+            pending = None
+            pending_started_ns = None
+            next_request_ns = 0
+            request_deadline_ns = None
+            def service_ready(contract, client):
+                try:
+                    services = self.get_service_names_and_types_by_node(
+                        contract['node_name'], contract['node_namespace'])
+                    contract['observed_services'] = [dict(name=name, types=list(kinds))
+                                                     for name, kinds in services]
+                    contract['graph_type_match'] = any(name == contract['service'] and
+                        contract['service_type'] in kinds for name, kinds in services)
+                    contract['graph_error'] = None
+                except Exception as error:
+                    contract['graph_type_match'] = False
+                    contract['graph_error'] = type(error).__name__ + ': ' + str(error)
+                contract['service_ready'] = bool(client.service_is_ready())
+                return contract['graph_type_match'] and contract['service_ready']
+            def ready():
+                nonlocal pending, pending_started_ns, next_request_ns
+                if self.get_clock().now().nanoseconds != before:
+                    raise RuntimeError('Source clock advanced while awaiting preplay consumers')
+                observed = []
+                for requirement in requirements:
+                    get = (self.get_subscriptions_info_by_topic if
+                           requirement['endpoint_type'] == 'SUBSCRIPTION' else self.get_publishers_info_by_topic)
+                    infos = get(requirement['topic'])
+                    matches = [recorder_endpoint_evidence(info) for info in infos
+                               if preplay_endpoint_matches(info, requirement)]
+                    observed.append(dict(requirement=requirement, matches=matches,
+                        observed=[recorder_endpoint_evidence(info) for info in infos]))
+                report['endpoints'] = observed
+                container_ready = service_ready(component, component_client)
+                smoother_ready = service_ready(smoother, smoother_client)
+                now_ns = time.monotonic_ns()
+                if now_ns >= request_deadline_ns:
+                    return False
+                if (container_ready and not component['matches'] and pending is None and
+                        now_ns >= next_request_ns):
+                    previous_ns = component['last_request_monotonic_ns']
+                    pending = component_client.call_async(list_type.Request())
+                    pending_started_ns = now_ns
+                    component['request_count'] += 1
+                    component['last_request_monotonic_ns'] = now_ns
+                    if previous_ns is not None:
+                        interval = now_ns - previous_ns
+                        minimum = component['minimum_observed_request_interval_ns']
+                        component['minimum_observed_request_interval_ns'] = interval if minimum is None else min(minimum, interval)
+                    next_request_ns = now_ns + component['request_minimum_interval_ns']
+                if pending is not None:
+                    if pending.done():
+                        completed = pending
+                        pending = None
+                        pending_started_ns = None
+                        response = completed.result()
+                        component.update(response_received=True,
+                            full_node_names=list(response.full_node_names),
+                            unique_ids=list(response.unique_ids),
+                            response_monotonic_ns=time.monotonic_ns())
+                        component['matches'] = preplay_component_response_matches(
+                            component['full_node_names'], component['unique_ids'])
+                    elif now_ns - pending_started_ns >= component['request_timeout_ns']:
+                        # Read-only query only: retire its local sequence before
+                        # retry. A late response cannot satisfy the fresh query.
+                        component_client.remove_pending_request(pending)
+                        pending.cancel()
+                        pending = None
+                        pending_started_ns = None
+                        component['request_timeout_count'] += 1
+                        component['last_request_timeout_monotonic_ns'] = now_ns
+                        next_request_ns = max(next_request_ns,
+                            now_ns + component['request_minimum_interval_ns'])
+                return (all(row['matches'] for row in observed) and container_ready and
+                        component['matches'] and smoother_ready)
+            # A ready callback can wake spin_once immediately: its .02s timeout
+            # is not a polling interval. Bound read-only RPCs on host monotonic
+            # time while preserving the original overall wait and predicate.
+            request_deadline_ns = time.monotonic_ns() + int(self.args.ready_timeout * 1000000000)
+            self.spin_until(ready, self.args.ready_timeout,
+                'real standalone preplay sensor-consumer graph endpoints', processes)
+            if self.get_clock().now().nanoseconds != before:
+                raise RuntimeError('Source clock advanced before preplay gate completed')
+            report['status'] = 'PASS'
+        except Exception as error:
+            report.update(status='FAIL', error=type(error).__name__ + ': ' + str(error))
+            raise
+        finally:
+            if pending is not None:
+                component_client.remove_pending_request(pending)
+                pending.cancel()
+                report['component_container']['pending_cancelled_at_gate_end'] = True
+            report.update(finished_monotonic_ns=time.monotonic_ns(),
+                paused_clock_after_ns=self.get_clock().now().nanoseconds,
+                observer_process_cpu_wait_ns=time.process_time_ns() - cpu_begin)
+            report['wait_monotonic_ns'] = report['finished_monotonic_ns'] - begin
+            report['paused_clock_unchanged'] = report['paused_clock_after_ns'] == before == expected_clock_ns
+            write_json(self.args.output / 'preplay_consumers.json', report)
+            self.record('preplay_consumers_ready' if report['status'] == 'PASS' else
+                        'preplay_consumers_not_ready', report)
 
     def until_source_time(self, target_ns, rate, processes):
         remaining = max(0., (target_ns - self.get_clock().now().nanoseconds) / 1e9 / rate)
@@ -291,18 +597,48 @@ class Monitor(Node):
         except Exception:
             return False
 
-    def recorder_ready(self, processes):
-        """Observe recorder subscriptions while a real clock is already running."""
+    def recorder_topics(self):
+        """Only topics created before navigation startup can gate source resume."""
         goal_topic = '/goal_pose' if self.goal_input == 'topic' else '/validation/goal_pose'
+        topics = {'/clock': 'rosgraph_msgs/msg/Clock', goal_topic: 'geometry_msgs/msg/PoseStamped'}
+        if getattr(self.args, 'full_bag_mode', False) and not self.plant:
+            # The native online node always creates pose/odom publishers. Debug
+            # is YAML-controlled, independently of the Nav2 observer switches.
+            import yaml
+            effective = self.args.output / 'lightning_config.yaml'
+            config = yaml.safe_load((effective if effective.is_file() else self.args.config).read_text())
+            topics.update({'/odom/current_pose': 'nav_msgs/msg/Odometry',
+                           '/lightning/pose': 'geometry_msgs/msg/PoseStamped'})
+            if config.get('debug', {}).get('enable', False):
+                topics['/lightning/debug'] = 'lightning/msg/LightningDebug'
+        for topic in getattr(self.args, 'record_topics_extra', []):
+            topics[topic] = getattr(self, 'raw_source_types', {}).get(topic)
+        return topics
+
+    def recorder_ready(self, processes):
+        """Require real recorder subscriptions before resuming paused input."""
+        required = self.recorder_topics()
+        observed = {}
         def ready():
-            return self.get_clock().now().nanoseconds > 0 and all(
-                any(info.node_name.startswith('rosbag2_recorder')
-                    for info in self.get_subscriptions_info_by_topic(topic))
-                for topic in ('/clock', goal_topic))
-        self.spin_until(ready, 15., 'recorder clock and goal subscriptions', processes)
-        self.spin_for(.2, processes)
+            observed.clear()
+            for topic, expected_type in required.items():
+                observed[topic] = [recorder_endpoint_evidence(info)
+                    for info in self.get_subscriptions_info_by_topic(topic)
+                    if info.node_name == 'rosbag2_recorder' and info.topic_type and
+                       (expected_type is None or info.topic_type == expected_type)]
+            return self.get_clock().now().nanoseconds > 0 and all(observed.values())
+        self.record('recorder_waiting', dict(required_topics=required))
+        try:
+            self.spin_until(ready, 15., 'recorder subscriptions for all pre-resume topics', processes)
+        except TimeoutError:
+            self.record('recorder_not_ready', dict(required_topics=required,
+                missing_topics=[topic for topic in required if not observed.get(topic)],
+                subscription_endpoints=observed))
+            raise
         self.record('recorder_ready', dict(sim_time_ns=self.get_clock().now().nanoseconds,
-            log_uses_sim_time=True, pre_clock_messages_not_recorded=True))
+            log_uses_sim_time=True, pre_clock_messages_not_recorded=True,
+            required_topics=required, subscription_endpoints=observed,
+            readiness='actual rosbag2_recorder graph subscriptions; no fixed settling sleep'))
 
     def readiness(self, processes):
         self.spin_until(self.sources_ready, self.args.ready_timeout,
@@ -325,6 +661,12 @@ class Monitor(Node):
             return len(active) == len(names) and self.navigator.server_is_ready() and self.sources_ready()
         self.spin_until(all_ready, self.args.ready_timeout, 'active lifecycle nodes and navigation Action', processes)
         self.record('stack_ready', dict(lifecycle_active=sorted(active)))
+        if getattr(self, 'cleanup_diagnostics', False):
+            try:
+                self._cleanup_diagnostic_record('lifecycle_diagnostic_ready', dict(
+                    phase='stack_ready', ready=self._lifecycle_shutdown_client.service_is_ready()))
+            except Exception as error:
+                self._cleanup_diagnostic_record('lifecycle_diagnostic_ready_error', dict(error=repr(error)))
 
     def send_goal(self, goal, processes):
         request = NavigateToPose.Goal()
@@ -381,12 +723,46 @@ class Monitor(Node):
 
     def lifecycle_shutdown(self, processes):
         """Use the stack's standard shutdown before stopping its clock/processes."""
-        client = self.create_client(ManageLifecycleNodes, '/lifecycle_manager_navigation/manage_nodes')
-        self.spin_until(client.service_is_ready, 5., 'lifecycle manager shutdown service', processes)
-        request = ManageLifecycleNodes.Request()
-        request.command = ManageLifecycleNodes.Request.SHUTDOWN
-        future = client.call_async(request)
-        self.spin_until(future.done, 30., 'standard lifecycle shutdown response', processes)
+        self.record('lifecycle_shutdown_begin', dict(sim_time_ns=self.get_clock().now().nanoseconds))
+        client = getattr(self, '_lifecycle_shutdown_client', None)
+        if client is None:
+            self.record('lifecycle_shutdown_client_create_started', {})
+            client = self.create_client(ManageLifecycleNodes, '/lifecycle_manager_navigation/manage_nodes')
+            self._lifecycle_shutdown_client = client
+            self.record('lifecycle_shutdown_client_created', {})
+        future = getattr(self, '_lifecycle_shutdown_future', None)
+        if future is None:
+            self.spin_until(client.service_is_ready, 5., 'lifecycle manager shutdown service', processes)
+            self.record('lifecycle_shutdown_service_ready', {})
+            request = ManageLifecycleNodes.Request()
+            request.command = ManageLifecycleNodes.Request.SHUTDOWN
+            self.record('lifecycle_shutdown_send_started', {})
+            if getattr(self, 'cleanup_diagnostics', False):
+                try:
+                    self._cleanup_diagnostic_record('lifecycle_diagnostic_call', dict(
+                        service='/lifecycle_manager_navigation/manage_nodes', command=4,
+                        local_request_ordinal=1, ready=client.service_is_ready()))
+                except Exception as error:
+                    self._cleanup_diagnostic_record('lifecycle_diagnostic_call_error', dict(error=repr(error)))
+            future = client.call_async(request)
+            # Keep the original RPC if waiting raises (for example source EOF).
+            # Finally may resume observation, but must never send SHUTDOWN twice.
+            self._lifecycle_shutdown_future = future
+            self.record('lifecycle_shutdown_requested', {})
+            if getattr(self, 'cleanup_diagnostics', False):
+                self._cleanup_future_snapshot(future, 'call_async_returned')
+                try:
+                    future.add_done_callback(lambda completed: self._cleanup_future_snapshot(completed, 'done_callback'))
+                except Exception as error:
+                    self._cleanup_diagnostic_record('lifecycle_diagnostic_callback_error', dict(error=repr(error)))
+        else:
+            self.record('lifecycle_shutdown_existing_request_reused', {})
+        try:
+            self.spin_until(future.done, 30., 'standard lifecycle shutdown response', processes)
+        except Exception:
+            if getattr(self, 'cleanup_diagnostics', False):
+                self._diagnose_lifecycle_timeout(future, processes)
+            raise
         response = future.result()
         self.record('lifecycle_shutdown_response', dict(success=bool(response and response.success)))
         if not response or not response.success:
