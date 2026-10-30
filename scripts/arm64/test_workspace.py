@@ -12,6 +12,9 @@ SPEC = importlib.util.spec_from_file_location('arm_workspace_under_test',
                                            Path(__file__).with_name('workspace.py'))
 workspace = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(workspace)
+# Retain the actual classifier for planning tests whose compiler fixture mocks
+# package_inputs; classification itself must still read real source paths.
+ACTUAL_PACKAGE_INPUTS = workspace.package_inputs
 
 
 def package(directory, name, dependencies=''):
@@ -77,13 +80,15 @@ def input_fixture(tmp_path, monkeypatch):
     monkeypatch.setattr(workspace, 'NAV_REPO', nav)
 
     def snapshot(name, relative, content, mode=None):
-        path = nav / name / relative
+        package_root = loc if name == 'lightning' else nav / name
+        path = package_root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
         if mode is not None:
             path.chmod(mode)
-        files = {nav: [f.relative_to(nav) for f in nav.rglob('*') if f.is_file()], loc: []}
-        return workspace.package_inputs(name, nav / name, loc, files)
+        files = {repo: [f.relative_to(repo) for f in repo.rglob('*') if f.is_file()]
+                 for repo in (nav, loc)}
+        return ACTUAL_PACKAGE_INPUTS(name, package_root, loc, files)
     return snapshot
 
 
@@ -91,6 +96,8 @@ def input_fixture(tmp_path, monkeypatch):
     ('controller', 'src/controller.cpp'), ('controller', 'include/controller.hpp'),
     ('messages', 'msg/State.msg'), ('controller', 'CMakeLists.txt'),
     ('controller', 'package.xml'), ('robot_debug_tools', 'scripts/generate_build_stamp.py'),
+    ('robot_navigo', 'scripts/nav_safety_gate.py'),
+    ('lightning', 'scripts/run_loc_online_entry.py'),
 ])
 def test_compile_inputs_invalidate_build_signature(input_fixture, name, relative):
     first = input_fixture(name, relative, 'first')
@@ -98,10 +105,15 @@ def test_compile_inputs_invalidate_build_signature(input_fixture, name, relative
     assert first['compile'] != second['compile']
 
 
-@pytest.mark.parametrize('relative', ['params/site.yaml', 'launch/entry.launch.py', 'scripts/helper'])
-def test_runtime_only_changes_do_not_invalidate_compilation(input_fixture, relative):
-    first = input_fixture('robot_navigo', relative, 'first')
-    second = input_fixture('robot_navigo', relative, 'second')
+@pytest.mark.parametrize('name,relative', [
+    ('robot_navigo', 'params/site.yaml'), ('robot_navigo', 'launch/entry.launch.py'),
+    ('robot_navigo', 'scripts/helper'), ('robot_navigo', 'scripts/other.py'),
+    ('lightning', 'config/site.yaml'), ('lightning', 'launch/entry.launch.py'),
+    ('lightning', 'scripts/other.py'),
+])
+def test_runtime_only_changes_do_not_invalidate_compilation(input_fixture, name, relative):
+    first = input_fixture(name, relative, 'first')
+    second = input_fixture(name, relative, 'second')
     assert first['compile'] == second['compile']
     assert first['runtime'] != second['runtime']
 
@@ -267,6 +279,36 @@ def test_configuration_change_only_reinstalls_runtime(cached_build, capsys):
     cached_build[2]['robot_navigo']['runtime'] = 'changed site config'
     assert planned_actions(cached_build, capsys) == {
         'robot_debug_msgs': 'reuse', 'lightning': 'reuse', 'robot_navigo': 'install'}
+
+
+@pytest.mark.parametrize('name,relative,action', [
+    ('robot_navigo', 'scripts/nav_safety_gate.py', 'build'),
+    ('lightning', 'scripts/run_loc_online_entry.py', 'build'),
+    ('robot_navigo', 'params/site.yaml', 'install'),
+    ('robot_navigo', 'launch/entry.launch.py', 'install'),
+    ('lightning', 'config/site.yaml', 'install'),
+    ('lightning', 'launch/entry.launch.py', 'install'),
+])
+def test_real_source_change_plans_only_required_package_action(
+        cached_build, capsys, name, relative, action):
+    args, names, inputs, _, _ = cached_build
+    packages = workspace.discover_packages(None)
+    loc, nav = packages['lightning'], workspace.NAV_REPO
+    source = packages[name] / relative
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text('original execution source or resource')
+
+    def actual_inputs():
+        files = {repo: [f.relative_to(repo) for f in repo.rglob('*') if f.is_file()]
+                 for repo in (nav, loc)}
+        return ACTUAL_PACKAGE_INPUTS(name, packages[name], loc, files)
+
+    inputs[name] = actual_inputs()
+    assert workspace.build(args) == 0  # Fixture compiler only, freezes the real input hashes.
+    source.write_text('updated execution source or resource')
+    inputs[name] = actual_inputs()
+    assert planned_actions(cached_build, capsys) == {
+        package_name: action if package_name == name else 'reuse' for package_name in names}
 
 
 def test_reused_binary_keeps_original_build_commit(cached_build, capsys):

@@ -36,6 +36,12 @@ NAV_PACKAGES = (
 )
 COMPILE_SUFFIXES = {'.c', '.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp', '.hxx',
                     '.cmake', '.msg', '.srv', '.action', '.idl', '.in'}
+# These installed Python executables also generate identity files during
+# configure/build. An install-only refresh would leave that identity stale.
+GENERATED_IDENTITY_INPUTS = {
+    ('robot_navigo', 'scripts/nav_safety_gate.py'),
+    ('lightning', 'scripts/run_loc_online_entry.py'),
+}
 IGNORED_PARTS = {'build', 'install', 'log', '.git', '__pycache__', '.pytest_cache',
                  'doc', 'docs', 'test', 'tests', 'regression'}
 
@@ -160,6 +166,7 @@ def package_inputs(name, path, loc, repo_files):
             continue
         value = file_identity(full)
         is_compile = (sub.suffix in COMPILE_SUFFIXES or sub.name in ('CMakeLists.txt', 'package.xml')
+                      or (name, sub.as_posix()) in GENERATED_IDENTITY_INPUTS
                       or name == 'robot_debug_tools' and sub.suffix == '.py')
         (compilation if is_compile else runtime)[str(sub)] = value
     if name == 'livox_ros_driver2':
