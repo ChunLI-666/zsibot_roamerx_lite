@@ -4,6 +4,7 @@ from pathlib import Path
 import signal
 import struct
 import subprocess
+import sys
 from types import SimpleNamespace
 
 import numpy as np
@@ -319,8 +320,10 @@ def test_only_expected_non_ros_log_tail_sigint_is_allowed(tmp_path):
     assert common.child_exit_audit(path, deliberate_sigint=True)['failures']
 
 
-def test_lifecycle_core_must_be_exact_overlay_library_even_if_old_bytes_match(tmp_path):
+def test_lifecycle_core_must_be_exact_overlay_library_even_if_old_bytes_match(tmp_path, monkeypatch):
     overlay = tmp_path / 'overlay'
+    monkeypatch.setitem(sys.modules, 'ament_index_python.packages',
+                        SimpleNamespace(get_package_prefix=lambda name: str(overlay)))
     expected = overlay / 'lib/libnav2_lifecycle_manager_core.so'
     expected.parent.mkdir(parents=True)
     expected.write_bytes(b'fixed local library')
@@ -331,8 +334,10 @@ def test_lifecycle_core_must_be_exact_overlay_library_even_if_old_bytes_match(tm
     assert not common.lifecycle_core_identity(other, overlay)['valid']
 
 
-def test_manager_bond_must_use_selected_overlay_library(tmp_path):
+def test_manager_bond_must_use_selected_overlay_library(tmp_path, monkeypatch):
     overlay = tmp_path / 'overlay'
+    monkeypatch.setitem(sys.modules, 'ament_index_python.packages',
+                        SimpleNamespace(get_package_prefix=lambda name: str(overlay)))
     fixed = overlay / 'lib/libbondcpp.so'
     fixed.parent.mkdir(parents=True)
     fixed.write_bytes(b'fixed destructor library')

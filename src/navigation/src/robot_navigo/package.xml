@@ -11,7 +11,9 @@
   <depend>robot_debug_tools</depend>
   <depend>robot_debug_msgs</depend>
 
-  <build_depend>navigation2</build_depend>
+  <!-- The ARM builder sets this environment before both dependency discovery
+       and CMake. An unset variable preserves the developer dependency set. -->
+  <build_depend condition="$ROBOT_NAVIGO_ARM_RUNTIME != '1'">navigation2</build_depend>
   <build_depend>launch_ros</build_depend>
 
   <build_depend>rclcpp</build_depend>
@@ -20,20 +22,20 @@
   <build_depend>nav_msgs</build_depend>
   <build_depend>geometry_msgs</build_depend>
   <build_depend>sensor_msgs</build_depend>
-  <build_depend>std_srvs</build_depend>
+  <build_depend condition="$ROBOT_NAVIGO_ARM_RUNTIME != '1'">std_srvs</build_depend>
   <build_depend>livox_ros_driver2</build_depend>
   <build_depend>robots_dog_msgs</build_depend>
-  <build_depend>OpenCV</build_depend>
-  <build_depend>yaml-cpp</build_depend>
+  <build_depend condition="$ROBOT_NAVIGO_ARM_RUNTIME != '1'">OpenCV</build_depend>
+  <build_depend condition="$ROBOT_NAVIGO_ARM_RUNTIME != '1'">yaml-cpp</build_depend>
 
   <exec_depend>rclcpp</exec_depend>
   <exec_depend>rclcpp_components</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
   <exec_depend>nav_msgs</exec_depend>
-  <exec_depend>OpenCV</exec_depend>
-  <exec_depend>yaml-cpp</exec_depend>
-  <exec_depend>python3-numpy</exec_depend>
-  <exec_depend>python3-scipy</exec_depend>
+  <exec_depend condition="$ROBOT_NAVIGO_ARM_RUNTIME != '1'">OpenCV</exec_depend>
+  <exec_depend condition="$ROBOT_NAVIGO_ARM_RUNTIME != '1'">yaml-cpp</exec_depend>
+  <exec_depend condition="$ROBOT_NAVIGO_ARM_RUNTIME != '1'">python3-numpy</exec_depend>
+  <exec_depend condition="$ROBOT_NAVIGO_ARM_RUNTIME != '1'">python3-scipy</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
   <exec_depend>navigo_behavior_tree</exec_depend>
   <exec_depend>navigo_bt_navigator</exec_depend>
@@ -47,9 +49,9 @@
   <exec_depend>rclpy</exec_depend>
   <exec_depend>navigo_epoch_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
-  <exec_depend>rosbag2_py</exec_depend>
-  <exec_depend>ros2bag</exec_depend>
-  <exec_depend>rosbag2_storage_mcap</exec_depend>
+  <exec_depend condition="$ROBOT_NAVIGO_ARM_RUNTIME != '1'">rosbag2_py</exec_depend>
+  <exec_depend condition="$ROBOT_NAVIGO_ARM_RUNTIME != '1'">ros2bag</exec_depend>
+  <exec_depend condition="$ROBOT_NAVIGO_ARM_RUNTIME != '1'">rosbag2_storage_mcap</exec_depend>
   <exec_depend>lifecycle_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>std_srvs</exec_depend>
@@ -58,11 +60,21 @@
 
   <exec_depend>python3-yaml</exec_depend>
   <exec_depend>launch_ros</exec_depend>
-  <exec_depend>navigation2</exec_depend>
-  <exec_depend>slam_toolbox</exec_depend>
+  <exec_depend condition="$ROBOT_NAVIGO_ARM_RUNTIME != '1'">navigation2</exec_depend>
+  <exec_depend condition="$ROBOT_NAVIGO_ARM_RUNTIME != '1'">slam_toolbox</exec_depend>
   <exec_depend>nav2_smoother</exec_depend>
   <!-- Build the workspace lifecycle ownership fix used by the default launch. -->
   <exec_depend>nav2_lifecycle_manager</exec_depend>
+  <!-- Dynamic launch/plugin dependencies are explicit in the runtime profile. -->
+  <exec_depend condition="$ROBOT_NAVIGO_ARM_RUNTIME == '1'">nav2_common</exec_depend>
+  <exec_depend condition="$ROBOT_NAVIGO_ARM_RUNTIME == '1'">ament_index_python</exec_depend>
+  <exec_depend condition="$ROBOT_NAVIGO_ARM_RUNTIME == '1'">navigo_map_server</exec_depend>
+  <exec_depend condition="$ROBOT_NAVIGO_ARM_RUNTIME == '1'">navigo_path_planner</exec_depend>
+  <exec_depend condition="$ROBOT_NAVIGO_ARM_RUNTIME == '1'">navigo_navfn_planner</exec_depend>
+  <exec_depend condition="$ROBOT_NAVIGO_ARM_RUNTIME == '1'">navigo_path_controller</exec_depend>
+  <exec_depend condition="$ROBOT_NAVIGO_ARM_RUNTIME == '1'">navigo_mppi_controller</exec_depend>
+  <exec_depend condition="$ROBOT_NAVIGO_ARM_RUNTIME == '1'">navigo_behaviors</exec_depend>
+  <exec_depend condition="$ROBOT_NAVIGO_ARM_RUNTIME == '1'">navigo_velocity_optimizer</exec_depend>
 
   <!-- <exec_depend>eigen</exec_depend>
   <exec_depend>pcl_conversions</exec_depend>
@@ -74,6 +86,7 @@
   <test_depend>composition_interfaces</test_depend>
   <test_depend>rmw_fastrtps_shared_cpp</test_depend>
   <test_depend>python3-yaml</test_depend>
+  <test_depend>python3-catkin-pkg</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

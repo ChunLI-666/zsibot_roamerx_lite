@@ -74,8 +74,9 @@ class Client:
 
 
 class Harness:
-    def __init__(self, diagnostics=False, pending=False):
+    def __init__(self, diagnostics=False, pending=False, arm_runtime=False):
         self.node = Monitor()
+        self.node.args = SimpleNamespace(arm_runtime=arm_runtime)
         self.node.cleanup_diagnostics = diagnostics
         self.events, self.created, self.waits = [], [], []
         self.original_error = TimeoutError('standard lifecycle shutdown response')
@@ -109,6 +110,18 @@ class Harness:
 
 
 class LifecycleDiagnosticsTest(unittest.TestCase):
+    def test_arm_runtime_diagnostics_and_shutdown_only_query_installed_nodes(self):
+        for diagnostics in (False, True):
+            with self.subTest(diagnostics=diagnostics):
+                h = Harness(diagnostics=diagnostics, arm_runtime=True)
+                h.node.lifecycle_shutdown(None)
+                self.assertFalse(any('/waypoint_follower/' in name for _, name in h.created))
+                final = h.events[-1]
+                self.assertEqual(final[0], 'lifecycle_finalized')
+                self.assertEqual(len(final[1]['nodes']), 7)
+                self.assertIn('smoother_server', final[1]['nodes'])
+                self.assertEqual(len(h.manager.calls), 1)
+
     def test_default_path_remains_lazy_and_normal(self):
         h = Harness()
         self.assertEqual(h.created, [])

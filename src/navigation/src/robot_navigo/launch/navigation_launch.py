@@ -1,14 +1,16 @@
 import os
+from typing import List
 
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, GroupAction, SetEnvironmentVariable, TimerAction
 from launch.conditions import IfCondition, UnlessCondition
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import IfElseSubstitution, LaunchConfiguration
 from launch_ros.actions import LoadComposableNodes, SetParameter
 from launch_ros.actions import Node
 from launch_ros.descriptions import ComposableNode, ParameterFile
+from launch_ros.parameter_descriptions import ParameterValue
 from nav2_common.launch import RewrittenYaml
 
 
@@ -25,6 +27,7 @@ def generate_launch_description():
     use_respawn = LaunchConfiguration('use_respawn')
     log_level = LaunchConfiguration('log_level')
     container_name = LaunchConfiguration('container_name')
+    enable_waypoint_follower = LaunchConfiguration('enable_waypoint_follower')
     waypoint_follower_package = LaunchConfiguration('waypoint_follower_package')
     waypoint_follower_executable = LaunchConfiguration('waypoint_follower_executable')
     waypoint_follower_plugin = LaunchConfiguration('waypoint_follower_plugin')
@@ -44,8 +47,13 @@ def generate_launch_description():
         'behavior_server',
         'velocity_smoother',
         'bt_navigator',
-        'waypoint_follower',
     ]
+    lifecycle_node_names = ParameterValue(
+        IfElseSubstitution(
+            enable_waypoint_follower,
+            if_value=repr(lifecycle_nodes + ['waypoint_follower']),
+            else_value=repr(lifecycle_nodes)),
+        value_type=List[str])
 
     remappings = [('/tf', 'tf'), ('/tf_static', 'tf_static')]
 
@@ -141,6 +149,10 @@ def generate_launch_description():
         'waypoint_follower_package',
         default_value='navigo_waypoint_follower',
         description='Waypoint follower package used by this deployment',
+    )
+    declare_enable_waypoint_follower_cmd = DeclareLaunchArgument(
+        'enable_waypoint_follower', default_value='true',
+        description='Start and lifecycle-manage the optional waypoint follower',
     )
 
     declare_waypoint_follower_executable_cmd = DeclareLaunchArgument(
@@ -249,6 +261,7 @@ def generate_launch_description():
             ),
             Node(
                 package=waypoint_follower_package,
+                condition=IfCondition(enable_waypoint_follower),
                 executable=waypoint_follower_executable,
                 name='waypoint_follower',
                 output='screen',
@@ -277,7 +290,7 @@ def generate_launch_description():
                     arguments=['--ros-args', '--log-level', log_level],
                     parameters=[{
                         'autostart': autostart,
-                        'node_names': lifecycle_nodes,
+                        'node_names': lifecycle_node_names,
                         'bond_timeout': 4.0,
                     }],
                 )],
@@ -336,6 +349,7 @@ def generate_launch_description():
                     ),
                     ComposableNode(
                         package=waypoint_follower_package,
+                        condition=IfCondition(enable_waypoint_follower),
                         plugin=waypoint_follower_plugin,
                         name='waypoint_follower',
                         parameters=[configured_params, {
@@ -349,7 +363,7 @@ def generate_launch_description():
                         name='lifecycle_manager_navigation',
                         parameters=[{
                             'autostart': autostart,
-                            'node_names': lifecycle_nodes,
+                            'node_names': lifecycle_node_names,
                             'bond_timeout': 4.0,
                         }],
                     ),
@@ -375,6 +389,7 @@ def generate_launch_description():
     ld.add_action(declare_log_level_cmd)
     ld.add_action(declare_container_name_cmd)
     ld.add_action(declare_waypoint_follower_package_cmd)
+    ld.add_action(declare_enable_waypoint_follower_cmd)
     ld.add_action(declare_waypoint_follower_executable_cmd)
     ld.add_action(declare_waypoint_follower_plugin_cmd)
     ld.add_action(declare_waypoint_task_executor_plugin_cmd)

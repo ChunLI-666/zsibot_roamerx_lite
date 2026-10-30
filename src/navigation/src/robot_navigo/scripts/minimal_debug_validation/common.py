@@ -83,6 +83,8 @@ def arguments(description):
     parser.add_argument('--goal-input', choices=('action', 'topic'), default='action',
                         help='Replay defaults to the real /goal_pose BT input; closed loop uses Action')
     parser.add_argument('--no-composition', action='store_true')
+    parser.add_argument('--arm-runtime', action='store_true',
+                        help='Validate the lean runtime: disable waypoint follower and pointcloud converter')
     parser.add_argument('--component-executor-threads', type=int, choices=range(0, 129),
                         help='Use bounded isolated Nav2 executors; 0 retains automatic worker count')
     parser.add_argument('--observer-off', action='store_true',
@@ -145,8 +147,38 @@ def timestamp_domain_valid(log_ns, source_ns, maximum_difference_sec=300, source
     return abs(log_ns - source_ns) <= maximum_difference_sec * 1_000_000_000
 
 
+def selected_package_prefix(install_prefix, package):
+    """Resolve the sourced package index and require the selected install tree."""
+    from ament_index_python.packages import get_package_prefix
+    root = Path(install_prefix).resolve()
+    prefix = Path(get_package_prefix(package)).resolve()
+    if prefix not in (root, root / package):
+        raise RuntimeError(f'{package} resolves outside the selected merged/isolated overlay: {prefix}')
+    return prefix
+
+
+def selected_overlay_libraries(install_prefix):
+    from ament_index_python.packages import get_packages_with_prefixes
+    root = Path(install_prefix).resolve()
+    prefixes = {selected_package_prefix(root, package)
+                for package, prefix in get_packages_with_prefixes().items()
+                if Path(prefix).resolve().is_relative_to(root)}
+    libraries = {}
+    for prefix in sorted(prefixes):
+        for path in sorted((prefix / 'lib').glob('*.so*')):
+            if not path.is_file():
+                continue
+            previous = libraries.get(path.name)
+            if previous is not None and previous.resolve() != path.resolve():
+                raise RuntimeError('Ambiguous selected overlay library: ' + path.name)
+            libraries[path.name] = path
+    return libraries
+
+
 def selected_library_identity(actual, install_prefix, library_name):
-    expected = Path(install_prefix) / 'lib' / library_name
+    package = {'libnav2_lifecycle_manager_core.so': 'nav2_lifecycle_manager',
+               'libbondcpp.so': 'bondcpp'}[library_name]
+    expected = selected_package_prefix(install_prefix, package) / 'lib' / library_name
     actual = Path(actual)
     present = actual.is_file() and expected.is_file()
     return dict(actual=str(actual.resolve()), expected=str(expected.resolve()),
@@ -199,7 +231,7 @@ def bootstrap(args):
                    ROS_LOCALHOST_ONLY='1', ROS_AUTOMATIC_DISCOVERY_RANGE='LOCALHOST',
                    ROS_LOG_DIR=str(args.output / 'ros_logs'))
         pangolin = WORKSPACE / 'src/lightning-lm/thirdparty/Pangolin-0.9.3/build'
-        if pangolin.is_dir():
+        if not getattr(args, 'arm_runtime', False) and pangolin.is_dir():
             env['LD_LIBRARY_PATH'] = str(pangolin) + ':' + env.get('LD_LIBRARY_PATH', '')
         os.execvpe('/bin/bash', ['bash', '-c', command], env)
     if args.output.exists():
@@ -261,6 +293,8 @@ def runtime_manifest(args, mode):
         'navigo_path_planner', 'navigo_navfn_planner', 'navigo_map_server',
         'navigo_behaviors', 'navigo_velocity_optimizer', 'navigo_waypoint_follower',
         'robot_navigo', 'robot_debug_msgs', 'robot_debug_tools', 'nav2_lifecycle_manager', 'bondcpp')
+    if getattr(args, 'arm_runtime', False):
+        critical = tuple(package for package in critical if package != 'navigo_waypoint_follower')
     if mode == 'replay':
         critical += ('lightning',)
     prefixes = {package: str(Path(get_package_prefix(package)).resolve()) for package in critical}
@@ -330,9 +364,12 @@ def runtime_manifest(args, mode):
             for name in ('LD_PRELOAD', 'MAGICK_THREAD_LIMIT')),
         goal_input=getattr(args, 'goal_input', 'action'),
         composition_enabled=not args.no_composition,
+        arm_runtime=bool(getattr(args, 'arm_runtime', False)),
         component_executor_threads=getattr(args, 'component_executor_threads', None),
         require_preplay_consumers=bool(getattr(args, 'require_preplay_consumers', False)),
-        preplay_consumers_scope='Standalone/localization endpoints, exact8 ListNodes construction response and smoother service discovery; not lifecycle ACTIVE, GOOD, TF, data delivery or CPU-idle proof',
+        preplay_consumers_scope=('Standalone/localization endpoints, exact'
+            + ('7' if getattr(args, 'arm_runtime', False) else '8')
+            + ' ListNodes construction response and smoother service discovery; not lifecycle ACTIVE, GOOD, TF, data delivery or CPU-idle proof'),
         cleanup_diagnostics=bool(getattr(args, 'cleanup_diagnostics', False)),
         profiling_enabled=profiling,
         profiling_backend=os.environ.get('LOCNAV_PROFILE_BACKEND', 'gperftools') if profiling else None,
@@ -561,7 +598,7 @@ class Processes:
             if expanded == owned:
                 break
             owned = expanded
-        selected = {path.name: path for path in (Path(install_prefix) / 'lib').glob('*.so*') if path.is_file()}
+        selected = selected_overlay_libraries(install_prefix)
         hashes, mapped, mismatches, lifecycle_cores, bonds = {}, {}, [], {}, {}
         for pid in sorted(owned):
             path = Path('/proc') / str(pid) / 'maps'
@@ -576,7 +613,9 @@ class Processes:
                 library = Path(fields[5])
                 is_lifecycle_core = library.name.startswith('libnav2_lifecycle_manager_core.so')
                 is_bondcpp = library.name.startswith('libbondcpp.so')
-                if not str(library).startswith(str(WORKSPACE)) and not (is_lifecycle_core or is_bondcpp):
+                if not (library.is_relative_to(WORKSPACE) or
+                        library.resolve().is_relative_to(Path(install_prefix).resolve()) or
+                        is_lifecycle_core or is_bondcpp):
                     continue
                 if is_lifecycle_core:
                     identity = lifecycle_core_identity(library, install_prefix)
@@ -604,8 +643,9 @@ class Processes:
                     key = str(expected)
                     if key not in hashes:
                         hashes[key] = sha256(expected)
+                    item['selected_overlay_path'] = str(expected.resolve())
                     item['selected_overlay_sha256'] = hashes[key]
-                    if hashes[str(library)] != hashes[key]:
+                    if library.resolve() != expected.resolve() or hashes[str(library)] != hashes[key]:
                         mismatches.append(str(library))
         manager_bonds = []
         for pid in {pid for item in lifecycle_cores.values() for pid in item['pids']}:
@@ -750,6 +790,8 @@ def start_stack(processes, args, params, scan=False):
         'autostart:=true', 'use_composition:=' + str(not args.no_composition),
         'enable_laserscan:=' + str(scan).lower(),
         'log_base_dir:=' + str(args.output / 'nav_logs')]
+    if getattr(args, 'arm_runtime', False):
+        command += ['enable_waypoint_follower:=false', 'enable_livox_converter:=false']
     if getattr(args, 'component_executor_threads', None) is not None:
         command += ['use_bounded_component_container:=true',
                     'component_executor_threads:=' + str(args.component_executor_threads)]

@@ -40,12 +40,13 @@ def info(requirement, **changes):
     return value
 
 
-def monitor(tmp_path, best_effort=False):
+def monitor(tmp_path, best_effort=False, arm_runtime=False):
     (tmp_path / 'lightning_config.yaml').write_text(yaml.safe_dump(dict(
         common=dict(qos_best_effort=best_effort), performance=dict(imu_queue_depth=2000, lidar_queue_depth=10))))
     (tmp_path / 'navigation_params.yaml').write_text('nav_safety_gate:\n  ros__parameters:\n    enable_epoch_contract: false\n')
     clock = SimpleNamespace(value=1000)
-    obj = SimpleNamespace(args=SimpleNamespace(output=tmp_path, ready_timeout=2., full_bag_mode=True),
+    obj = SimpleNamespace(args=SimpleNamespace(output=tmp_path, ready_timeout=2., full_bag_mode=True,
+                                               arm_runtime=arm_runtime),
         plant=False, events=[], get_clock=lambda: SimpleNamespace(now=lambda: SimpleNamespace(nanoseconds=clock.value)))
     methods = actual_methods()
     for key in ('preplay_consumer_requirements', 'preplay_consumers_ready'):
@@ -61,8 +62,9 @@ def monitor(tmp_path, best_effort=False):
         if not any(x.node_name == r['node_name'] for x in graph[key]): graph[key].append(info(r))
     obj.get_subscriptions_info_by_topic = lambda topic: graph.get((topic, 'SUBSCRIPTION'), [])
     obj.get_publishers_info_by_topic = lambda topic: graph.get((topic, 'PUBLISHER'), [])
-    obj.component_responses = [SimpleNamespace(full_node_names=methods['preplay_component_names'](),
-                                              unique_ids=list(range(1, 9)))]
+    component_names = methods['preplay_component_names'](arm_runtime)
+    obj.component_responses = [SimpleNamespace(full_node_names=component_names,
+                                              unique_ids=list(range(1, len(component_names) + 1)))]
     obj.component_requests = []
     obj.service_graph = {
         'navigo_container': [('/navigo_container/_container/list_nodes', ['composition_interfaces/srv/ListNodes'])],
@@ -102,6 +104,28 @@ def test_ready_paused_graph_without_any_good_tf_scan_or_new_clock(tmp_path):
     assert len(d['component_container']['unique_ids']) == 8
     assert d['standalone_smoother_service']['service_ready']
     assert d['standalone_smoother_service']['state_requested'] is False
+
+
+def test_arm_runtime_accepts_exact_seven_components_without_waypoint(tmp_path):
+    obj, _, _, sensors, types, _ = monitor(tmp_path, arm_runtime=True)
+    run(obj, sensors, types)
+    report = json.loads((tmp_path / 'preplay_consumers.json').read_text())
+    component = report['component_container']
+    assert report['status'] == 'PASS' and component['matches']
+    assert len(component['unique_ids']) == 7
+    assert '/waypoint_follower' not in component['expected_full_node_names']
+
+
+@pytest.mark.parametrize('arm_runtime', [False, True])
+def test_component_profile_mismatch_is_rejected(tmp_path, arm_runtime):
+    obj, _, _, sensors, types, _ = monitor(tmp_path, arm_runtime=arm_runtime)
+    other_names = actual_methods()['preplay_component_names'](not arm_runtime)
+    obj.component_responses = [SimpleNamespace(full_node_names=other_names,
+                                               unique_ids=list(range(1, len(other_names) + 1)))]
+    with pytest.raises(TimeoutError):
+        run(obj, sensors, types)
+    report = json.loads((tmp_path / 'preplay_consumers.json').read_text())
+    assert report['status'] == 'FAIL' and not report['component_container']['matches']
 
 
 def test_real_fastdds_16_byte_graph_gid_is_preserved(tmp_path):

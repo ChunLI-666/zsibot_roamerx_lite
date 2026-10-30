@@ -6,6 +6,20 @@ project(robot_navigo
         DESCRIPTION "robot_navigo source code"
 )
 
+# Keep the package dependency conditions and the CMake target set in agreement.
+# Unset is the existing developer profile; the ARM entry sets both values.
+set(_arm_runtime_default OFF)
+if("$ENV{ROBOT_NAVIGO_ARM_RUNTIME}" STREQUAL "1")
+    set(_arm_runtime_default ON)
+endif()
+option(ROBOT_NAVIGO_ARM_RUNTIME "Build only the ARM navigation runtime" ${_arm_runtime_default})
+if((ROBOT_NAVIGO_ARM_RUNTIME AND NOT _arm_runtime_default) OR
+   (NOT ROBOT_NAVIGO_ARM_RUNTIME AND _arm_runtime_default))
+    message(FATAL_ERROR
+        "ROBOT_NAVIGO_ARM_RUNTIME must agree with the dependency environment: "
+        "set ROBOT_NAVIGO_ARM_RUNTIME=1 and -DROBOT_NAVIGO_ARM_RUNTIME=ON for ARM")
+endif()
+
 option(FOR_3588 OFF)
 if(FOR_3588)
     add_definitions(-DFOR_3588)
@@ -39,23 +53,24 @@ find_package(rclcpp_components REQUIRED)
 find_package(robot_debug_tools REQUIRED)
 find_package(robot_debug_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(livox_ros_driver2 REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(robots_dog_msgs REQUIRED)
+
+if(NOT ROBOT_NAVIGO_ARM_RUNTIME)
 find_package(nav2_msgs REQUIRED)
 find_package(navigation2 REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(yaml-cpp REQUIRED)
-find_package(sensor_msgs REQUIRED)
-find_package(livox_ros_driver2 REQUIRED)
 find_package(CURL REQUIRED)
 find_package(visualization_msgs REQUIRED)
-find_package(geometry_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(lcm REQUIRED)
 find_package(navigo_behavior_tree REQUIRED)
 find_package(navigo_bt_navigator REQUIRED)
 find_package(navigo_core REQUIRED)
 find_package(navigo_costmap_2d REQUIRED)
-find_package(robots_dog_msgs REQUIRED)
-
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(ament_index_cpp REQUIRED) 
 
@@ -68,6 +83,7 @@ add_subdirectory(lcm-types/cpp)
 # udp interface lib
 #############################################################################
 add_subdirectory(udp) 
+endif()
 
 #############################################################################
 # some exe lib
@@ -77,6 +93,7 @@ add_executable(bounded_component_container src/bounded_component_container.cpp)
 ament_target_dependencies(bounded_component_container rclcpp rclcpp_components)
 install(TARGETS bounded_component_container DESTINATION lib/${PROJECT_NAME})
 
+if(NOT ROBOT_NAVIGO_ARM_RUNTIME)
 #==========================>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 add_executable(odom_to_tf_broadcaster
         src/tf_publisher.cpp
@@ -226,6 +243,7 @@ add_executable(costmap_listener
 ament_target_dependencies(costmap_listener
         nav2_msgs
         rclcpp)
+endif()
 
 # Direct CustomMsg -> LaserScan projection for the navigation hot path.
 add_executable(livox_scan_projector
@@ -252,6 +270,9 @@ add_custom_target(gate_debug_stamp ALL
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/debug_build.json DESTINATION share/${PROJECT_NAME})
 
 #==========================>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+if(ROBOT_NAVIGO_ARM_RUNTIME)
+    install(PROGRAMS scripts/nav_safety_gate.py DESTINATION lib/${PROJECT_NAME})
+else()
 install(PROGRAMS
         scripts/emap_publisher.py
         scripts/lightning_bridge.py
@@ -276,6 +297,7 @@ install(PROGRAMS
         scripts/zsl1_recording_inventory.py
         DESTINATION lib/${PROJECT_NAME}
 )
+endif()
 
 #==========================>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> 
 # add_executable(detector_node 
@@ -294,6 +316,7 @@ install(PROGRAMS
 #############################################################################
 # install rules
 #############################################################################
+if(NOT ROBOT_NAVIGO_ARM_RUNTIME)
 install(TARGETS odom_to_tf_broadcaster
         DESTINATION lib/${PROJECT_NAME}
 )
@@ -327,6 +350,7 @@ install(TARGETS costmap_listener
 install(TARGETS mode_status_pub
         DESTINATION lib/${PROJECT_NAME}
 )
+endif()
 install(TARGETS livox_scan_projector
         DESTINATION lib/${PROJECT_NAME}
 )
@@ -336,6 +360,14 @@ install(DIRECTORY include/
 # install(TARGETS detector_node
 #         DESTINATION lib/${PROJECT_NAME}
 # )
+if(ROBOT_NAVIGO_ARM_RUNTIME)
+    install(FILES
+        launch/lightning_nav_bringup.launch.py
+        launch/bringup_launch.py
+        launch/navigation_launch.py
+        DESTINATION share/${PROJECT_NAME}/launch)
+    install(FILES params/navigo_params.yaml DESTINATION share/${PROJECT_NAME}/params)
+else()
 install(DIRECTORY launch params map rviz doc routes regression
         DESTINATION share/${PROJECT_NAME}
         DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
@@ -361,6 +393,7 @@ install(FILES scripts/performance/README.md DESTINATION share/${PROJECT_NAME}/pe
 install(DIRECTORY scripts/performance/heap_sampled
         DESTINATION share/${PROJECT_NAME}/performance
         PATTERN "__pycache__" EXCLUDE)
+endif()
 
 if(BUILD_TESTING)
     find_package(ament_cmake_gtest REQUIRED)
@@ -404,6 +437,11 @@ if(BUILD_TESTING)
             NAME test_bounded_component_launch
             COMMAND ${Python3_EXECUTABLE}
                     ${CMAKE_CURRENT_SOURCE_DIR}/test/test_bounded_component_launch.py
+                    ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(
+            NAME test_arm_dependency_profile
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_arm_dependency_profile.py
                     ${CMAKE_CURRENT_SOURCE_DIR})
     ament_add_gtest(test_livox_scan_projection
             test/test_livox_scan_projection.cpp)
@@ -476,6 +514,7 @@ ament_package()
 #############################################################################
 ## enabel deb package
 ############################################################################
+if(NOT ROBOT_NAVIGO_ARM_RUNTIME)
 set(CPACK_PACKAGING_INSTALL_PREFIX "/opt/ros/$ENV{ROS_DISTRO}")
 set(CPACK_PACKAGE_NAME ${PROJECT_NAME})
 set(CPACK_PACKAGE_FILE_NAME ${CPACK_PACKAGE_NAME}_${PROJECT_VERSION}_${CMAKE_HOST_SYSTEM_PROCESSOR}_$ENV{ROS_DISTRO}_${CMAKE_SYSTEM_NAME})
@@ -483,3 +522,4 @@ set(CPACK_GENERATOR "DEB")
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "kanonwy")
 
 include(CPack)
+endif()

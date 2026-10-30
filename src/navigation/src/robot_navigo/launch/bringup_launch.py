@@ -32,6 +32,7 @@ def generate_launch_description():
     use_composition = LaunchConfiguration('use_composition')
     use_bounded_component_container = LaunchConfiguration('use_bounded_component_container')
     component_executor_threads = LaunchConfiguration('component_executor_threads')
+    enable_waypoint_follower = LaunchConfiguration('enable_waypoint_follower')
     use_respawn = LaunchConfiguration('use_respawn')
     log_level = LaunchConfiguration('log_level')
     waypoint_follower_package = LaunchConfiguration('waypoint_follower_package')
@@ -121,6 +122,9 @@ def generate_launch_description():
 
     declare_waypoint_follower_package_cmd = DeclareLaunchArgument(
         'waypoint_follower_package', default_value='navigo_waypoint_follower')
+    declare_enable_waypoint_follower_cmd = DeclareLaunchArgument(
+        'enable_waypoint_follower', default_value='true',
+        description='Start and lifecycle-manage the optional waypoint follower')
     declare_waypoint_follower_executable_cmd = DeclareLaunchArgument(
         'waypoint_follower_executable', default_value='waypoint_follower')
     declare_waypoint_follower_plugin_cmd = DeclareLaunchArgument(
@@ -175,6 +179,7 @@ def generate_launch_description():
                     'use_respawn': use_respawn,
                     'log_level': log_level,
                     'container_name': 'navigo_container',
+                    'enable_waypoint_follower': enable_waypoint_follower,
                     'waypoint_follower_package': waypoint_follower_package,
                     'waypoint_follower_executable': waypoint_follower_executable,
                     'waypoint_follower_plugin': waypoint_follower_plugin,
@@ -203,6 +208,7 @@ def generate_launch_description():
     ld.add_action(declare_use_respawn_cmd)
     ld.add_action(declare_log_level_cmd)
     ld.add_action(declare_waypoint_follower_package_cmd)
+    ld.add_action(declare_enable_waypoint_follower_cmd)
     ld.add_action(declare_waypoint_follower_executable_cmd)
     ld.add_action(declare_waypoint_follower_plugin_cmd)
     ld.add_action(declare_waypoint_task_executor_plugin_cmd)
