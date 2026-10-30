@@ -187,6 +187,38 @@ def write_changed(path, content):
         path.write_text(content)
 
 
+def cpp_build_stamp(stamp, symbol_id, header_include='robot_debug_build.hpp'):
+    """Keep identity data out of consumer headers and private to its artifact."""
+    # Do not include commit, flags or absolute build paths in the namespace:
+    # those would change the header and force all consumers to recompile.
+    symbol_key = json.dumps([stamp['repository_id'], stamp['artifact_id'], symbol_id])
+    namespace = 'build_stamp_' + hashlib.sha256(symbol_key.encode()).hexdigest()
+    header = [
+        '#pragma once', '#include <robot_debug_msgs/msg/build_stamp.hpp>',
+        'namespace robot_debug {', f'namespace {namespace} {{',
+        # Even another copy of the same target loaded with RTLD_GLOBAL must not
+        # replace this implementation. Namespace isolation alone covers only
+        # distinct targets; ELF hidden visibility also covers duplicate ones.
+        '#if defined(__GNUC__) || defined(__clang__)',
+        '__attribute__((visibility("hidden")))', '#endif',
+        'robot_debug_msgs::msg::BuildStamp value();', '}',
+        'static inline robot_debug_msgs::msg::BuildStamp compiled_build_stamp() {',
+        f'return {namespace}::value();', '}', '}',
+    ]
+    source = [
+        '#include ' + json.dumps(header_include), 'namespace robot_debug {',
+        f'namespace {namespace} {{',
+        'robot_debug_msgs::msg::BuildStamp value() {',
+        'robot_debug_msgs::msg::BuildStamp stamp;',
+    ]
+    for key, value in stamp.items():
+        literal = str(value).lower() if isinstance(value, bool) else (
+            str(value) if isinstance(value, int) else json.dumps(value))
+        source.append(f'stamp.{key} = {literal};')
+    source += ['return stamp;', '}', '}', '}']
+    return '\n'.join(header) + '\n', '\n'.join(source) + '\n'
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--repo', required=True)
@@ -195,8 +227,12 @@ def main():
     parser.add_argument('--build-context', default='')
     parser.add_argument('--source-manifest', help='strict complete Git archive provenance; invalid proof fails the build')
     parser.add_argument('--header')
+    parser.add_argument('--source', help='identity implementation; required together with --header')
+    parser.add_argument('--symbol-id', default='', help='stable project/target key, never a commit or build path')
     parser.add_argument('--json', required=True)
     args = parser.parse_args()
+    if bool(args.header) != bool(args.source):
+        parser.error('--header and --source must be specified together')
     if args.source_manifest is not None:
         try:
             stamp, proof_text = archive_build_stamp(
@@ -208,16 +244,10 @@ def main():
         stamp = build_stamp(args.repo, args.repository_id, args.artifact, args.build_context)
     write_changed(args.json, json.dumps(stamp, sort_keys=True, indent=2) + '\n')
     if args.header:
-        lines = ['#pragma once', '#include <robot_debug_msgs/msg/build_stamp.hpp>',
-                 'namespace robot_debug {',
-                 'static inline robot_debug_msgs::msg::BuildStamp compiled_build_stamp() {',
-                 'robot_debug_msgs::msg::BuildStamp stamp;']
-        for key, value in stamp.items():
-            literal = str(value).lower() if isinstance(value, bool) else (
-                str(value) if isinstance(value, int) else json.dumps(value))
-            lines.append(f'stamp.{key} = {literal};')
-        lines += ['return stamp;', '}', '}']
-        write_changed(args.header, '\n'.join(lines) + '\n')
+        header_include = os.path.relpath(args.header, Path(args.source).parent)
+        header, source = cpp_build_stamp(stamp, args.symbol_id, header_include)
+        write_changed(args.header, header)
+        write_changed(args.source, source)
 
 
 if __name__ == '__main__':

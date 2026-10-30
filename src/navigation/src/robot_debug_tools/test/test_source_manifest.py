@@ -232,7 +232,8 @@ def test_cli_failure_writes_no_identity_and_success_installs_exact_sidecar(archi
     command = [sys.executable, str(GENERATOR), '--repo', str(archive['root'] / 'src'),
                '--repository-id', 'lightning', '--artifact', 'lightning.libs',
                '--source-manifest', str(archive['manifest']), '--json', str(output / 'debug_build.json'),
-               '--header', str(output / 'robot_debug_build.hpp')]
+               '--header', str(output / 'robot_debug_build.hpp'),
+               '--source', str(output / 'robot_debug_build.cpp')]
     archive['proof']['git_commit'] = '0' * 40
     write_proof(archive)
     failed = subprocess.run(command, capture_output=True, text=True)
@@ -245,8 +246,10 @@ def test_cli_failure_writes_no_identity_and_success_installs_exact_sidecar(archi
     assert stamp['git_commit'] == archive['commit'] and stamp['known']
     assert (output / 'source_manifest.json').read_bytes() == archive['manifest'].read_bytes()
     header = (output / 'robot_debug_build.hpp').read_text()
-    assert len([line for line in header.splitlines() if line.startswith('stamp.')]) == 6
-    assert 'stamp.git_tree' not in header
+    source = (output / 'robot_debug_build.cpp').read_text()
+    assert not any(line.startswith('stamp.') for line in header.splitlines())
+    assert len([line for line in source.splitlines() if line.startswith('stamp.')]) == 6
+    assert 'stamp.git_tree' not in source
 
 
 def test_duplicate_json_keys_are_rejected(archive):
