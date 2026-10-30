@@ -118,7 +118,7 @@ def main():
                       map=blocked_spec,steps=50,stop_on_exception=False))
     # 0829 same recorded pose + path geometry, empty bounded context map. This is
     # a geometry/behavior counterfactual, NOT reconstruction of historical costmaps.
-    extracted=root/'docs/progress/2026-09-08_relocalization_and_reverse_design/rosbag2_2026_08_29-04_41_05_extracted.json'
+    extracted=root/'analysis_outputs/docs_cleanup_20261019/docs_before/progress/2026-09-08_relocalization_and_reverse_design/rosbag2_2026_08_29-04_41_05_extracted.json'
     bag=json.loads(extracted.read_text())
     debug=bag['/controller_server/debug']; plans=bag['/transformed_global_plan']
     times=[p['t'] for p in plans]

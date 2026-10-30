@@ -21,7 +21,7 @@ def main():
     parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args();ws=args.workspace.resolve();out=args.output.resolve();out.mkdir(exist_ok=False)
     repo=ws/'src/zsibot/zsibot_roamerx_lite'
-    extracted=ws/'docs/progress/2026-09-08_relocalization_and_reverse_design/rosbag2_2026_08_29-04_41_05_extracted.json'
+    extracted=ws/'analysis_outputs/docs_cleanup_20261019/docs_before/progress/2026-09-08_relocalization_and_reverse_design/rosbag2_2026_08_29-04_41_05_extracted.json'
     data=json.loads(extracted.read_text());plans=sorted(data['/transformed_global_plan'],key=lambda r:r['t'])
     times=[r['t'] for r in plans];snapshots=[]
     for label,start,end in WINDOWS:
