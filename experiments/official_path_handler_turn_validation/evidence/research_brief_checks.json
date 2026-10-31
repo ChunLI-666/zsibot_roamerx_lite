@@ -1,0 +1,17 @@
+{
+  "document": "RESEARCH_AND_INTEGRATION_BRIEF.md",
+  "sha256": "4f48dc2f14061216892ab234c870f392dade4fcc4acd71c33045f39ce0ebd5a7",
+  "local_links_verified": true,
+  "source_inputs": [
+    "ab_chain_tight_xy_result.json",
+    "repro_result.json",
+    "global_planner_comparison.json",
+    "global_old_radius_exact.log",
+    "global_ab_planner_repro.log",
+    "baseline_xy4cm/result.json",
+    "complete_rotation_constraint.patch"
+  ],
+  "codacy": "tool unavailable",
+  "new_build_or_runtime": "none; documentation only",
+  "main_thread_contacted": false
+}
