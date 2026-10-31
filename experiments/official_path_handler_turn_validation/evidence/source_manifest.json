@@ -1,0 +1,118 @@
+{
+  "purpose": "Isolated official PathHandler interface and native component verification; not robot or full-stack acceptance",
+  "upstream_ref": "f3406e246cda1e7c28052409a098313fbc1761fe",
+  "files": [
+    {
+      "path": "nav2_controller/plugins/feasible_path_handler.cpp",
+      "git_blob_sha": "7fc324ec280621651821d52067c0782c6b9cb931",
+      "sha256": "8e547ae3e330a330919c9b5d871a1c6a7c7c5c3eb9bc35fe61e696bc57d570ef",
+      "size": 11430,
+      "transport_fix": "removed one trailing LF to recover exact API Git blob",
+      "input_sha256": "a88ea367a0dcd870a0618b2d65b13493b185dda555dbea0ea27deb9a0351c8a3"
+    },
+    {
+      "path": "nav2_core/include/nav2_core/path_handler.hpp",
+      "git_blob_sha": "8873ba466484224c3390564866a36554c00f6279",
+      "sha256": "490e1d4241edaaaa106faf3ca212b50650b2510b644df3b9c819331c1ee3885b",
+      "size": 3669,
+      "transport_fix": "removed one trailing LF to recover exact API Git blob",
+      "input_sha256": "8db7efa1b7a82931c729da9d4f5209207ab24faf1da760c2fe3408345c0fe4a7"
+    },
+    {
+      "path": "nav2_controller/plugins/simple_goal_checker.cpp",
+      "git_blob_sha": "1fa963af9c6c28330f0da34659bc6d2bb9247662",
+      "sha256": "b7e35ce9c47ad26a0bffa5d8b130a21c6c30b21099df995890b9bd73c7b9a29e",
+      "size": 6253,
+      "transport_fix": "removed one trailing LF to recover exact API Git blob",
+      "input_sha256": "5d45b8ec5193550f34dc1edd05b76d26cefdecd704c04d0de84e40c5ce1ebb04"
+    },
+    {
+      "path": "nav2_core/include/nav2_core/controller.hpp",
+      "git_blob_sha": "7f7bd111059df789a1a99685b03be5890cf121ac",
+      "sha256": "056da29d550927da3438eb0c6ddcd240a397255e3aac5256dddb7e31b7efcbed",
+      "size": 5438,
+      "transport_fix": "removed one trailing LF to recover exact API Git blob",
+      "input_sha256": "679049dc8ebbcadda6333a9a60b917219e824934444fb4ee18b16e642494d7a3"
+    },
+    {
+      "path": "nav2_core/include/nav2_core/goal_checker.hpp",
+      "git_blob_sha": "2fde1fad80a6204aa084e50eea347a531e305206",
+      "sha256": "709efddef19f9dccef7b24ce6e09230e141dbaed3edb5f881bf8c620d8bb98ac",
+      "size": 4369,
+      "transport_fix": "removed one trailing LF to recover exact API Git blob",
+      "input_sha256": "3d85b57534a97b12480589a24d3853c21e7ae8a95f36aba5da0c4d4340692e83"
+    },
+    {
+      "path": "nav2_controller/include/nav2_controller/plugins/feasible_path_handler.hpp",
+      "git_blob_sha": "a9e9352809c21adfe7110da5d82e2470da9e3fe1",
+      "sha256": "67f36094ec78a59c830d568bb62e354d8afb0bfcc7c8109b63ea1d749ade8883",
+      "size": 5521,
+      "transport_fix": "removed one trailing LF to recover exact API Git blob",
+      "input_sha256": "d502f8acff60ad80d6dd16bce33215156064533d58f0d2113778c860e0a1020a"
+    },
+    {
+      "path": "nav2_controller/src/controller_server.cpp",
+      "git_blob_sha": "ac4a3a8db73dd1c65ce0b40e93dc1abeac515474",
+      "sha256": "466f97a21b659b5b91e74bc7f0affb875bfe1b6566e0dc72dcf0e8556e1b62f7",
+      "size": 33264,
+      "transport_fix": "removed one trailing LF to recover exact API Git blob",
+      "input_sha256": "b98b7cf5a88a09b2937d67892f3e3256af913c215d44ade1641508fc56f79b64"
+    },
+    {
+      "path": "nav2_msgs/action/FollowPath.action",
+      "git_blob_sha": "ccf66dd7a5d83f3dc161e4e20bdbf131b0cf069d",
+      "sha256": "640f654d52d91d51bbcce437001ca5f3010ebec7113b1806a4733245c5688bd3",
+      "size": 762,
+      "transport_fix": "removed one trailing LF to recover exact API Git blob",
+      "input_sha256": "98c6af16e0aeb9c90728ed786aef7176380244cc8b4c7dfb125d6aba709a5129"
+    },
+    {
+      "path": "nav2_util/include/nav2_util/path_utils.hpp",
+      "git_blob_sha": "11a51d850f6ff0cdfb9815eae9791b1103dae29d",
+      "sha256": "734be73e8e3944961fa3de039829eab7734627d35e86b1908d7833b5e3eb545a",
+      "size": 4101,
+      "transport_fix": "removed one trailing LF to recover exact API Git blob",
+      "input_sha256": "5dec2cddabbc3ff213a994b502f49bc7b41be47e5d87499447c2ac6d4a6771a7"
+    },
+    {
+      "path": "nav2_util/src/path_utils.cpp",
+      "git_blob_sha": "17e3f59a5b3142cc9edf6c3b2f84e26e8706c530",
+      "sha256": "69a89699dd101a5dbcf54e5d68dcd35e96e4516405feaca075ccc6bb3e59f4ff",
+      "size": 7211,
+      "transport_fix": "removed one trailing LF to recover exact API Git blob",
+      "input_sha256": "9675d1e04ba33b651cdbdc82677a3f7cfba734ebf28f1a1855426b6acfe585af"
+    },
+    {
+      "path": "nav2_regulated_pure_pursuit_controller/src/regulated_pure_pursuit_controller.cpp",
+      "git_blob_sha": "7d0cafdb58de6e4c02b9b581360450bc7185e6d5",
+      "sha256": "fb9c29fa33077e583284273034968e9b9d113d70e1c1ffdf8acc66a10385c731",
+      "size": 15134,
+      "transport_fix": "removed one trailing LF to recover exact API Git blob",
+      "input_sha256": "67f0ce511eade4f3d646b9e25948f9ea651912f6ab6aabefc69109b28cf67c21"
+    },
+    {
+      "path": "nav2_mppi_controller/src/controller.cpp",
+      "git_blob_sha": "7ad1e5976e9c27befa6a7ba39f1483140109446b",
+      "sha256": "b7f5d025e12316387baac7b886b96ae9c7f7b8b44751f6a45930e4361c0f0c04",
+      "size": 5175,
+      "transport_fix": "removed one trailing LF to recover exact API Git blob",
+      "input_sha256": "5f302bca37378ed4dffa344307a53fe39385c828d5b7072c577888972d44930a"
+    },
+    {
+      "path": "nav2_controller/package.xml",
+      "git_blob_sha": "376e82b715245e5ce5e9d6669d0a80c0e0ff54ce",
+      "sha256": "b6c3d96c9c47d90aabbfb1de3a100a31461134e0cbffc093fda95f2e41e899e7",
+      "size": 1306,
+      "transport_fix": "removed one trailing LF to recover exact API Git blob",
+      "input_sha256": "9abc6fa8c73c09f4dbcd8a9ecda369ea38b1fdea05532b1daffb7757bb86f6d9"
+    }
+  ],
+  "product_changes": false,
+  "board_connection": false,
+  "new_session_created": false,
+  "runtime_domains_used": [],
+  "limits": [
+    "Frozen PR merge revision, not current rolling HEAD.",
+    "Docker socket inaccessible; no system installation or upgrade."
+  ]
+}

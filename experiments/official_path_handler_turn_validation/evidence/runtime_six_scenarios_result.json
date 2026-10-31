@@ -1,0 +1,44 @@
+{
+  "returncode": 0,
+  "summaries": [
+    {
+      "summary": "same_xy_180",
+      "success": 1,
+      "first_depart_yaw_deg": -1
+    },
+    {
+      "summary": "near_terminal110",
+      "success": 1,
+      "first_depart_yaw_deg": -1
+    },
+    {
+      "summary": "midway_90",
+      "success": 1,
+      "first_depart_yaw_deg": 84.5329
+    },
+    {
+      "summary": "door_straight",
+      "success": 1,
+      "first_depart_yaw_deg": -1
+    },
+    {
+      "scenario": "cancel",
+      "zero_after_cancel": true
+    },
+    {
+      "summary": "cancel_and_new_goal",
+      "success": 1,
+      "first_depart_yaw_deg": -1
+    },
+    {
+      "scenario": "blocked_rotation",
+      "rejected": true,
+      "tick": 16
+    },
+    {
+      "summary": "blocked_rotation",
+      "success": 0,
+      "first_depart_yaw_deg": -1
+    }
+  ]
+}

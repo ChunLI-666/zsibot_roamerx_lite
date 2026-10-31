@@ -1,0 +1,5 @@
+{
+  "returncode": 2,
+  "meaning": "2 means strict rotate-before-translation requirement not satisfied in native fixture",
+  "runtime": "No ROS nodes or DDS; real Costmap2D and same-frame TF; test-only Costmap2DROS facade"
+}

@@ -1,0 +1,7 @@
+{"test":"rotation_sequence","robot_yaw_deg":0,"segment_end_yaw_deg":30,"future_translation_visible":0,"remaining_constraint":3}
+{"test":"rotation_sequence","robot_yaw_deg":30,"segment_end_yaw_deg":30,"future_translation_visible":0,"remaining_constraint":0}
+{"test":"rotation_sequence","robot_yaw_deg":30,"segment_end_yaw_deg":90,"future_translation_visible":1,"remaining_constraint":0}
+{"test":"rotation_sequence","robot_yaw_deg":60,"segment_end_yaw_deg":90,"future_translation_visible":1,"remaining_constraint":0}
+{"test":"rotation_sequence","robot_yaw_deg":90,"segment_end_yaw_deg":90,"future_translation_visible":1,"remaining_constraint":0}
+{"test":"goal_contract","mid_rotation_xy_reached":0,"terminal_xy_reached":1,"terminal_wrong_yaw_success":0,"terminal_right_yaw_success":1}
+{"requirement":"withhold_translation_until_full_90deg","satisfied_in_fixture":0}

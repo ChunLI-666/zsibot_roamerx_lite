@@ -1,0 +1,23 @@
+{
+  "files": [
+    {
+      "source": "/home/charles/project/colcon_ws/release_artifacts/maps/rock_dog22_refined_1cm_evidence5cm_20261031/map.yaml",
+      "copy": "map.yaml",
+      "sha256": "be119b54c026707c0f8071cafb945c731b0ec66f83634ab8eef2aeb62298a08e",
+      "size": 206
+    },
+    {
+      "source": "/home/charles/project/colcon_ws/release_artifacts/maps/rock_dog22_refined_1cm_evidence5cm_20261031/map.pgm",
+      "copy": "map.pgm",
+      "sha256": "4801f2489780c6b257bd5d530d0f82de82f221acf4624e6af17c55bcc27f6dca",
+      "size": 3383313
+    },
+    {
+      "source": "/home/charles/project/colcon_ws/src/zsibot/zsibot_roamerx_lite/src/navigation/src/robot_feasible_navigation/params/stop_turn_1cm_h16.json",
+      "copy": "stop_turn_1cm_h16.json",
+      "sha256": "eb3ee2f4b112ba6ec3163424db937d50b396f43c2a42f0b6f032fccf78dc9526",
+      "size": 448570
+    }
+  ],
+  "control_set_provenance": "Existing main-line generated stop/turn primitives, snapshotted read-only. Official lattice consumes this data; this is not claimed to be the stock official generator output."
+}

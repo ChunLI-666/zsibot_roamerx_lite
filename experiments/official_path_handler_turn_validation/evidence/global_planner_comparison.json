@@ -1,0 +1,106 @@
+{
+  "returncode": 0,
+  "elapsed_s": 3.881198216928169,
+  "results": [
+    {
+      "scene": "free_same_xy_180",
+      "planner": "Hybrid",
+      "poses": 1,
+      "path_length_m": 0,
+      "max_excursion_m": 0,
+      "inplace_rotation_deg": 0,
+      "body_collision_samples": 0,
+      "body_samples": 0,
+      "elapsed_s": 0.377273
+    },
+    {
+      "scene": "free_same_xy_180",
+      "planner": "Lattice",
+      "poses": 1,
+      "path_length_m": 0,
+      "max_excursion_m": 0,
+      "inplace_rotation_deg": 0,
+      "body_collision_samples": 0,
+      "body_samples": 0,
+      "elapsed_s": 0.127421
+    },
+    {
+      "scene": "free_same_xy_180",
+      "planner": "LatticeActions",
+      "poses": 1,
+      "path_length_m": 0,
+      "max_excursion_m": 0,
+      "inplace_rotation_deg": 0,
+      "body_collision_samples": 0,
+      "body_samples": 0,
+      "elapsed_s": 0.0902665
+    },
+    {
+      "scene": "free_near_110",
+      "planner": "Hybrid",
+      "poses": 218,
+      "path_length_m": 3.4015,
+      "max_excursion_m": 1.27526,
+      "inplace_rotation_deg": 0,
+      "body_collision_samples": 0,
+      "body_samples": 1077,
+      "elapsed_s": 0.332175
+    },
+    {
+      "scene": "free_near_110",
+      "planner": "Lattice",
+      "poses": 938,
+      "path_length_m": 3.1992,
+      "max_excursion_m": 1.19384,
+      "inplace_rotation_deg": 63.2921,
+      "body_collision_samples": 0,
+      "body_samples": 2558,
+      "elapsed_s": 0.0950019
+    },
+    {
+      "scene": "free_near_110",
+      "planner": "LatticeActions",
+      "poses": 4881,
+      "path_length_m": 2.45812,
+      "max_excursion_m": 0.885268,
+      "inplace_rotation_deg": 333.292,
+      "body_collision_samples": 0,
+      "body_samples": 9760,
+      "elapsed_s": 1.41473
+    },
+    {
+      "scene": "recorded_terminal110_static_map",
+      "planner": "Hybrid",
+      "poses": 256,
+      "path_length_m": 4.95645,
+      "max_excursion_m": 1.0397,
+      "inplace_rotation_deg": 5,
+      "body_collision_samples": 2,
+      "body_samples": 1403,
+      "elapsed_s": 0.307468
+    },
+    {
+      "scene": "recorded_terminal110_static_map",
+      "planner": "Lattice",
+      "poses": 3538,
+      "path_length_m": 4.46621,
+      "max_excursion_m": 0.993758,
+      "inplace_rotation_deg": 259.695,
+      "body_collision_samples": 0,
+      "body_samples": 7736,
+      "elapsed_s": 0.150239
+    },
+    {
+      "scene": "recorded_terminal110_static_map",
+      "planner": "LatticeActions",
+      "poses": 863,
+      "path_length_m": 0.0447214,
+      "max_excursion_m": 0.0447216,
+      "inplace_rotation_deg": 116.565,
+      "body_collision_samples": 0,
+      "body_samples": 1724,
+      "elapsed_s": 0.255661
+    }
+  ],
+  "scope": "Real installed official Jazzy planners. Shared static or free costmap with recorded padding/inflation; no dynamic scan layer or physical robot. Lattice action data snapshotted from main generated file."
+}

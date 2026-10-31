@@ -1,0 +1,58 @@
+{
+  "native_ros_checks_passed": true,
+  "variant": "complete-rotation",
+  "scenarios": {
+    "same_xy_180": {
+      "summary": "same_xy_180",
+      "success": 1,
+      "first_depart_yaw_deg": -1,
+      "resume_yaw_deg": -1
+    },
+    "near_terminal110": {
+      "summary": "near_terminal110",
+      "success": 1,
+      "first_depart_yaw_deg": -1,
+      "resume_yaw_deg": -1
+    },
+    "midway_90": {
+      "summary": "midway_90",
+      "success": 1,
+      "first_depart_yaw_deg": 88.1407,
+      "resume_yaw_deg": 88.9771
+    },
+    "door_straight": {
+      "summary": "door_straight",
+      "success": 1,
+      "first_depart_yaw_deg": -1,
+      "resume_yaw_deg": -1
+    },
+    "cancel_and_new_goal": {
+      "summary": "cancel_and_new_goal",
+      "success": 1,
+      "first_depart_yaw_deg": -1,
+      "resume_yaw_deg": -1
+    },
+    "blocked_rotation": {
+      "summary": "blocked_rotation",
+      "success": 0,
+      "first_depart_yaw_deg": -1,
+      "resume_yaw_deg": -1
+    }
+  },
+  "wire_tests": [
+    {
+      "wire_test": "legacy_invalid_goal_rejected",
+      "success": true
+    },
+    {
+      "wire_test": "legacy_goal_feedback_result",
+      "success": true,
+      "feedback_count": 65
+    },
+    {
+      "wire_test": "legacy_cancel_result",
+      "success": true
+    }
+  ],
+  "scope": "Frozen official path-interface revision, Jazzy compatibility adapters, ideal kinematics and synthetic map. No planner, BT, SDK, robot, or production activation."
+}

@@ -1,0 +1,21 @@
+{
+  "source": "latest_source/nav2_regulated_pure_pursuit_controller/src/regulated_pure_pursuit_controller.cpp",
+  "methods": [
+    {
+      "method": "shouldRotateToPath",
+      "sha256": "fcb4f8b719cdd49ea029813698fad950ad4ca693d61e4929ad5494c5737bf10d",
+      "unchanged": true
+    },
+    {
+      "method": "shouldRotateToGoalHeading",
+      "sha256": "30558a9df0802583797787a4f687cb5b914bfe21c39aa6a9dd353c2c66e1bfe9",
+      "unchanged": true
+    },
+    {
+      "method": "rotateToHeading",
+      "sha256": "88bb9f7fc8a3d50e47fc254411460885cbd79b9f8338160bf58cd7d11c403935",
+      "unchanged": true
+    }
+  ],
+  "scope": "Exact selected decision methods; declaration and parameter fixture only; not full RPP plugin or collision checker"
+}

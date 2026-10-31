@@ -1,0 +1,14 @@
+Internal ctest changing into directory: /home/charles/project/colcon_ws/analysis_outputs/upstream_nav2_interface_isolated_20261031/build
+Test project /home/charles/project/colcon_ws/analysis_outputs/upstream_nav2_interface_isolated_20261031/build
+    Start 1: exact_upstream_native_path_semantics
+1/1 Test #1: exact_upstream_native_path_semantics ...***Failed    0.01 sec
+/home/charles/project/colcon_ws/analysis_outputs/upstream_nav2_interface_isolated_20261031/build/native_path_probe: symbol lookup error: /home/charles/project/colcon_ws/analysis_outputs/upstream_nav2_interface_isolated_20261031/build/native_path_probe: undefined symbol: _ZNK15nav2_costmap_2d9Costmap2D10worldToMapEddRjS1_
+
+
+0% tests passed, 1 tests failed out of 1
+
+Total Test time (real) =   0.02 sec
+
+The following tests FAILED:
+	  1 - exact_upstream_native_path_semantics (Failed)
+Errors while running CTest

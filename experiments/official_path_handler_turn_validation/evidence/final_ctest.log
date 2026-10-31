@@ -1,0 +1,7 @@
+Test project /home/charles/project/colcon_ws/analysis_outputs/upstream_nav2_interface_isolated_20261031/build
+    Start 1: exact_upstream_native_path_semantics
+1/1 Test #1: exact_upstream_native_path_semantics ...   Passed    0.02 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =   0.02 sec

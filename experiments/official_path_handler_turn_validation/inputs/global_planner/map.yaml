@@ -1,0 +1,12 @@
+image: map.pgm
+mode: trinary
+width: 1792
+height: 1888
+resolution: 0.00999999978
+origin:
+  - -6.8799996376037598
+  - -9.5999994277954102
+  - 0
+negate: 0
+occupied_thresh: 0.65000000000000002
+free_thresh: 0.25

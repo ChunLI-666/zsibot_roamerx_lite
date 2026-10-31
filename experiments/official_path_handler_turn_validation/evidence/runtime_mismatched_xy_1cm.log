@@ -1,0 +1,186 @@
+[WARN] [1793445684.056055905] [rcl]: ROS_LOCALHOST_ONLY is deprecated but still honored if it is enabled. Use ROS_AUTOMATIC_DISCOVERY_RANGE and ROS_STATIC_PEERS instead.
+[WARN] [1793445684.056140672] [rcl]: 'localhost_only' is enabled, 'automatic_discovery_range' and 'static_peers' will be ignored.
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+[37;1m2026-10-31 19:21:24.058 [31;1m[[37;1mTRANSPORT_UDP[31;1m Error] [37mError creating socket: Operation not permitted[34;1m -> Function [36minit[m
+[37;1m2026-10-31 19:21:24.058 [31;1m[[37;1mRTPS_PARTICIPANT[31;1m Error] [37mUser transport failed to register.[34;1m -> Function [36mRTPSParticipantImpl[m
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+{"scenario":"same_xy_180","tick":0,"x":0,"y":0,"yaw_deg":0,"vx":0,"wz":0.1}
+{"scenario":"same_xy_180","tick":10,"x":0,"y":0,"yaw_deg":16.713,"vx":0,"wz":0.414374}
+{"scenario":"same_xy_180","tick":20,"x":0,"y":0,"yaw_deg":36.7103,"vx":0,"wz":0.338868}
+{"scenario":"same_xy_180","tick":30,"x":0,"y":0,"yaw_deg":54.8947,"vx":0,"wz":0.316942}
+{"scenario":"same_xy_180","tick":40,"x":0,"y":0,"yaw_deg":74.8916,"vx":0,"wz":0.317401}
+{"scenario":"same_xy_180","tick":50,"x":0,"y":0,"yaw_deg":94.8915,"vx":0,"wz":0.317421}
+{"scenario":"same_xy_180","tick":60,"x":0,"y":0,"yaw_deg":114.1,"vx":0,"wz":0.453834}
+{"scenario":"same_xy_180","tick":70,"x":0,"y":0,"yaw_deg":134.102,"vx":0,"wz":0.453749}
+{"scenario":"same_xy_180","tick":80,"x":0,"y":0,"yaw_deg":154.102,"vx":0,"wz":0.453746}
+{"scenario":"same_xy_180","tick":90,"x":0,"y":0,"yaw_deg":174.102,"vx":0,"wz":0.453745}
+{"scenario":"same_xy_180","tick":92,"x":0,"y":0,"yaw_deg":178.646,"vx":0,"wz":0}
+{"summary":"same_xy_180","success":1,"first_depart_yaw_deg":-1}
+{"scenario":"midway_90","tick":0,"x":0,"y":0,"yaw_deg":0,"vx":0.15,"wz":0}
+{"scenario":"midway_90","tick":10,"x":0.15,"y":0,"yaw_deg":0,"vx":0.15,"wz":0}
+{"scenario":"midway_90","tick":20,"x":0.3,"y":0,"yaw_deg":0,"vx":0.15,"wz":0}
+{"scenario":"midway_90","tick":30,"x":0.449125,"y":0,"yaw_deg":0,"vx":0.137719,"wz":0}
+{"scenario":"midway_90","tick":40,"x":0.572339,"y":0,"yaw_deg":0,"vx":0.106915,"wz":0}
+{"scenario":"midway_90","tick":50,"x":0.673619,"y":0,"yaw_deg":0,"vx":0.1,"wz":0}
+{"scenario":"midway_90","tick":60,"x":0.773619,"y":0,"yaw_deg":0,"vx":0.1,"wz":0}
+{"scenario":"midway_90","tick":70,"x":0.873619,"y":0,"yaw_deg":0,"vx":0.1,"wz":0}
+{"scenario":"midway_90","tick":80,"x":0.963619,"y":0,"yaw_deg":0.572958,"vx":0,"wz":0.2}
+{"scenario":"midway_90","tick":90,"x":0.963619,"y":0,"yaw_deg":4.7225,"vx":0,"wz":0.0177061}
+{"scenario":"midway_90","tick":100,"x":0.963619,"y":0,"yaw_deg":5.04578,"vx":0,"wz":-0.0399758}
+{"scenario":"midway_90","tick":110,"x":0.963619,"y":0,"yaw_deg":5.1724,"vx":0,"wz":-0.051139}
+{"scenario":"midway_90","tick":120,"x":0.963619,"y":0,"yaw_deg":5.10715,"vx":0,"wz":-0.051139}
+{"scenario":"midway_90","tick":130,"x":0.963619,"y":0,"yaw_deg":5.0974,"vx":0,"wz":-0.0487166}
+{"scenario":"midway_90","tick":140,"x":0.963619,"y":0,"yaw_deg":5.17094,"vx":0,"wz":-0.0487166}
+{"scenario":"midway_90","tick":150,"x":0.963619,"y":0,"yaw_deg":5.17585,"vx":0,"wz":-0.0527088}
+{"scenario":"midway_90","tick":160,"x":0.963619,"y":0,"yaw_deg":5.13792,"vx":0,"wz":-0.0424747}
+{"scenario":"midway_90","tick":170,"x":0.963619,"y":0,"yaw_deg":4.89776,"vx":0,"wz":0.0484764}
+{"scenario":"midway_90","tick":180,"x":0.963619,"y":0,"yaw_deg":4.81046,"vx":0,"wz":0.0484764}
+{"scenario":"midway_90","tick":190,"x":0.963619,"y":0,"yaw_deg":4.79643,"vx":0,"wz":0.0503031}
+{"scenario":"midway_90","tick":200,"x":0.963619,"y":0,"yaw_deg":4.8138,"vx":0,"wz":0.0503031}
+{"scenario":"midway_90","tick":210,"x":0.963619,"y":0,"yaw_deg":4.83117,"vx":0,"wz":0.0503031}
+{"scenario":"midway_90","tick":220,"x":0.963619,"y":0,"yaw_deg":4.84854,"vx":0,"wz":0.0503031}
+{"scenario":"midway_90","tick":230,"x":0.963619,"y":0,"yaw_deg":4.8659,"vx":0,"wz":0.0503031}
+{"scenario":"midway_90","tick":240,"x":0.963619,"y":0,"yaw_deg":4.88327,"vx":0,"wz":0.0503031}
+{"scenario":"midway_90","tick":250,"x":0.963619,"y":0,"yaw_deg":4.90064,"vx":0,"wz":0.0503031}
+{"scenario":"midway_90","tick":260,"x":0.963619,"y":0,"yaw_deg":4.91801,"vx":0,"wz":0.0503031}
+{"scenario":"midway_90","tick":270,"x":0.963619,"y":0,"yaw_deg":4.92806,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":280,"x":0.963619,"y":0,"yaw_deg":4.92714,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":290,"x":0.963619,"y":0,"yaw_deg":4.92623,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":300,"x":0.963619,"y":0,"yaw_deg":4.92531,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":310,"x":0.963619,"y":0,"yaw_deg":4.9244,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":320,"x":0.963619,"y":0,"yaw_deg":4.92348,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":330,"x":0.963619,"y":0,"yaw_deg":4.92257,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":340,"x":0.963619,"y":0,"yaw_deg":4.92165,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":350,"x":0.963619,"y":0,"yaw_deg":4.92074,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":360,"x":0.963619,"y":0,"yaw_deg":4.91982,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":370,"x":0.963619,"y":0,"yaw_deg":4.91891,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":380,"x":0.963619,"y":0,"yaw_deg":4.91799,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":390,"x":0.963619,"y":0,"yaw_deg":4.91708,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":400,"x":0.963619,"y":0,"yaw_deg":4.91616,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":410,"x":0.963619,"y":0,"yaw_deg":4.91525,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":420,"x":0.963619,"y":0,"yaw_deg":4.91433,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":430,"x":0.963619,"y":0,"yaw_deg":4.91341,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":440,"x":0.963619,"y":0,"yaw_deg":4.9125,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":450,"x":0.963619,"y":0,"yaw_deg":4.91158,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":460,"x":0.963619,"y":0,"yaw_deg":4.91067,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":470,"x":0.963619,"y":0,"yaw_deg":4.90975,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":480,"x":0.963619,"y":0,"yaw_deg":4.90884,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":490,"x":0.963619,"y":0,"yaw_deg":4.90792,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":500,"x":0.963619,"y":0,"yaw_deg":4.90701,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":510,"x":0.963619,"y":0,"yaw_deg":4.90609,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":520,"x":0.963619,"y":0,"yaw_deg":4.90518,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":530,"x":0.963619,"y":0,"yaw_deg":4.90426,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":540,"x":0.963619,"y":0,"yaw_deg":4.90335,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":550,"x":0.963619,"y":0,"yaw_deg":4.90243,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":560,"x":0.963619,"y":0,"yaw_deg":4.90152,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":570,"x":0.963619,"y":0,"yaw_deg":4.9006,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":580,"x":0.963619,"y":0,"yaw_deg":4.89969,"vx":0,"wz":0.049984}
+{"scenario":"midway_90","tick":590,"x":0.963619,"y":0,"yaw_deg":4.89877,"vx":0,"wz":0.049984}
+{"summary":"midway_90","success":0,"first_depart_yaw_deg":-1}
+{"scenario":"cancel_and_new_goal","tick":0,"x":0,"y":0,"yaw_deg":0,"vx":0.15,"wz":0}
+{"scenario":"cancel","zero_after_cancel":true}
+{"scenario":"cancel_and_new_goal","tick":10,"x":0.075,"y":0,"yaw_deg":4.77573,"vx":0,"wz":0.333523}
+{"scenario":"cancel_and_new_goal","tick":20,"x":0.075,"y":0,"yaw_deg":24.8871,"vx":0,"wz":0.31807}
+{"scenario":"cancel_and_new_goal","tick":30,"x":0.075,"y":0,"yaw_deg":44.0995,"vx":0,"wz":0.453836}
+{"scenario":"cancel_and_new_goal","tick":40,"x":0.075,"y":0,"yaw_deg":63.6445,"vx":0,"wz":0.217523}
+{"scenario":"cancel_and_new_goal","tick":50,"x":0.075,"y":0,"yaw_deg":83.6457,"vx":0,"wz":0.217427}
+{"scenario":"cancel_and_new_goal","tick":53,"x":0.075,"y":0,"yaw_deg":88.6518,"vx":0,"wz":0}
+{"summary":"cancel_and_new_goal","success":1,"first_depart_yaw_deg":-1}
+{"scenario":"blocked_rotation","tick":0,"x":0,"y":0,"yaw_deg":0,"vx":0,"wz":0.1}
+{"scenario":"blocked_rotation","tick":10,"x":0,"y":0,"yaw_deg":16.713,"vx":0,"wz":0.414374}
+{"scenario":"blocked_rotation","rejected":true,"tick":16}
+{"summary":"blocked_rotation","success":0,"first_depart_yaw_deg":-1}
