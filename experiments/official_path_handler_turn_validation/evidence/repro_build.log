@@ -1,3 +1,5 @@
 [ 25%] Built target corrected_path_probe
 [ 83%] Built target official_rpp_backport
+[ 91%] Building CXX object CMakeFiles/official_runtime_corrected_probe.dir/harness/official_runtime_probe.cpp.o
+[100%] Linking CXX executable official_runtime_corrected_probe
 [100%] Built target official_runtime_corrected_probe

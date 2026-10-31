@@ -1,0 +1,196 @@
+{
+  "decision": "Local component validation passed; suitable for isolated ARM compilation and software tests. Production ControllerServer integration remains to be completed.",
+  "architecture": "x86_64",
+  "planner_profile": {
+    "control_file": "inputs/global_planner/diagnostic_small_radius_same_actions.json",
+    "metadata_turning_radius_m": 0.01,
+    "analytic_expansion_max_length_m": 0.001,
+    "tolerance_m": 0,
+    "footprint_m": [
+      [
+        0.3,
+        0.15
+      ],
+      [
+        0.3,
+        -0.15
+      ],
+      [
+        -0.3,
+        -0.15
+      ],
+      [
+        -0.3,
+        0.15
+      ]
+    ],
+    "footprint_padding_m": 0.035
+  },
+  "controller_goal_xy_m": 0.01,
+  "handler_xy_m": 0.02,
+  "handler_yaw_rad": 0.03,
+  "goal_yaw_rad": 0.05,
+  "adapted_cases_passed": 10,
+  "raw_planner_controls": 5,
+  "scenarios": [
+    {
+      "scene": "free_same_xy_180",
+      "variant": "exact_yaw_slow_turn",
+      "returncode": 0,
+      "csv_sha256": "52143293ebc0ae154c7772e19070d3dc0650fb77c86fbe4c94e2cd959aba279d",
+      "requested_start": [
+        0,
+        0,
+        0
+      ],
+      "requested_goal": [
+        0,
+        0,
+        3.141592653589793
+      ],
+      "log": "evidence/ab_chain_free_same_xy_180_exact_yaw_slow_turn_tight_xy.log",
+      "planner_controller_summary": true,
+      "success": 1,
+      "checker_reached": 1,
+      "body_safe": 1,
+      "ticks": 310,
+      "travelled_m": 0,
+      "max_excursion_m": 0,
+      "request_position_error_m": 0,
+      "request_yaw_error_deg": 2.38308350945,
+      "error": ""
+    },
+    {
+      "scene": "free_near_110",
+      "variant": "exact_yaw_slow_turn",
+      "returncode": 0,
+      "csv_sha256": "b7e84f2404755a133abb80b1a2d6627d3b66fd8fef6440f5129487a6f02598dd",
+      "requested_start": [
+        0,
+        0,
+        0
+      ],
+      "requested_goal": [
+        0.2,
+        0,
+        1.9198621771937625
+      ],
+      "log": "evidence/ab_chain_free_near_110_exact_yaw_slow_turn_tight_xy.log",
+      "planner_controller_summary": true,
+      "success": 1,
+      "checker_reached": 1,
+      "body_safe": 1,
+      "ticks": 207,
+      "travelled_m": 0.2,
+      "max_excursion_m": 0.2,
+      "request_position_error_m": 1.11022302463e-16,
+      "request_yaw_error_deg": 2.85689231054,
+      "error": ""
+    },
+    {
+      "scene": "synthetic_door_goal90",
+      "variant": "exact_yaw_slow_turn",
+      "returncode": 0,
+      "csv_sha256": "e359e41e591eb2b7cf16da3c7198716fa7dbcdebf2dd1910676acb7bf3c08f48",
+      "requested_start": [
+        0,
+        0,
+        0.2617993877991494
+      ],
+      "requested_goal": [
+        1.5,
+        0,
+        1.5707963267948966
+      ],
+      "log": "evidence/ab_chain_synthetic_door_goal90_exact_yaw_slow_turn_tight_xy.log",
+      "planner_controller_summary": true,
+      "success": 1,
+      "checker_reached": 1,
+      "body_safe": 1,
+      "ticks": 294,
+      "travelled_m": 1.49985339848,
+      "max_excursion_m": 1.49984829895,
+      "request_position_error_m": 0.000151701504742,
+      "request_yaw_error_deg": 2.32342163919,
+      "error": ""
+    },
+    {
+      "scene": "synthetic_l_corridor",
+      "variant": "exact_yaw_slow_turn",
+      "returncode": 0,
+      "csv_sha256": "bcc1f68222a46dae9deaa46445140e407e8c9f54a02cf9746120c9ca0215f818",
+      "requested_start": [
+        0,
+        0,
+        0
+      ],
+      "requested_goal": [
+        1,
+        1,
+        1.5707963267948966
+      ],
+      "log": "evidence/ab_chain_synthetic_l_corridor_exact_yaw_slow_turn_tight_xy.log",
+      "planner_controller_summary": true,
+      "success": 1,
+      "checker_reached": 1,
+      "body_safe": 1,
+      "ticks": 336,
+      "travelled_m": 1.92170034772,
+      "max_excursion_m": 1.40894775476,
+      "request_position_error_m": 0.00749162003831,
+      "request_yaw_error_deg": 0.174417893593,
+      "error": ""
+    },
+    {
+      "scene": "recorded_terminal110_static_map",
+      "variant": "exact_yaw_slow_turn",
+      "returncode": 0,
+      "csv_sha256": "dfc8571b0aac371a7f49f4069949cf142fccb2c610bec7088f792bf7dd6ab7f8",
+      "requested_start": [
+        -3.8007497322782706,
+        4.658441093749194,
+        3.0504716917604155
+      ],
+      "requested_goal": [
+        -3.789631256533969,
+        4.698352909931362,
+        1.1210367137250565
+      ],
+      "log": "evidence/ab_chain_recorded_terminal110_static_map_exact_yaw_slow_turn_tight_xy.log",
+      "planner_controller_summary": true,
+      "success": 1,
+      "checker_reached": 1,
+      "body_safe": 1,
+      "ticks": 197,
+      "travelled_m": 0.04,
+      "max_excursion_m": 0.0399997044139,
+      "request_position_error_m": 0.00775795772303,
+      "request_yaw_error_deg": 0.714847068021,
+      "error": ""
+    }
+  ],
+  "wire_tests": [
+    {
+      "wire_test": "legacy_invalid_goal_rejected",
+      "success": true
+    },
+    {
+      "wire_test": "legacy_goal_feedback_result",
+      "success": true,
+      "feedback_count": 65
+    },
+    {
+      "wire_test": "legacy_cancel_result",
+      "success": true
+    }
+  ],
+  "native_ctest_passed": 2,
+  "cancel_new_goal_passed": true,
+  "rotation_collision_refused": true,
+  "integration_remaining": "Run the candidate as a production controller service: existing BT FollowPath request input, real TF/odom and progress checking, velocity output into existing smoother and safety gate. Existing downstream modules do not need rewriting.",
+  "scope": "Local ideal-body component closed loop; no hardware motion or complete navigation stack acceptance.",
+  "branch": "feature/official-path-handler-turn-validation",
+  "board_touched": false,
+  "pushed": false,
+  "codacy_cli_analyze": "Tool unavailable; no installation or pass claim."
+}

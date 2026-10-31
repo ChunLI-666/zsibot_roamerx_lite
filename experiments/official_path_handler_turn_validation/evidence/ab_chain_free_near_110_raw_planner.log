@@ -1,10 +1,10 @@
-[WARN] [1793448153.325783953] [rcl]: ROS_LOCALHOST_ONLY is deprecated but still honored if it is enabled. Use ROS_AUTOMATIC_DISCOVERY_RANGE and ROS_STATIC_PEERS instead.
-[WARN] [1793448153.325809627] [rcl]: 'localhost_only' is enabled, 'automatic_discovery_range' and 'static_peers' will be ignored.
+[WARN] [1793448327.471229433] [rcl]: ROS_LOCALHOST_ONLY is deprecated but still honored if it is enabled. Use ROS_AUTOMATIC_DISCOVERY_RANGE and ROS_STATIC_PEERS instead.
+[WARN] [1793448327.471253034] [rcl]: 'localhost_only' is enabled, 'automatic_discovery_range' and 'static_peers' will be ignored.
 getifaddrs: Operation not permitted
 getifaddrs: Operation not permitted
 getifaddrs: Operation not permitted
-[37;1m2026-10-31 20:02:33.330 [31;1m[[37;1mTRANSPORT_UDP[31;1m Error] [37mError creating socket: Operation not permitted[34;1m -> Function [36minit[m
-[37;1m2026-10-31 20:02:33.330 [31;1m[[37;1mRTPS_PARTICIPANT[31;1m Error] [37mUser transport failed to register.[34;1m -> Function [36mRTPSParticipantImpl[m
+[37;1m2026-10-31 20:05:27.475 [31;1m[[37;1mTRANSPORT_UDP[31;1m Error] [37mError creating socket: Operation not permitted[34;1m -> Function [36minit[m
+[37;1m2026-10-31 20:05:27.475 [31;1m[[37;1mRTPS_PARTICIPANT[31;1m Error] [37mUser transport failed to register.[34;1m -> Function [36mRTPSParticipantImpl[m
 getifaddrs: Operation not permitted
 getifaddrs: Operation not permitted
 getifaddrs: Operation not permitted
@@ -99,7 +99,8 @@ getifaddrs: Operation not permitted
 getifaddrs: Operation not permitted
 getifaddrs: Operation not permitted
 {"tick":0,"x":0,"y":0,"yaw_deg":0,"vx":0.1,"wz":0,"segment_poses":1016}
-{"tick":20,"x":0.17,"y":0,"yaw_deg":3.43775,"vx":0,"wz":0.4,"segment_poses":847}
-{"tick":40,"x":0.17,"y":0,"yaw_deg":60.1606,"vx":0,"wz":0.5,"segment_poses":847}
-{"tick":59,"x":0.17,"y":0,"yaw_deg":114.081,"vx":0,"wz":0,"segment_poses":847}
-{"planner_controller_summary":true,"success":0,"checker_reached":1,"body_safe":1,"ticks":59,"travelled_m":0.17,"max_excursion_m":0.17,"request_position_error_m":0.03,"request_yaw_error_deg":4.08139454011,"error":""}
+{"tick":20,"x":0.2,"y":0,"yaw_deg":0,"vx":0,"wz":0.1,"segment_poses":2}
+{"tick":40,"x":0.2,"y":0,"yaw_deg":51.5662,"vx":0,"wz":0.5,"segment_poses":2}
+{"tick":60,"x":0.2,"y":0,"yaw_deg":108.862,"vx":0,"wz":0.5,"segment_poses":2}
+{"tick":62,"x":0.2,"y":0,"yaw_deg":114.081,"vx":0,"wz":0,"segment_poses":2}
+{"planner_controller_summary":true,"success":0,"checker_reached":1,"body_safe":1,"ticks":62,"travelled_m":0.2,"max_excursion_m":0.2,"request_position_error_m":1.11022302463e-16,"request_yaw_error_deg":4.08139454011,"error":""}

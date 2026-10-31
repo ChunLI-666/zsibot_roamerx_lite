@@ -10,6 +10,9 @@ import subprocess
 root = Path(__file__).resolve().parents[1]
 assert os.environ.get("ROS_DOMAIN_ID") == "218"
 evidence = root / "evidence"
+tag = os.environ.get("PROBE_RUN_TAG", "")
+if any(ch not in "_-.abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" for ch in tag):
+    raise SystemExit("Invalid evidence tag")
 cases = [
     ("free_same_xy_180", [0, 0, 0], [0, 0, math.pi], "free"),
     ("free_near_110", [0, 0, 0], [.2, 0, math.radians(110)], "free"),
@@ -37,7 +40,7 @@ for variant in ("raw_planner", "exact_yaw", "exact_yaw_slow_turn"):
                "--ros-args", "--log-level", "error"]
         run = subprocess.run(cmd, env=env, text=True, stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT, timeout=35, check=False)
-        log = evidence / f"ab_chain_{name}_{variant}.log"
+        log = evidence / f"ab_chain_{name}_{variant}{tag}.log"
         log.write_text(run.stdout)
         row = {"scene": name, "variant": variant, "returncode": run.returncode,
                "csv_sha256": hashlib.sha256(csv.read_bytes()).hexdigest(),
@@ -64,8 +67,9 @@ report = {
         "footprint_padding_m": .035,
     },
     "exact_yaw_adaptation": "Append the requested yaw at the unchanged planner terminal XY; do not claim it is raw planner output. Actual motion is densely swept against the footprint.",
+    "controller_goal_xy_tolerance_m": float(os.environ.get("PROBE_GOAL_XY", ".04")),
     "results": results,
     "all_exact_yaw_passed": all(r.get("success") == 1 for r in results
                                 if r["variant"] != "raw_planner"),
 }
-(evidence / "ab_chain_result.json").write_text(json.dumps(report, indent=2) + "\n")
+(evidence / f"ab_chain{tag}_result.json").write_text(json.dumps(report, indent=2) + "\n")

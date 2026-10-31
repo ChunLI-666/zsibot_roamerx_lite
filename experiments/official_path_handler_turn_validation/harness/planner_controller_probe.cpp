@@ -135,7 +135,7 @@ int main(int argc,char ** argv) {
     }
     const double pos_err=std::hypot(current.pose.position.x-requested.pose.position.x,current.pose.position.y-requested.pose.position.y);
     const double yaw_err=std::abs(angles::shortest_angular_distance(tf2::getYaw(current.pose.orientation),tf2::getYaw(requested.pose.orientation)));
-    const bool passed=reached && safe && pos_err<=.04 && yaw_err<=.05;
+    const bool passed=reached && safe && pos_err<=goal_xy && yaw_err<=.05;
     std::cout<<std::setprecision(12)<<"{\"planner_controller_summary\":true,\"success\":"<<passed
       <<",\"checker_reached\":"<<reached<<",\"body_safe\":"<<safe<<",\"ticks\":"<<tick
       <<",\"travelled_m\":"<<travelled<<",\"max_excursion_m\":"<<max_excursion

@@ -42,7 +42,7 @@
         0,
         3.141592653589793
       ],
-      "log": "evidence/ab_chain_free_same_xy_180_raw_planner.log",
+      "log": "evidence/baseline_xy4cm/ab_chain_free_same_xy_180_raw_planner.log",
       "planner_controller_summary": true,
       "success": 1,
       "checker_reached": 1,
@@ -69,7 +69,7 @@
         0,
         1.9198621771937625
       ],
-      "log": "evidence/ab_chain_free_near_110_raw_planner.log",
+      "log": "evidence/baseline_xy4cm/ab_chain_free_near_110_raw_planner.log",
       "planner_controller_summary": true,
       "success": 0,
       "checker_reached": 1,
@@ -96,7 +96,7 @@
         0,
         1.5707963267948966
       ],
-      "log": "evidence/ab_chain_synthetic_door_goal90_raw_planner.log",
+      "log": "evidence/baseline_xy4cm/ab_chain_synthetic_door_goal90_raw_planner.log",
       "planner_controller_summary": true,
       "success": 1,
       "checker_reached": 1,
@@ -123,7 +123,7 @@
         1,
         1.5707963267948966
       ],
-      "log": "evidence/ab_chain_synthetic_l_corridor_raw_planner.log",
+      "log": "evidence/baseline_xy4cm/ab_chain_synthetic_l_corridor_raw_planner.log",
       "planner_controller_summary": true,
       "success": 0,
       "checker_reached": 0,
@@ -150,7 +150,7 @@
         4.698352909931362,
         1.1210367137250565
       ],
-      "log": "evidence/ab_chain_recorded_terminal110_static_map_raw_planner.log",
+      "log": "evidence/baseline_xy4cm/ab_chain_recorded_terminal110_static_map_raw_planner.log",
       "planner_controller_summary": true,
       "success": 1,
       "checker_reached": 1,
@@ -177,7 +177,7 @@
         0,
         3.141592653589793
       ],
-      "log": "evidence/ab_chain_free_same_xy_180_exact_yaw.log",
+      "log": "evidence/baseline_xy4cm/ab_chain_free_same_xy_180_exact_yaw.log",
       "planner_controller_summary": true,
       "success": 1,
       "checker_reached": 1,
@@ -204,7 +204,7 @@
         0,
         1.9198621771937625
       ],
-      "log": "evidence/ab_chain_free_near_110_exact_yaw.log",
+      "log": "evidence/baseline_xy4cm/ab_chain_free_near_110_exact_yaw.log",
       "planner_controller_summary": true,
       "success": 1,
       "checker_reached": 1,
@@ -231,7 +231,7 @@
         0,
         1.5707963267948966
       ],
-      "log": "evidence/ab_chain_synthetic_door_goal90_exact_yaw.log",
+      "log": "evidence/baseline_xy4cm/ab_chain_synthetic_door_goal90_exact_yaw.log",
       "planner_controller_summary": true,
       "success": 1,
       "checker_reached": 1,
@@ -258,7 +258,7 @@
         1,
         1.5707963267948966
       ],
-      "log": "evidence/ab_chain_synthetic_l_corridor_exact_yaw.log",
+      "log": "evidence/baseline_xy4cm/ab_chain_synthetic_l_corridor_exact_yaw.log",
       "planner_controller_summary": true,
       "success": 0,
       "checker_reached": 0,
@@ -285,7 +285,7 @@
         4.698352909931362,
         1.1210367137250565
       ],
-      "log": "evidence/ab_chain_recorded_terminal110_static_map_exact_yaw.log",
+      "log": "evidence/baseline_xy4cm/ab_chain_recorded_terminal110_static_map_exact_yaw.log",
       "planner_controller_summary": true,
       "success": 1,
       "checker_reached": 1,
@@ -312,7 +312,7 @@
         0,
         3.141592653589793
       ],
-      "log": "evidence/ab_chain_free_same_xy_180_exact_yaw_slow_turn.log",
+      "log": "evidence/baseline_xy4cm/ab_chain_free_same_xy_180_exact_yaw_slow_turn.log",
       "planner_controller_summary": true,
       "success": 1,
       "checker_reached": 1,
@@ -339,7 +339,7 @@
         0,
         1.9198621771937625
       ],
-      "log": "evidence/ab_chain_free_near_110_exact_yaw_slow_turn.log",
+      "log": "evidence/baseline_xy4cm/ab_chain_free_near_110_exact_yaw_slow_turn.log",
       "planner_controller_summary": true,
       "success": 1,
       "checker_reached": 1,
@@ -366,7 +366,7 @@
         0,
         1.5707963267948966
       ],
-      "log": "evidence/ab_chain_synthetic_door_goal90_exact_yaw_slow_turn.log",
+      "log": "evidence/baseline_xy4cm/ab_chain_synthetic_door_goal90_exact_yaw_slow_turn.log",
       "planner_controller_summary": true,
       "success": 1,
       "checker_reached": 1,
@@ -393,7 +393,7 @@
         1,
         1.5707963267948966
       ],
-      "log": "evidence/ab_chain_synthetic_l_corridor_exact_yaw_slow_turn.log",
+      "log": "evidence/baseline_xy4cm/ab_chain_synthetic_l_corridor_exact_yaw_slow_turn.log",
       "planner_controller_summary": true,
       "success": 0,
       "checker_reached": 0,
@@ -420,7 +420,7 @@
         4.698352909931362,
         1.1210367137250565
       ],
-      "log": "evidence/ab_chain_recorded_terminal110_static_map_exact_yaw_slow_turn.log",
+      "log": "evidence/baseline_xy4cm/ab_chain_recorded_terminal110_static_map_exact_yaw_slow_turn.log",
       "planner_controller_summary": true,
       "success": 1,
       "checker_reached": 1,
@@ -433,5 +433,6 @@
       "error": ""
     }
   ],
-  "all_exact_yaw_passed": false
+  "all_exact_yaw_passed": false,
+  "controller_goal_xy_tolerance_m": 0.04
 }

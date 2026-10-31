@@ -24,8 +24,9 @@ unmodified official generator output. Diagnostic metadata variants are separate
 files. The copied old real map is a static test input, not the current board map.
 
 `evidence/global_planner_comparison.json` retains the original global-planner
-comparison. `evidence/ab_chain_result.json` contains five actual planner-to-new-
-controller scenarios, including negative controls. Simulated motion is ideal
+comparison. `evidence/ab_chain_result.json` contains the initial planner-to-new-
+controller scenarios and negative controls. The final tighter-tolerance results
+are in `evidence/ab_chain_tight_xy_result.json`. Simulated motion is ideal
 constant-twist integration with dense footprint sweeps, not quadruped dynamics.
 
 Current verified findings:
@@ -41,8 +42,24 @@ Current verified findings:
   XY; raw planner output and adapted output are reported separately.
 - A real planner path through the synthetic L corridor is collision-free, but
   the initial controller tuning starts rotating too early and rejects the turn.
-  This negative result is retained; tighter consistent tolerances are being
-  tested. A complete integrated navigation stack is not declared accepted.
+  This negative result is retained in `evidence/baseline_xy4cm/`. Consistent
+  1 cm controller XY / 2 cm handler XY tolerances pass this counterexample.
+- Final adapted results pass all five scenarios at both tested turn speeds.
+  The original requested pose, not only the discretized path endpoint, is
+  checked. Cancel/new-goal and actual legacy action round trips also pass.
+
+Reproduce the planner/controller suite with:
+
+```bash
+bash run_planner_chain_isolated.sh
+```
+
+The local result supports an isolated native ARM build/software test. This
+fixture is not a production ControllerServer. Actual BT requests and its
+velocity output into the existing smoother/safety-gate chain still need to be
+connected and jointly tested. Those existing downstream modules need not be
+rewritten. Production progress checking, actual TF/odom, robot execution and
+quadruped dynamics are outside this fixture. No board action is performed.
 
 The user requested preservation on a separate feature branch without switching
 the canonical checkout. This experiment is stored below `experiments/` on that

@@ -1,10 +1,10 @@
-[WARN] [1793448166.082793893] [rcl]: ROS_LOCALHOST_ONLY is deprecated but still honored if it is enabled. Use ROS_AUTOMATIC_DISCOVERY_RANGE and ROS_STATIC_PEERS instead.
-[WARN] [1793448166.082813338] [rcl]: 'localhost_only' is enabled, 'automatic_discovery_range' and 'static_peers' will be ignored.
+[WARN] [1793448338.688107672] [rcl]: ROS_LOCALHOST_ONLY is deprecated but still honored if it is enabled. Use ROS_AUTOMATIC_DISCOVERY_RANGE and ROS_STATIC_PEERS instead.
+[WARN] [1793448338.688136499] [rcl]: 'localhost_only' is enabled, 'automatic_discovery_range' and 'static_peers' will be ignored.
 getifaddrs: Operation not permitted
 getifaddrs: Operation not permitted
 getifaddrs: Operation not permitted
-[37;1m2026-10-31 20:02:46.085 [31;1m[[37;1mTRANSPORT_UDP[31;1m Error] [37mError creating socket: Operation not permitted[34;1m -> Function [36minit[m
-[37;1m2026-10-31 20:02:46.086 [31;1m[[37;1mRTPS_PARTICIPANT[31;1m Error] [37mUser transport failed to register.[34;1m -> Function [36mRTPSParticipantImpl[m
+[37;1m2026-10-31 20:05:38.692 [31;1m[[37;1mTRANSPORT_UDP[31;1m Error] [37mError creating socket: Operation not permitted[34;1m -> Function [36minit[m
+[37;1m2026-10-31 20:05:38.692 [31;1m[[37;1mRTPS_PARTICIPANT[31;1m Error] [37mUser transport failed to register.[34;1m -> Function [36mRTPSParticipantImpl[m
 getifaddrs: Operation not permitted
 getifaddrs: Operation not permitted
 getifaddrs: Operation not permitted
@@ -108,5 +108,5 @@ getifaddrs: Operation not permitted
 {"tick":140,"x":-3.80075,"y":4.65844,"yaw_deg":94.5651,"vx":0,"wz":-0.1,"segment_poses":2}
 {"tick":160,"x":-3.80075,"y":4.65844,"yaw_deg":83.1059,"vx":0,"wz":-0.1,"segment_poses":2}
 {"tick":180,"x":-3.80075,"y":4.65844,"yaw_deg":71.6468,"vx":0,"wz":-0.1,"segment_poses":2}
-{"tick":194,"x":-3.79637,"y":4.66743,"yaw_deg":63.8571,"vx":0,"wz":0,"segment_poses":38}
-{"planner_controller_summary":true,"success":1,"checker_reached":1,"body_safe":1,"ticks":194,"travelled_m":0.01,"max_excursion_m":0.00999998522066,"request_position_error_m":0.0316476167685,"request_yaw_error_deg":0.373610220963,"error":""}
+{"tick":197,"x":-3.78302,"y":4.6943,"yaw_deg":63.5158,"vx":0,"wz":0,"segment_poses":7}
+{"planner_controller_summary":true,"success":1,"checker_reached":1,"body_safe":1,"ticks":197,"travelled_m":0.04,"max_excursion_m":0.0399997044139,"request_position_error_m":0.00775795772303,"request_yaw_error_deg":0.714847068021,"error":""}
