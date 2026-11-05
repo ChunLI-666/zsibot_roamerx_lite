@@ -67,6 +67,9 @@ The fresh map retains 1 cm geometry and its mapping evidence uses 5 cm cells.
 Navigation uses a 20 m rolling global costmap and 6 m local costmap at 1 cm.
 Both publish full raw master costmaps; the recorder includes hidden topics,
 actions, front camera and calibration, original sensors, commands, TF and diagnostics.
+The launcher's two raw master costmap evidence subscriptions request reliable,
+transient-local delivery with depth 1 to match the retained publisher samples.
+Sensor subscriptions, the 6 s costmap evidence check, and freshness limits stay unchanged.
 Each of the four complete frozen static-layer diagnostic topics is captured once
 as its original CDR under `/experiment/static_layer_snapshot/...`, with a sidecar
 hash and reliable delivery acknowledgement. The original `/map` and master
