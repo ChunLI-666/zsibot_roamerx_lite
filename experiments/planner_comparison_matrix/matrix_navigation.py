@@ -306,10 +306,21 @@ def run(args,out,selected_install,manifest):
             launch(name,[exe_path]+common+remaps)
         write(out/'processes.json',{name:p.pid for name,p in procs})
         for name in ['map_server','planner_server','controller_server','velocity_smoother','bt_navigator']:
-            client=node.create_client(GetState,'/'+name+'/get_state');deadline=time.monotonic()+90
-            while time.monotonic()<deadline and not stopped:
-                pump(.1)
-                if client.service_is_ready() and wait(client.call_async(GetState.Request())).current_state.id==3:break
+            service='/'+name+'/get_state';client=node.create_client(GetState,service);deadline=time.monotonic()+90;attempts=0
+            while time.monotonic()<deadline and not stopped and rclpy.ok():
+                pump(min(.1,max(0.,deadline-time.monotonic())))
+                if stopped or not rclpy.ok() or not client.service_is_ready():continue
+                if time.monotonic()>=deadline:continue
+                attempts+=1
+                try:
+                    future=client.call_async(GetState.Request())
+                    state=wait(future,timeout=min(3.,max(0.,deadline-time.monotonic())),operation=service)
+                except TimeoutError:
+                    remaining=deadline-time.monotonic()
+                    if stopped or not rclpy.ok() or remaining<=0:raise
+                    event('lifecycle_poll_retry',node=name,service=service,remaining_sec=remaining,attempts=attempts)
+                    continue
+                if not stopped and rclpy.ok() and time.monotonic()<deadline and state.current_state.id==3:break
             else:raise RuntimeError(name+' did not activate')
         params={}
         for name in ['map_server','planner_server','controller_server','local_costmap/local_costmap','global_costmap/global_costmap','velocity_smoother','bt_navigator','nav_safety_gate']:
