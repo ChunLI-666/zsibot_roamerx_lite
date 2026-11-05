@@ -260,4 +260,42 @@ inline bool sweepFree(
   }
   return true;
 }
+// Predict a planar differential-drive command at constant twist. This is a
+// collision horizon, not a physical braking-distance guarantee. Caller holds
+// the map lock and may install a request-local ScopedObstacleIndex.
+inline bool commandSweepFree(
+  nav2_costmap_2d::Costmap2D & map, const Footprint & footprint,
+  double x, double y, double yaw, double vx, double wz, double horizon)
+{
+  if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(yaw) ||
+    !std::isfinite(vx) || !std::isfinite(wz) || !std::isfinite(horizon) ||
+    horizon <= 0.0 || horizon > 3.0 || std::abs(wz) > 20.0 || std::abs(vx) > 20.0)
+  {
+    return false;
+  }
+  const double resolution = map.getResolution();
+  if (!std::isfinite(resolution) || resolution <= 0.0) {return false;}
+  // Arc-to-chord sagitta <= |vx*wz|*dt^2/8. Keep it below 1/4 cell;
+  // footprintFree's additional whole-cell guard covers this approximation.
+  const double requested_steps = std::ceil(std::max({horizon / 0.02,
+    std::abs(wz) * horizon / 0.05,
+    horizon * std::sqrt(std::abs(vx * wz) / (2.0 * resolution))}));
+  if (!std::isfinite(requested_steps) || requested_steps > 1000000.0) {return false;}
+  const int steps = std::max(1, static_cast<int>(requested_steps));
+  const double dt = horizon / steps;
+  for (int i = 0; i < steps; ++i) {
+    const double next_yaw = yaw + wz * dt;
+    double next_x = x, next_y = y;
+    if (std::abs(wz) > 1e-9) {
+      next_x += vx / wz * (std::sin(next_yaw) - std::sin(yaw));
+      next_y += vx / wz * (std::cos(yaw) - std::cos(next_yaw));
+    } else {
+      next_x += vx * dt * std::cos(yaw);
+      next_y += vx * dt * std::sin(yaw);
+    }
+    if (!sweepFree(map, footprint, x, y, yaw, next_x, next_y, next_yaw)) {return false;}
+    x = next_x; y = next_y; yaw = next_yaw;
+  }
+  return true;
+}
 }  // namespace robot_feasible_navigation::sweep

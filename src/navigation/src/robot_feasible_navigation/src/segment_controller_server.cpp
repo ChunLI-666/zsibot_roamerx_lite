@@ -128,6 +128,7 @@ SegmentControllerServer::SegmentControllerServer(const rclcpp::NodeOptions & opt
   declare_parameter("segments.progress_search_distance", config.progress_search_distance, descriptor);
   declare_parameter("segments.odom_timeout", config.odom_timeout, descriptor);
   declare_parameter("segments.rotation_anchor_wait_timeout", config.rotation_anchor_wait_timeout, descriptor);
+  declare_parameter("segments.command_sweep_horizon", 1.0, descriptor);
 
   // The costmap node is used in the implementation of the controller
   costmap_ros_ = std::make_shared<nav2_costmap_2d::Costmap2DROS>(
@@ -669,6 +670,10 @@ void SegmentControllerServer::computeControl()
 
       updateGlobalPath();
 
+      // Latest TF may return a cached transform while odometry stays fresh.
+      // Check the real chain stamp before either completion or command output.
+      validateTransformFreshness();
+
       if (isGoalReached()) {
         RCLCPP_INFO(get_logger(), "Reached the goal!");
         break;
@@ -894,6 +899,34 @@ void SegmentControllerServer::publishSegmentStop()
   publishVelocity(zero);  // Same owner/publisher; do not reset RPP at every braking cycle.
 }
 
+void SegmentControllerServer::validateTransformFreshness()
+{
+  const auto timeout = coordinator_.config().odom_timeout;
+  for (const auto & frame : {costmap_ros_->getGlobalFrameID(), current_path_.header.frame_id}) {
+    try {
+      const auto transform = costmap_ros_->getTfBuffer()->lookupTransform(
+        frame, costmap_ros_->getBaseFrameID(), tf2::TimePointZero);
+      const rclcpp::Time stamp(transform.header.stamp, get_clock()->get_clock_type());
+      const double age = (now() - stamp).seconds();
+      auto & history = transform_history_[frame];
+      const auto steady = std::chrono::steady_clock::now();
+      if (stamp.nanoseconds() <= 0 || age < -0.05 || age > timeout ||
+        stamp.nanoseconds() < history.stamp)
+      {
+        throw nav2_core::ControllerTFError("Stale, future or regressed actual TF chain: " + frame);
+      }
+      if (stamp.nanoseconds() > history.stamp) {
+        history.stamp = stamp.nanoseconds(); history.advanced = steady;
+      }
+      if (std::chrono::duration<double>(steady - history.advanced).count() > timeout) {
+        throw nav2_core::ControllerTFError("Actual TF stamp stopped advancing: " + frame);
+      }
+    } catch (const tf2::TransformException & e) {
+      throw nav2_core::ControllerTFError(e.what());
+    }
+  }
+}
+
 bool SegmentControllerServer::rotationSweepFree(
   const geometry_msgs::msg::PoseStamped & actual_pose,
   const geometry_msgs::msg::PoseStamped & requested_target)
@@ -1036,6 +1069,21 @@ void SegmentControllerServer::computeAndPublishVelocity()
       std::abs(cmd_vel_2d.twist.angular.z) > 1e-6)
     {
       throw nav2_core::NoValidControl("TRACK cannot introduce an unplanned in-place rotation");
+    }
+    {
+      auto * map = costmap_ros_->getCostmap();
+      std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> lock(*map->getMutex());
+      sweep::ScopedObstacleIndex index(*map);
+      const auto & v = cmd_vel_2d.twist;
+      const double horizon = get_parameter("segments.command_sweep_horizon").as_double();
+      if (horizon < 0.5 || v.linear.y != 0.0 || v.linear.z != 0.0 ||
+        v.angular.x != 0.0 || v.angular.y != 0.0 ||
+        !sweep::commandSweepFree(*map, costmap_ros_->getRobotFootprint(),
+        pose.pose.position.x, pose.pose.position.y, SegmentCoordinator::yaw(pose.pose),
+        v.linear.x, v.angular.z, horizon))
+      {
+        throw nav2_core::NoValidControl("Filled actual command sweep blocked or invalid");
+      }
     }
     last_valid_cmd_time_ = now();
     cmd_vel_2d.header.frame_id = costmap_ros_->getBaseFrameID();

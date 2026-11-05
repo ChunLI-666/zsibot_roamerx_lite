@@ -35,6 +35,19 @@ TEST(FilledFootprint, InteriorObstacleAndUnknownAreBlocked)
   EXPECT_FALSE(rs::footprintFree(map, body(), 1.0, 1.0, 0.0));
 }
 
+TEST(FilledFootprint, CommandArcChecksMiddleAndRejectsInvalidVelocity)
+{
+  nav2_costmap_2d::Costmap2D map(400, 400, 0.01, -2.0, -2.0, 0);
+  EXPECT_TRUE(rs::commandSweepFree(map, body(), 0.0, 0.0, 0.0, 1.0, M_PI_2, 1.0));
+  block(map, 0.4, 0.08);
+  EXPECT_TRUE(rs::footprintFree(map, body(), 0.0, 0.0, 0.0));
+  EXPECT_TRUE(rs::footprintFree(map, body(), 2.0 / M_PI, 2.0 / M_PI, M_PI_2));
+  EXPECT_FALSE(rs::commandSweepFree(map, body(), 0.0, 0.0, 0.0, 1.0, M_PI_2, 1.0));
+  EXPECT_FALSE(rs::commandSweepFree(map, body(), 0.0, 0.0, 0.0,
+    std::numeric_limits<double>::quiet_NaN(), 0.0, 1.0));
+  EXPECT_FALSE(rs::commandSweepFree(map, body(), 0.0, 0.0, 0.0, 0.1, 0.0, 0.0));
+}
+
 TEST(FilledFootprint, RotationMiddleCollisionDespiteClearEndpoints)
 {
   nav2_costmap_2d::Costmap2D map(200, 200, 0.01, 0.0, 0.0, 0);
