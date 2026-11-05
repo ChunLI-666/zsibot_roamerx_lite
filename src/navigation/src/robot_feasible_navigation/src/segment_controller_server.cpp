@@ -952,6 +952,7 @@ bool SegmentControllerServer::rotationSweepFree(
   const auto footprint = costmap_ros_->getRobotFootprint();
   const double x = actual_pose.pose.position.x, y = actual_pose.pose.position.y;
   std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> lock(*map->getMutex());
+  sweep::ScopedObstacleIndex index(*map);
   return sweep::sweepFree(*map, footprint, x, y, SegmentCoordinator::yaw(actual_pose.pose),
     x, y, SegmentCoordinator::yaw(transformed.pose));
 }
