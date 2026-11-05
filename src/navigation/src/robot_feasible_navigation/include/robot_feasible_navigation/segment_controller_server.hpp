@@ -296,6 +296,12 @@ protected:
   std::optional<std::chrono::steady_clock::time_point> rotation_anchor_wait_since_;
   bool rotation_anchor_waiting_{false};
   bool incoming_rotation_snapshot_{false};
+  struct TransformHistory {
+    std::int64_t stamp{0};
+    std::chrono::steady_clock::time_point advanced;
+  };
+  std::unordered_map<std::string, TransformHistory> transform_history_;
+  void validateTransformFreshness();
   void installActiveSegment();
   void clearSegmentState();
   geometry_msgs::msg::PoseStamped actualPathPose();
