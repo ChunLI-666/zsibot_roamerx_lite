@@ -22,8 +22,16 @@ when its raw sensors and front camera are available.
 
 The fresh map retains 1 cm geometry and its mapping evidence uses 5 cm cells.
 Navigation uses a 20 m rolling global costmap and 6 m local costmap at 1 cm.
-Both publish full raw costmaps; the recorder includes hidden topics, actions,
-front camera and calibration, original sensors, commands, TF and diagnostics.
+Both publish full raw master costmaps; the recorder includes hidden topics,
+actions, front camera and calibration, original sensors, commands, TF and diagnostics.
+Each of the four complete frozen static-layer diagnostic topics is captured once
+as its original CDR under `/experiment/static_layer_snapshot/...`, with a sidecar
+hash and reliable delivery acknowledgement. The original `/map` and master
+costmaps remain fully recorded. After closure, the MCAP must contain exactly one
+message per snapshot alias with the original CDR hash. A map reload requires a new run. The old all-topic
+v2 recording contained about 113 GB of uncompressed CDR, 92% from repeated complete
+static-layer copies; that recording remains intact. The revised policy removes
+those repeated subscriptions, and its exact exclusions are saved in each manifest.
 The launcher writes a 0.5 s readiness lease and continuously revokes it for stale
 odom/TF/scan/camera or invalid localization. The pilot must additionally check
 current inputs immediately before each goal. Runtime command guards remain active

@@ -5,6 +5,7 @@ No fake plant, localization status publisher, TF publisher, sensor bridge, SDK a
 """
 import argparse,copy,hashlib,json,math,os,pathlib,shutil,signal,subprocess,sys,time
 import yaml
+from static_layer_snapshot import EXCLUDED_LAYERS,capture as capture_static_layers,audit_recorded as audit_static_layers
 BASE=pathlib.Path(__file__).resolve().parent
 NAV=BASE.parents[1]
 ROOT=NAV.parents[2]
@@ -85,6 +86,10 @@ def prepare(args):
     d['bt_navigator']['ros__parameters']['default_nav_to_pose_bt_xml']=str(bt)
     params=out/'params.yaml';params.write_text(yaml.safe_dump(d,sort_keys=False));manifest['params_sha256']=sha(params)
     shutil.copy2(__file__,out/'launcher_snapshot.py');manifest['launcher_sha256']=sha(__file__)
+    helper=BASE/'static_layer_snapshot.py';shutil.copy2(helper,out/helper.name)
+    manifest['static_layer_snapshot_helper_sha256']=sha(helper)
+    manifest['recording_policy']=dict(excluded_continuous_topics_regex=EXCLUDED_LAYERS,
+      replacement='One original-CDR snapshot of each frozen static layer under /experiment/static_layer_snapshot; map and master costmaps remain continuous')
     write(out/'runtime_manifest.json',manifest);write(out/'invocation.json',dict(argv=sys.argv,cwd=os.getcwd()))
     return out,selected_install,manifest
 
@@ -108,7 +113,7 @@ def run(args,out,selected_install,manifest):
     from tf2_ros import Buffer,TransformListener
     from rclpy.qos import qos_profile_sensor_data
     import cv2,numpy as np
-    stopped=False
+    stopped=False;static_snapshots=[]
     def request_stop(*unused):
         nonlocal stopped;stopped=True
     rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
@@ -182,7 +187,7 @@ def run(args,out,selected_install,manifest):
         for topic in ['/cmd_vel_nav','/cmd_vel','/cmd_vel_safe']:
             if node.get_publishers_info_by_topic(topic):raise RuntimeError('Existing velocity publisher requires owner cleanup before this run: '+topic)
         # Recorder covers preflight source data, all lifecycle transitions, full maps, camera and actions.
-        launch('recorder',['/opt/ros/jazzy/bin/ros2','bag','record','--node-name',recorder_name,'-a','--include-hidden-topics','-s','mcap','--storage-preset-profile','zstd_fast','--max-cache-size','268435456','-o',str(out/'bag')],recorder_env)
+        launch('recorder',['/opt/ros/jazzy/bin/ros2','bag','record','--node-name',recorder_name,'-a','--include-hidden-topics','--exclude-regex',EXCLUDED_LAYERS,'-s','mcap','--storage-preset-profile','zstd_fast','--max-cache-size','268435456','-o',str(out/'bag')],recorder_env)
         deadline=time.monotonic()+args.preflight_timeout;preflight={}
         while time.monotonic()<deadline and not stopped:
             pump(.1)
@@ -235,6 +240,7 @@ def run(args,out,selected_install,manifest):
             names=wait(lc.call_async(ListParameters.Request())).result.names;req=GetParameters.Request();req.names=names
             params[name]={n:message_to_ordereddict(v) for n,v in zip(names,wait(gc.call_async(req)).values)}
         write(out/'runtime_parameters.json',params)
+        static_snapshots=capture_static_layers(node,out,recorder_name,pump,lambda:stopped)
         actual_maps={}
         for name,size in [('global_costmap',2000),('local_costmap',600)]:
             client=node.create_client(GetCostmap,'/'+name+'/get_costmap')
@@ -315,9 +321,13 @@ def run(args,out,selected_install,manifest):
         metadata=out/'bag/metadata.yaml'
         if metadata.exists():
             md=yaml.safe_load(metadata.read_text())['rosbag2_bagfile_information'];topic_counts={x['topic_metadata']['name']:x['message_count'] for x in md['topics_with_message_count']}
+            try:snapshot_audit=audit_static_layers(out/'bag',static_snapshots)
+            except Exception as error:snapshot_audit=dict(passed=False,error=repr(error))
+            write(out/'static_layer_recording_audit.json',snapshot_audit)
             required=[args.camera_topic,args.camera_info_topic,args.odom_topic,args.scan_topic,'/livox/lidar','/livox/imu','/lightning_bridge/debug','/lightning/debug','/debug/build_info','/tf','/tf_static','/map','/global_costmap/costmap_raw','/local_costmap/costmap_raw','/cmd_vel_nav','/cmd_vel','/cmd_vel_safe','/simulation/command_adapter/policy_cmd']
+            required += [snapshot['recorded_topic'] for snapshot in static_snapshots]
             write(out/'final_audit.json',dict(message_count=md['message_count'],topic_counts=topic_counts,required_topics_nonempty={t:topic_counts.get(t,0)>0 for t in required},
-              mcap_sha256={p.name:sha(p) for p in (out/'bag').glob('*.mcap')},note='Sequential decode and per-case action/results remain required before acceptance.'))
+              static_layer_exactly_once_cdr_verified=snapshot_audit['passed'],mcap_sha256={p.name:sha(p) for p in (out/'bag').glob('*.mcap')},note='Sequential decode and per-case action/results remain required before acceptance.'))
         event('stopped',observed_counts=counts);event_stream.close();node.destroy_node();rclpy.shutdown()
 
 def main():
