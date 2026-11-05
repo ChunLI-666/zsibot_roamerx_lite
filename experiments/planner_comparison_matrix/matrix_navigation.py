@@ -8,14 +8,63 @@ import yaml
 from static_layer_snapshot import EXCLUDED_LAYERS,capture as capture_static_layers,audit_recorded as audit_static_layers
 BASE=pathlib.Path(__file__).resolve().parent
 NAV=BASE.parents[1]
-ROOT=NAV.parents[2]
 def sha(path):
     with pathlib.Path(path).open('rb') as stream:return hashlib.file_digest(stream,'sha256').hexdigest()
 def write(path,value):
     path=pathlib.Path(path);temporary=path.with_suffix(path.suffix+'.tmp')
     temporary.write_text(json.dumps(value,indent=2)+'\n');temporary.replace(path)
 
+def source_snapshot(path,template):
+    """Validate a deployment source manifest without inspecting a Git checkout."""
+    def unique_object(pairs):
+        result={}
+        for key,value in pairs:
+            if key in result:raise ValueError('Duplicate source snapshot key: '+key)
+            result[key]=value
+        return result
+    def hex_digest(value,length):
+        return isinstance(value,str) and len(value)==length and all(c in '0123456789abcdef' for c in value)
+    raw=pathlib.Path(path).read_bytes()
+    data=json.loads(raw,object_pairs_hook=unique_object)
+    if not isinstance(data,dict) or set(data)!={'schema_version','origin','files_sha256'}:
+        raise ValueError('Source snapshot requires schema_version, origin and files_sha256')
+    if type(data['schema_version']) is not int or data['schema_version']!=1:
+        raise ValueError('Unsupported source snapshot schema_version')
+    origin=data['origin']
+    if not isinstance(origin,dict) or set(origin)!={'kind','canonical_repository','commit','branch','status'}:
+        raise ValueError('Source snapshot origin requires canonical Git observation')
+    if origin['kind']!='canonical_checkout_snapshot' or not hex_digest(origin['commit'],40):
+        raise ValueError('Invalid source snapshot origin kind or commit')
+    if not isinstance(origin['canonical_repository'],str) or not pathlib.PurePosixPath(origin['canonical_repository']).is_absolute():
+        raise ValueError('Source snapshot canonical_repository must be an absolute origin path')
+    if not isinstance(origin['branch'],str) or not origin['branch'] or not isinstance(origin['status'],str):
+        raise ValueError('Source snapshot branch and status must preserve the canonical observation')
+    files=data['files_sha256']
+    if not isinstance(files,dict) or not files:raise ValueError('Source snapshot requires source file hashes')
+    root=NAV.resolve()
+    # The wrapper executes before this process; the other files are consumed here.
+    required=[pathlib.Path(__file__),BASE/'static_layer_snapshot.py',BASE/'run_matrix_navigation.sh',
+      template,NAV/'src/navigation/src/robot_navigo/scripts/nav_safety_gate.py']
+    required_names=set()
+    for source in required:
+        resolved=source.resolve(strict=True)
+        if not resolved.is_relative_to(root):raise ValueError('Source input escapes deployment NAV: '+str(source))
+        required_names.add(source.absolute().relative_to(root).as_posix())
+    if not required_names<=files.keys():
+        raise ValueError('Source snapshot missing required files: '+repr(sorted(required_names-files.keys())))
+    for name,digest in files.items():
+        relative=pathlib.PurePosixPath(name)
+        if not name or relative.is_absolute() or '..' in relative.parts or '\\' in name or relative.as_posix()!=name:
+            raise ValueError('Source snapshot file must be a normalized relative NAV path: '+name)
+        resolved=(root/name).resolve(strict=True)
+        if not resolved.is_relative_to(root) or not resolved.is_file():
+            raise ValueError('Source snapshot file escapes deployment NAV or is not a file: '+name)
+        if not hex_digest(digest,64) or sha(resolved)!=digest:raise ValueError('Source snapshot hash mismatch: '+name)
+    return data,raw
+
 def prepare(args):
+    template=pathlib.Path(args.template).absolute()
+    snapshot,snapshot_raw=source_snapshot(args.source_snapshot,template) if args.source_snapshot else (None,None)
     out=pathlib.Path(args.output).resolve();out.mkdir(parents=True,exist_ok=False)
     footprint=json.loads(args.footprint)
     if len(footprint)<3 or any(len(p)!=2 or any(not math.isfinite(v) for v in p) for p in footprint):raise ValueError('finite polygon required')
@@ -28,7 +77,7 @@ def prepare(args):
     map_yaml=pathlib.Path(args.map).resolve();map_data=yaml.safe_load(map_yaml.read_text())
     if abs(float(map_data['resolution'])-.01)>1e-8:raise ValueError('this comparison requires 1cm geometry map')
     map_image=(map_yaml.parent/map_data['image']).resolve()
-    template=pathlib.Path(args.template).resolve()
+    template=template.resolve()
     d=yaml.safe_load(template.read_text());rpp=copy.deepcopy(d['controller_server']['ros__parameters']['FollowPath'].get('rpp',d['controller_server']['ros__parameters']['FollowPath']))
     rpp.pop('plugin',None)
     if args.rotate_threshold is not None:rpp['rotate_to_heading_min_angle']=args.rotate_threshold
@@ -46,9 +95,14 @@ def prepare(args):
         goal_tolerances=dict(xy=args.xy_tolerance,yaw=args.yaw_tolerance,stateful=False),goal_distance_from_start_limit_m=8.,
         command_chain=['/cmd_vel_nav','/cmd_vel','/cmd_vel_safe'],goal_client='Separate authorized agent must record UUID, original goal, result/cancel and settled errors',
         build_receipt=str(pathlib.Path(args.build_receipt).resolve()) if args.build_receipt else None,
-        source_repository_observation=dict(head=subprocess.check_output(['git','-C',str(NAV),'rev-parse','HEAD'],text=True).strip(),
+        source_repository_observation=None if snapshot else dict(head=subprocess.check_output(['git','-C',str(NAV),'rev-parse','HEAD'],text=True).strip(),
           status=subprocess.check_output(['git','-C',str(NAV),'status','--short'],text=True)),
         caution='Repository observation is not a substitute for the selected artifact build receipt')
+    if snapshot:
+        frozen=out/'deployment_source_snapshot.json';frozen.write_bytes(snapshot_raw)
+        manifest['deployment_source_snapshot']=dict(path=str(frozen),sha256=sha(frozen),origin=snapshot['origin'],
+          validated_files_sha256=snapshot['files_sha256'],deployment_nav=str(NAV),
+          note='Supplied canonical source observation and verified deployment bytes; no deployment Git checkout was inspected. This does not replace the selected artifact build receipt.')
     if args.build_receipt:
         receipt=pathlib.Path(args.build_receipt).resolve();shutil.copy2(receipt,out/'source_build_receipt.json');manifest['build_receipt_sha256']=sha(receipt)
     for node in ['controller_server','velocity_smoother','bt_navigator']:d[node]['ros__parameters']['odom_topic']=args.odom_topic
@@ -97,6 +151,13 @@ def run(args,out,selected_install,manifest):
     if os.environ.get('ROS_DOMAIN_ID')!='185':raise RuntimeError('Matrix navigation requires the isolated domain185 environment from simulation_setup')
     if not args.build_receipt:raise RuntimeError('--run requires a concrete selected-artifact --build-receipt')
     if not args.message_install:raise RuntimeError('--run requires an isolated custom-message --message-install for complete recording')
+    if args.source_snapshot:
+        # Recheck the frozen manifest immediately before runtime setup, including
+        # files copied later (safety gate); a preparation result is not a lease.
+        frozen=out/'deployment_source_snapshot.json'
+        if sha(frozen)!=manifest['deployment_source_snapshot']['sha256']:
+            raise RuntimeError('Deployment source snapshot changed after preparation')
+        source_snapshot(frozen,pathlib.Path(args.template).absolute())
     import rclpy
     from rclpy.node import Node
     from rclpy.signals import SignalHandlerOptions
@@ -336,6 +397,7 @@ def main():
     p.add_argument('--padding',required=True,type=float);p.add_argument('--variant',required=True,choices=['official','segmented','hybrid']);p.add_argument('--output',required=True)
     p.add_argument('--odom-topic',default='/odom/current_pose');p.add_argument('--scan-topic',default='/laser_scan');p.add_argument('--camera-topic',default='/camera/front/image/compressed');p.add_argument('--camera-info-topic',default='/camera/front/camera_info')
     p.add_argument('--template',default=str(BASE/'matrix_profile.yaml'))
+    p.add_argument('--source-snapshot',help='Validated source manifest for a Git-free frozen deployment; defaults to observing canonical Git')
     p.add_argument('--official-install');p.add_argument('--segmented-install')
     p.add_argument('--rotate-threshold',type=float,help='Explicit RPP heading threshold override; otherwise frozen template value')
     p.add_argument('--xy-tolerance',type=float,default=.15);p.add_argument('--yaw-tolerance',type=float,default=.08)
