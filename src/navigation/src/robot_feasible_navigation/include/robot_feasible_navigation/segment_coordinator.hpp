@@ -56,6 +56,10 @@ public:
   // Pose must already be in path.header.frame_id. Repeated observations are idempotent.
   void observe(const geometry_msgs::msg::Pose & pose);
   bool geometryReached(const geometry_msgs::msg::Pose & pose) const;
+  // Tighten TRACK handoff for a stricter original goal, without changing the
+  // separately configured ROTATE anchor/drift allowance.
+  bool geometryReached(const geometry_msgs::msg::Pose & pose,
+    double maximum_track_xy_tolerance) const;
   bool orderedProgressReached(double xy_tolerance, double yaw_tolerance) const;
   bool stopped(const geometry_msgs::msg::Twist & measured_velocity) const;
   // Initial task/new-goal/segment entry must first stop. Latches once per entry; an active

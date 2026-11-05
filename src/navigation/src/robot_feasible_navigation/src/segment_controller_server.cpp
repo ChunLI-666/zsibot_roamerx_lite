@@ -48,7 +48,9 @@ namespace
 class IntermediateGoalChecker final : public nav2_core::GoalChecker
 {
 public:
-  explicit IntermediateGoalChecker(const SegmentCoordinator::Config & config) : config_(config) {}
+  IntermediateGoalChecker(const SegmentCoordinator::Config & config,
+    std::function<double()> phase_xy_tolerance)
+  : config_(config), phase_xy_tolerance_(std::move(phase_xy_tolerance)) {}
   void initialize(const rclcpp_lifecycle::LifecycleNode::WeakPtr &,
     const std::string &, const std::shared_ptr<nav2_costmap_2d::Costmap2DROS>) override {}
   void reset() override {}
@@ -56,7 +58,7 @@ public:
     const geometry_msgs::msg::Pose & goal, const geometry_msgs::msg::Twist & velocity) override
   {
     return std::hypot(pose.position.x - goal.position.x, pose.position.y - goal.position.y) <=
-           config_.xy_tolerance && std::abs(SegmentCoordinator::angle(
+           xyTolerance() && std::abs(SegmentCoordinator::angle(
              SegmentCoordinator::yaw(goal) - SegmentCoordinator::yaw(pose))) <=
            config_.yaw_tolerance && std::hypot(velocity.linear.x, velocity.linear.y) <=
            config_.stopped_linear_velocity &&
@@ -64,7 +66,7 @@ public:
   }
   bool getTolerances(geometry_msgs::msg::Pose & pose, geometry_msgs::msg::Twist & velocity) override
   {
-    pose.position.x = config_.xy_tolerance; pose.position.y = config_.xy_tolerance;
+    pose.position.x = xyTolerance(); pose.position.y = pose.position.x;
     pose.position.z = std::numeric_limits<double>::lowest();
     pose.orientation.z = std::sin(config_.yaw_tolerance * .5);
     pose.orientation.w = std::cos(config_.yaw_tolerance * .5);
@@ -74,7 +76,9 @@ public:
     return true;
   }
 private:
+  double xyTolerance() const {return std::min(config_.xy_tolerance, phase_xy_tolerance_());}
   SegmentCoordinator::Config config_;
+  std::function<double()> phase_xy_tolerance_;
 };
 struct ScopeExit
 {
@@ -165,7 +169,9 @@ SegmentControllerServer::on_configure(const rclcpp_lifecycle::State & state)
   get_parameter("segments.rotation_anchor_wait_timeout", segment_config.rotation_anchor_wait_timeout);
   try {
     coordinator_ = SegmentCoordinator(segment_config);
-    intermediate_goal_checker_ = std::make_unique<IntermediateGoalChecker>(segment_config);
+    intermediate_goal_checker_ = std::make_unique<IntermediateGoalChecker>(segment_config,
+      [this]() {return coordinator_.rotating() ? coordinator_.config().xy_tolerance :
+        originalGoalTolerances().first;});
   } catch (const std::invalid_argument & e) {
     RCLCPP_ERROR(get_logger(), "Invalid segment configuration: %s", e.what());
     return nav2_util::CallbackReturn::FAILURE;
@@ -1021,7 +1027,7 @@ void SegmentControllerServer::computeAndPublishVelocity()
     // check and this call must not let RPP start an implicit end-of-TRACK yaw correction.
     const auto actual = toPathPose(pose);
     coordinator_.observe(actual.pose);
-    if (coordinator_.geometryReached(actual.pose)) {
+    if (coordinator_.geometryReached(actual.pose, originalGoalTolerances().first)) {
       segment_braking_ = true;
       publishSegmentStop();
       return;
@@ -1041,7 +1047,8 @@ void SegmentControllerServer::computeAndPublishVelocity()
       controllers_[current_controller_]->computeVelocityCommands(
       pose,
       measured,
-      terminal_rotation_active_ ? goal_checkers_[current_goal_checker_].get() :
+      (terminal_rotation_active_ || coordinator_.finalSegment()) ?
+      goal_checkers_[current_goal_checker_].get() :
       intermediate_goal_checker_.get());
     if (coordinator_.rotating() || terminal_rotation_active_) {
       if (std::hypot(cmd_vel_2d.twist.linear.x, cmd_vel_2d.twist.linear.y) > 1e-6) {
@@ -1197,6 +1204,21 @@ void SegmentControllerServer::publishZeroVelocity()
   }
 }
 
+std::pair<double, double> SegmentControllerServer::originalGoalTolerances()
+{
+  geometry_msgs::msg::Pose tolerance_pose;
+  geometry_msgs::msg::Twist tolerance_velocity;
+  if (!goal_checkers_[current_goal_checker_]->getTolerances(tolerance_pose, tolerance_velocity)) {
+    throw nav2_core::ControllerException("Final checker must expose its tolerances");
+  }
+  const double xy_tolerance = tolerance_pose.position.x;
+  const double yaw_tolerance = std::abs(SegmentCoordinator::yaw(tolerance_pose));
+  if (!std::isfinite(xy_tolerance) || xy_tolerance <= 0.0 || !std::isfinite(yaw_tolerance)) {
+    throw nav2_core::ControllerException("Invalid original goal checker tolerances");
+  }
+  return {xy_tolerance, yaw_tolerance};
+}
+
 bool SegmentControllerServer::isGoalReached()
 {
   if (coordinator_.empty() || !original_goal_) {return false;}
@@ -1208,30 +1230,10 @@ bool SegmentControllerServer::isGoalReached()
     publishSegmentStop();
     return false;
   }
-  geometry_msgs::msg::Pose tolerance_pose;
-  geometry_msgs::msg::Twist tolerance_velocity;
-  if (!goal_checkers_[current_goal_checker_]->getTolerances(tolerance_pose, tolerance_velocity)) {
-    throw nav2_core::ControllerException("Final checker must expose its tolerances");
-  }
-  const double xy_tolerance = tolerance_pose.position.x;
-  const double yaw_tolerance = std::abs(SegmentCoordinator::yaw(tolerance_pose));
-  if (!std::isfinite(xy_tolerance) || xy_tolerance <= 0.0 || !std::isfinite(yaw_tolerance)) {
-    throw nav2_core::ControllerException("Invalid original goal checker tolerances");
-  }
+  const auto [xy_tolerance, yaw_tolerance] = originalGoalTolerances();
 
-  // Single NavigateToPose acceptance is the original user goal, not exhaustion of an
-  // exact sub-cell adapter. Recheck BOTH current geometry components before the stateful
-  // checker so an earlier XY latch cannot accept a robot that subsequently moved away.
-  if (SegmentCoordinator::originalGoalGeometryReached(
-    path_pose.pose, original_goal_->pose, xy_tolerance, yaw_tolerance))
-  {
-    const bool reached = goal_checkers_[current_goal_checker_]->isGoalReached(
-      path_pose.pose, original_goal_->pose, measured);
-    segment_braking_ = !reached;  // E.g. a real stopped-goal checker still requests a stop.
-    return reached;
-  }
-  if (!terminal_braking_) {segment_braking_ = false;}
-
+  // A repeated XY location near the original goal is not route completion. Check
+  // remaining ordered progress before consulting even a stateful final checker.
   bool terminal_eligible = coordinator_.terminalWindowEligible(
     path_pose.pose, original_goal_->pose, xy_tolerance);
   if ((terminal_rotation_active_ || terminal_braking_) && queued_path_) {
@@ -1241,6 +1243,20 @@ bool SegmentControllerServer::isGoalReached()
     terminal_eligible = terminal_eligible && pending.terminalWindowEligible(
       path_pose.pose, original_goal_->pose, xy_tolerance);
   }
+
+  // Single NavigateToPose acceptance is the original user goal, not exhaustion of an
+  // exact sub-cell adapter. Recheck BOTH current geometry components before the stateful
+  // checker so an earlier XY latch cannot accept a robot that subsequently moved away.
+  if (terminal_eligible && SegmentCoordinator::originalGoalGeometryReached(
+    path_pose.pose, original_goal_->pose, xy_tolerance, yaw_tolerance))
+  {
+    const bool reached = goal_checkers_[current_goal_checker_]->isGoalReached(
+      path_pose.pose, original_goal_->pose, measured);
+    segment_braking_ = !reached;  // E.g. a real stopped-goal checker still requests a stop.
+    return reached;
+  }
+  if (!terminal_braking_) {segment_braking_ = false;}
+
   bool sweep_free = false;
   if (terminal_eligible) {
     geometry_msgs::msg::PoseStamped actual;
@@ -1306,7 +1322,7 @@ bool SegmentControllerServer::isGoalReached()
   }
   if (!coordinator_.executionReady(measured)) {return false;}
   if (!coordinator_.finalSegment()) {
-    segment_braking_ = coordinator_.geometryReached(path_pose.pose);
+    segment_braking_ = coordinator_.geometryReached(path_pose.pose, xy_tolerance);
     if (segment_braking_ && coordinator_.stopped(measured)) {
       if (queued_path_) {
         // This snapshot was generated DURING the completed turn. Its original start
