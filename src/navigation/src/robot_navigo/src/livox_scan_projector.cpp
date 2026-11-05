@@ -76,15 +76,18 @@ public:
     }
 
     const auto qos = rclcpp::QoS(rclcpp::KeepLast(qos_depth_)).best_effort().durability_volatile();
+    auto input_qos = qos;
+    const bool input_reliable = declare_parameter("sensor_input_reliable", false);
+    if (input_reliable) {input_qos.reliable();}
     scan_pub_ = create_publisher<sensor_msgs::msg::LaserScan>(output_topic, qos);
     debug_pub_ = create_publisher<robots_dog_msgs::msg::LivoxBridgeDebug>(debug_topic, qos);
     if (input_type == "livox_custom") {
       livox_sub_ = create_subscription<livox_ros_driver2::msg::CustomMsg>(
-        input_topic, qos,
+        input_topic, input_qos,
         std::bind(&LivoxScanProjector::onLivox, this, std::placeholders::_1));
     } else if (input_type == "pointcloud2") {
       pointcloud_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
-        input_topic, qos,
+        input_topic, input_qos,
         std::bind(&LivoxScanProjector::onPointCloud2, this, std::placeholders::_1));
     } else {
       throw std::invalid_argument("input_type must be 'livox_custom' or 'pointcloud2'");
@@ -95,10 +98,10 @@ public:
 
     RCLCPP_INFO(
       get_logger(),
-      "Direct scan projection (%s): %s -> %s, frame=%s, bins=%zu, height=[%.2f, %.2f]",
+      "Direct scan projection (%s): %s -> %s, frame=%s, bins=%zu, height=[%.2f, %.2f], input=%s",
       input_type.c_str(), input_topic.c_str(), output_topic.c_str(), target_frame_.c_str(),
       scanBinCount(config_),
-      config_.min_height, config_.max_height);
+      config_.min_height, config_.max_height, input_reliable ? "reliable" : "best_effort");
   }
 
 private:
