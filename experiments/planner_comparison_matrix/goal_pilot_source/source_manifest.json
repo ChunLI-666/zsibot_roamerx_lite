@@ -1,7 +1,7 @@
 {
   "files": {
-    "pilot.py": "15967872f575b3a0106aaf41766bff0c3cd7a72219208921351d9826cadd9405",
+    "pilot.py": "72d5a7d812f8cbb57856e54aefae9ef6457a22be1eaa0430eceddcb991ee7f2a",
     "validate_pilot_guards.py": "73727a1ef1f03abc8136d6d600abf85ccef296bfc46ce79343c96044062c3041"
   },
-  "scope": "Exact independently exercised goal pilot source; original per-attempt snapshots remain authoritative for earlier failed startup variants."
+  "scope": "Continuous-preflight revision exercised with offline virtual-clock and original-guard tests; no live goal yet. Earlier analysis pilot and original per-attempt snapshots remain authoritative for earlier attempts."
 }
