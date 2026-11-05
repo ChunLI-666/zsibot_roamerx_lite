@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>official_lattice_rpp_adapter</name>
+  <version>0.1.0</version>
+  <description>Explicit Jazzy compatibility adapter for official feasible path handling and RPP experiments.</description>
+  <maintainer email="lingyihu@navigo.com">lingyihu</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend><depend>rclcpp_lifecycle</depend>
+  <depend>nav2_core</depend><depend>nav2_costmap_2d</depend><depend>nav2_util</depend>
+  <depend>nav2_regulated_pure_pursuit_controller</depend><depend>nav_msgs</depend>
+  <depend>geometry_msgs</depend><depend>tf2_ros</depend><depend>tf2_geometry_msgs</depend>
+  <depend>pluginlib</depend><depend>angles</depend>
+  <exec_depend>nav2_smac_planner</exec_depend>
+  <test_depend>ament_cmake_gtest</test_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

@@ -1,0 +1,35 @@
+{
+  "sources": [
+    {
+      "source": "experiments/official_path_handler_turn_validation/upstream/nav2_controller/include/nav2_controller/plugins/feasible_path_handler.hpp",
+      "source_sha256": "67f36094ec78a59c830d568bb62e354d8afb0bfcc7c8109b63ea1d749ade8883",
+      "adapted": "include/official_lattice_rpp_adapter/feasible_path_handler.hpp"
+    },
+    {
+      "source": "experiments/official_path_handler_turn_validation/upstream/nav2_controller/plugins/feasible_path_handler.cpp",
+      "source_sha256": "8e547ae3e330a330919c9b5d871a1c6a7c7c5c3eb9bc35fe61e696bc57d570ef",
+      "adapted": "src/feasible_path_handler.cpp"
+    },
+    {
+      "source": "experiments/official_path_handler_turn_validation/backport/complete_rotation_constraints.cpp",
+      "source_sha256": "e25c8207ae6ea44f8a4c19e3157df0b963a3b813f99f9ebe62c1bb02f0b9cab0",
+      "adapted": "src/rotation_constraints.cpp"
+    }
+  ],
+  "changes": [
+    "Jazzy lifecycle declare/get compatibility; private namespace; no new nav2_core ABI",
+    "existing complete rotation run constraint correction retained",
+    "failed per-pose TF transform now throws instead of using default pose",
+    "Guard bounded closest-point iterator before decrementing twice",
+    "RPP observation uses exact pre-compute segment; stateful, reverse and fixed curvature disabled",
+    "Actual measured odometry uses receive-time and original header freshness gates",
+    "Filled body sweep at actual origin covers whole remaining signed rotation and predicted constant-twist arc",
+    "Jazzy FeasibleGoalChecker binds to per-node/controller generation and current ordered remaining-path state; installed SimpleGoalChecker still checks exact final goal with stateful=false",
+    "TF actual body and path transformation chains check ROS age, future/regressed stamps and steady stamp-progress age",
+    "Installed official raw path first primitive sample is joined to actual start with bounded forward connector plus checked heading alignment; proven float round-trip is restored independently per axis",
+    "Sparse FollowPath input is subdivided along its existing line/yaw geometry to <=1cm and <=0.02rad; original final goal retained",
+    "Both controller routes share resolution-adaptive filled constant-twist commandSweepFree; this is not physical braking or leg-motion acceptance",
+    "CheckedHybrid is an explicit DUBIN control group using installed SmacPlannerHybrid, with the same filled path/final-goal guards; its curved first sample does not use the stop-turn lateral alignment contract"
+  ],
+  "scope": "Experimental compatibility adapter; not native rolling Nav2 ControllerServer"
+}
