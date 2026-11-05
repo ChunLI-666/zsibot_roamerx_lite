@@ -63,6 +63,11 @@
   <exec_depend condition="$ROBOT_NAVIGO_ARM_RUNTIME != '1'">navigation2</exec_depend>
   <exec_depend condition="$ROBOT_NAVIGO_ARM_RUNTIME != '1'">slam_toolbox</exec_depend>
   <exec_depend>nav2_smoother</exec_depend>
+  <!-- Independent optional upstream planner; no nav2_core plugin is loaded
+       into the navigo_core composition container. -->
+  <exec_depend>nav2_planner</exec_depend>
+  <exec_depend>nav2_smac_planner</exec_depend>
+  <exec_depend>nav2_costmap_2d</exec_depend>
   <!-- Build the workspace lifecycle ownership fix used by the default launch. -->
   <exec_depend>nav2_lifecycle_manager</exec_depend>
   <!-- Dynamic launch/plugin dependencies are explicit in the runtime profile. -->

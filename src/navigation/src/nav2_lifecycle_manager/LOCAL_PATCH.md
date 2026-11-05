@@ -1,4 +1,49 @@
-# Lifecycle callback lifetime overlay
+# Local lifecycle manager patches
+
+## 2026-10-31 startup RPC bounds
+
+`changeStateForNode` now uses a local ChangeState/GetState helper with a
+30-second application-level deadline measured by `steady_clock`. Its private
+callback group is excluded from the manager's existing executor; a local
+executor uses the manager Node's own Context. This replaces the previous
+unbounded wait for a transition reply without changing navigation algorithms.
+The deadline bounds application waiting, not the execution time of an underlying
+RMW call or the server's transition callback.
+
+The helper sends at most one ChangeState request. A received negative reply
+fails the transition. A positive reply still requires a fresh GetState response
+matching the expected primary state. Only CONFIGURE and ACTIVATE may continue
+without a confirmed reply: after a one-second response grace period, a fresh
+GetState response must show the expected state. The manager logs a WARN stating
+that the RPC reply is unconfirmed and the observed state was verified. Read-only
+state queries are polled with at most one request pending; stale observations
+cannot authorize continuation. Other transitions require a confirmed positive
+reply as well as the expected state. No state-changing request is retried.
+
+ACTIVATE still performs the original bond handshake before startup can succeed.
+Bond checks, heartbeat periods, connection deadlines and protocol behavior are
+unchanged; a verified active state does not bypass a missing or broken bond.
+An atomic stopping flag is set at pre-shutdown and at the start of destruction.
+The helper stops when that flag is set or the Node's Context closes, removes
+unanswered requests on exit, and does not cancel the manager's other executors.
+Application timeout does not cancel a transition already executing on the
+server; existing startup failure handling remains in effect.
+
+This change bounds the individual transition wait after client initialization.
+The existing initial `createLifecycleServiceClients` discovery wait is still
+unbounded, so this is not a claim that every startup path has a total deadline.
+The observed field hang is consistent with waiting for a transition reply, but
+the DDS cause remains unproven. This patch does not establish or claim to repair
+an underlying DDS fault. Build, isolated startup and field acceptance evidence
+must be reported separately.
+
+## Historical callback lifetime patch
+
+The remainder of this section describes the earlier callback lifetime patch.
+Statements below that timeouts or transition policy were unchanged apply to
+that historical patch alone; the startup RPC behavior added above supersedes
+those statements for the current package. The current pre-shutdown callback also
+sets the stopping flag described above.
 
 This is the official ROS Jazzy `nav2_lifecycle_manager` 1.3.13 source package,
 vendored into the canonical navigation repository. The source archive digest and

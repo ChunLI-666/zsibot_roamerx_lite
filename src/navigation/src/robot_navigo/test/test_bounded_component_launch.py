@@ -9,7 +9,9 @@ import unittest
 from unittest.mock import patch
 
 from launch import LaunchContext
-from launch.actions import DeclareLaunchArgument, GroupAction, IncludeLaunchDescription, TimerAction
+from launch.actions import (
+    DeclareLaunchArgument, GroupAction, IncludeLaunchDescription, OpaqueFunction, TimerAction,
+)
 from launch.utilities import normalize_to_list_of_substitutions, perform_substitutions
 from launch_ros.actions import LoadComposableNodes, Node
 from launch_ros.utilities import evaluate_parameters
@@ -37,6 +39,13 @@ def default_context(description, **overrides):
         if isinstance(entity, DeclareLaunchArgument):
             entity.execute(context)
     context.launch_configurations.update(overrides)
+    # Resolve parameter preparation only; never execute a Node or an include.
+    for entity in description.entities:
+        if (isinstance(entity, OpaqueFunction) and
+                entity._OpaqueFunction__function.__name__ in (
+                    '_prepare_container_parameters', '_prepare_planner_parameters')):
+            for action in entity.execute(context) or []:
+                action.execute(context)
     return context
 
 

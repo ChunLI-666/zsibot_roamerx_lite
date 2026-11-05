@@ -1,0 +1,89 @@
+{
+  "artifact": "stop_turn_1cm_h16.json",
+  "sha256": "eb3ee2f4b112ba6ec3163424db937d50b396f43c2a42f0b6f032fccf78dc9526",
+  "generator": "tools/generate_stop_turn_primitives.py",
+  "generator_sha256": "e604954f2d33e1f4ad3b26d672fa0245c64508817a42fb36202ea7d3072bda6f",
+  "generation_date": "2026-10-31",
+  "origin": "Project-generated analytic integer-grid motions; not an official Nav2 primitive set.",
+  "schema_reference": "Nav2 Jazzy fromJsonToMetaData/fromJsonToMotionPrimitive (utils.hpp)",
+  "resolution_m": 0.01,
+  "heading_directions_cells": [
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      1
+    ],
+    [
+      1,
+      1
+    ],
+    [
+      1,
+      2
+    ],
+    [
+      0,
+      1
+    ],
+    [
+      -1,
+      2
+    ],
+    [
+      -1,
+      1
+    ],
+    [
+      -2,
+      1
+    ],
+    [
+      -1,
+      0
+    ],
+    [
+      -2,
+      -1
+    ],
+    [
+      -1,
+      -1
+    ],
+    [
+      -1,
+      -2
+    ],
+    [
+      0,
+      -1
+    ],
+    [
+      1,
+      -2
+    ],
+    [
+      1,
+      -1
+    ],
+    [
+      2,
+      -1
+    ]
+  ],
+  "motions_per_heading": [
+    "forward_straight",
+    "counterclockwise_in_place",
+    "clockwise_in_place"
+  ],
+  "max_translation_sample_m": 0.001,
+  "max_rotation_sample_rad": 0.0025,
+  "number_of_headings": 16,
+  "number_of_trajectories": 48,
+  "reverse_or_lateral_displacement": false,
+  "metadata_radius_contract": "Positive heuristic radius only; explicit in-place motions have radius and XY length zero.",
+  "required_planner_contract": "Use explicit primitive edges; no analytic expansion or reverse expansion.",
+  "acceptance": "Static schema/geometry/connectivity only; runtime planning and physical execution are separate acceptance stages."
+}

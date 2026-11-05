@@ -365,10 +365,15 @@ if(ROBOT_NAVIGO_ARM_RUNTIME)
         launch/lightning_nav_bringup.launch.py
         launch/bringup_launch.py
         launch/navigation_launch.py
+        launch/planner_parameters.py
         DESTINATION share/${PROJECT_NAME}/launch)
-    install(FILES params/navigo_params.yaml DESTINATION share/${PROJECT_NAME}/params)
+    install(FILES params/navigo_params.yaml params/smac_planner.yaml params/smac_diffdrive.yaml
+                  params/smac_hybrid_field_experiment.yaml
+            DESTINATION share/${PROJECT_NAME}/params)
+    install(DIRECTORY params/smac DESTINATION share/${PROJECT_NAME}/params)
+    install(DIRECTORY behavior_trees DESTINATION share/${PROJECT_NAME})
 else()
-install(DIRECTORY launch params map rviz doc routes regression
+install(DIRECTORY launch params behavior_trees map rviz doc routes regression
         DESTINATION share/${PROJECT_NAME}
         DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
         GROUP_READ GROUP_WRITE GROUP_EXECUTE
@@ -437,6 +442,11 @@ if(BUILD_TESTING)
             NAME test_bounded_component_launch
             COMMAND ${Python3_EXECUTABLE}
                     ${CMAKE_CURRENT_SOURCE_DIR}/test/test_bounded_component_launch.py
+                    ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(
+            NAME test_smac_planner_launch
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_smac_planner_launch.py
                     ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(
             NAME test_arm_dependency_profile

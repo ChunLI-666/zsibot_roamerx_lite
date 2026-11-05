@@ -1,0 +1,7 @@
+<library path="safe_lattice_planner">
+  <class name="robot_feasible_navigation::SafeLatticePlanner"
+         type="robot_feasible_navigation::SafeLatticePlanner"
+         base_class_type="nav2_core::GlobalPlanner">
+    <description>Opt-in private Smac 1.3.13 stop-turn lattice with actual-angle filled-body sweeps.</description>
+  </class>
+</library>

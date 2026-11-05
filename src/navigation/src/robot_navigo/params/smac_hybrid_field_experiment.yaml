@@ -1,0 +1,57 @@
+# Explicit field-experiment overlay for planner_backend:=smac_hybrid.
+# Requires the real matching 1cm map. No generated lattice input is used.
+# Legacy and Omni defaults remain separate. This file does not imply physical acceptance.
+# .035 padding is a software test margin, not a measured leg envelope.
+# lookup_table_size bounds the heuristic cache, not feasible path length.
+planner_server:
+  ros__parameters:
+    planner_plugins:
+    - GridBased
+    GridBased:
+      plugin: nav2_smac_planner::SmacPlannerHybrid
+      motion_model_for_search: DUBIN
+      minimum_turning_radius: 0.5
+      angle_quantization_bins: 72
+      lookup_table_size: 1.0
+      downsample_costmap: false
+      downsampling_factor: 1
+      downsample_obstacle_heuristic: false
+      allow_unknown: false
+      smooth_path: false
+      cache_obstacle_heuristic: false
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      footprint_padding: 0.035
+      plugins:
+      - static_layer
+      - obstacle_layer
+      - inflation_layer
+      static_layer:
+        plugin: nav2_costmap_2d::StaticLayer
+      obstacle_layer:
+        plugin: nav2_costmap_2d::ObstacleLayer
+      inflation_layer:
+        plugin: nav2_costmap_2d::InflationLayer
+        inflation_radius: 0.4
+        cost_scaling_factor: 3.0
+      resolution: 0.01
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      footprint_padding: 0.035
+      inflation_layer:
+        inflation_radius: 0.4
+        cost_scaling_factor: 3.0
+      resolution: 0.01
+bt_navigator:
+  ros__parameters:
+    default_server_timeout: 1000
+controller_server:
+  ros__parameters:
+    FollowPath:
+      motion_model: DiffDrive
+      vy_max: 0.0
+      PathAlignCritic:
+        use_path_orientations: true
+        offset_from_furthest: 5

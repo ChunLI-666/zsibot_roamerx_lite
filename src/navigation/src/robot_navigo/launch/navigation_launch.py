@@ -1,17 +1,40 @@
+import importlib.util
 import os
 from typing import List
+
 
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, GroupAction, SetEnvironmentVariable, TimerAction
-from launch.conditions import IfCondition, UnlessCondition
-from launch.substitutions import IfElseSubstitution, LaunchConfiguration
+from launch.actions import (
+    DeclareLaunchArgument, GroupAction, OpaqueFunction, SetEnvironmentVariable,
+    SetLaunchConfiguration, TimerAction,
+)
+from launch.conditions import (
+    IfCondition, LaunchConfigurationEquals, LaunchConfigurationNotEquals, UnlessCondition,
+)
+from launch.substitutions import EqualsSubstitution, IfElseSubstitution, LaunchConfiguration
 from launch_ros.actions import LoadComposableNodes, SetParameter
 from launch_ros.actions import Node
 from launch_ros.descriptions import ComposableNode, ParameterFile
 from launch_ros.parameter_descriptions import ParameterValue
 from nav2_common.launch import RewrittenYaml
+
+
+_planner_spec = importlib.util.spec_from_file_location(
+    'robot_navigo_planner_parameters',
+    os.path.join(os.path.dirname(__file__), 'planner_parameters.py'))
+_planner_parameters = importlib.util.module_from_spec(_planner_spec)
+_planner_spec.loader.exec_module(_planner_parameters)
+
+
+def _prepare_planner_parameters(context, package_dir):
+    """Use the parent's complete profile, or prepare it for direct launch calls."""
+    source = LaunchConfiguration('params_file').perform(context)
+    prepared = LaunchConfiguration('_planner_parameters_prepared').perform(context)
+    if prepared.lower() != 'true':
+        source = _planner_parameters.selected_parameter_file(context, package_dir, source)
+    return [SetLaunchConfiguration('planner_selected_params_file', source)]
 
 
 def generate_launch_description():
@@ -21,7 +44,6 @@ def generate_launch_description():
     namespace = LaunchConfiguration('namespace')
     use_sim_time = LaunchConfiguration('use_sim_time')
     map_yaml_file = LaunchConfiguration('map')
-    params_file = LaunchConfiguration('params_file')
     autostart = LaunchConfiguration('autostart')
     use_composition = LaunchConfiguration('use_composition')
     use_respawn = LaunchConfiguration('use_respawn')
@@ -48,11 +70,21 @@ def generate_launch_description():
         'velocity_smoother',
         'bt_navigator',
     ]
+    # Compute->Follow Smac trees never call SmoothPath. Do not lifecycle-manage
+    # an idle upstream smoother; keep the complete legacy startup unchanged.
+    legacy_names = IfElseSubstitution(
+        enable_waypoint_follower,
+        if_value=repr(lifecycle_nodes + ['waypoint_follower']),
+        else_value=repr(lifecycle_nodes))
+    smac_nodes = [name for name in lifecycle_nodes if name != 'smoother_server']
+    smac_names = IfElseSubstitution(
+        enable_waypoint_follower,
+        if_value=repr(smac_nodes + ['waypoint_follower']),
+        else_value=repr(smac_nodes))
     lifecycle_node_names = ParameterValue(
         IfElseSubstitution(
-            enable_waypoint_follower,
-            if_value=repr(lifecycle_nodes + ['waypoint_follower']),
-            else_value=repr(lifecycle_nodes)),
+            EqualsSubstitution(LaunchConfiguration('planner_backend'), 'fork_navfn'),
+            if_value=legacy_names, else_value=smac_names),
         value_type=List[str])
 
     remappings = [('/tf', 'tf'), ('/tf_static', 'tf_static')]
@@ -66,7 +98,7 @@ def generate_launch_description():
 
     configured_params = ParameterFile(
         RewrittenYaml(
-            source_file=params_file,
+            source_file=LaunchConfiguration('planner_selected_params_file'),
             root_key=namespace,
             param_rewrites=param_substitutions,
             convert_types=True,
@@ -82,9 +114,9 @@ def generate_launch_description():
     # loads the navigo costmap fork. Keep it in a separate process to prevent
     # ABI symbol collisions inside the composition container.
     smoother_server = Node(
+        condition=LaunchConfigurationEquals('planner_backend', 'fork_navfn'),
         package='nav2_smoother',
         executable='smoother_server',
-        namespace=namespace,
         name='smoother_server',
         output='screen',
         respawn=use_respawn,
@@ -94,6 +126,22 @@ def generate_launch_description():
         remappings=remappings,
         # The navigo overlay installs forked libraries with upstream SONAMEs.
         # Force the upstream costmap client ahead of the overlay for this node.
+        additional_env={'LD_LIBRARY_PATH': smoother_library_path},
+    )
+
+    # The official planner and its costmap stay outside the fork container.
+    # Inherit PushRosNamespace once, exactly like the other standalone servers.
+    upstream_planner = Node(
+        condition=LaunchConfigurationNotEquals('planner_backend', 'fork_navfn'),
+        package='nav2_planner',
+        executable='planner_server',
+        name='planner_server',
+        output='screen',
+        respawn=use_respawn,
+        respawn_delay=2.0,
+        parameters=[configured_params],
+        arguments=['--ros-args', '--log-level', log_level],
+        remappings=remappings,
         additional_env={'LD_LIBRARY_PATH': smoother_library_path},
     )
 
@@ -116,6 +164,21 @@ def generate_launch_description():
         default_value=os.path.join(bringup_dir, 'params', 'navigo_params.yaml'),
         description='Full path to the ROS2 parameters file to use for all launched nodes',
     )
+    declare_prepared_parameters_cmd = DeclareLaunchArgument(
+        '_planner_parameters_prepared', default_value='false', choices=['true', 'false'],
+        description='Internal: bringup already selected the complete process parameter file')
+    declare_planner_backend_cmd = DeclareLaunchArgument(
+        'planner_backend', default_value='fork_navfn',
+        choices=['fork_navfn', 'smac_lattice', 'smac_hybrid'],
+        description='Official Lattice/Hybrid service; fork_navfn retains the legacy navigation tree')
+    declare_smac_planner_params_cmd = DeclareLaunchArgument(
+        'smac_planner_params_file',
+        default_value=os.path.join(bringup_dir, 'params', 'smac_planner.yaml'),
+        description='Reviewed overlay for the independent upstream planner and SE2 path tracking')
+    declare_smac_lattice_file_cmd = DeclareLaunchArgument(
+        'smac_lattice_file',
+        default_value=os.path.join(bringup_dir, 'params', 'smac', 'omni_5cm_r050.json'),
+        description='Omni or DiffDrive primitive JSON matching the controller model and map resolution')
 
     declare_autostart_cmd = DeclareLaunchArgument(
         'autostart',
@@ -199,6 +262,7 @@ def generate_launch_description():
                 remappings=remappings + [('cmd_vel', 'cmd_vel_nav')]
             ),
             Node(
+                condition=LaunchConfigurationEquals('planner_backend', 'fork_navfn'),
                 package='navigo_path_planner',
                 executable='planner_server',
                 name='planner_server',
@@ -320,6 +384,7 @@ def generate_launch_description():
                         remappings=remappings + [('cmd_vel', 'cmd_vel_nav')]
                     ),
                     ComposableNode(
+                        condition=LaunchConfigurationEquals('planner_backend', 'fork_navfn'),
                         package='navigo_path_planner',
                         plugin='navigo_path_planner::PlannerServer',
                         name='planner_server',
@@ -383,6 +448,10 @@ def generate_launch_description():
     ld.add_action(declare_use_sim_time_cmd)
     ld.add_action(declare_map_yaml_cmd)
     ld.add_action(declare_params_file_cmd)
+    ld.add_action(declare_prepared_parameters_cmd)
+    ld.add_action(declare_planner_backend_cmd)
+    ld.add_action(declare_smac_planner_params_cmd)
+    ld.add_action(declare_smac_lattice_file_cmd)
     ld.add_action(declare_autostart_cmd)
     ld.add_action(declare_use_composition_cmd)
     ld.add_action(declare_use_respawn_cmd)
@@ -393,7 +462,10 @@ def generate_launch_description():
     ld.add_action(declare_waypoint_follower_executable_cmd)
     ld.add_action(declare_waypoint_follower_plugin_cmd)
     ld.add_action(declare_waypoint_task_executor_plugin_cmd)
+    ld.add_action(OpaqueFunction(
+        function=_prepare_planner_parameters, kwargs={'package_dir': bringup_dir}))
     ld.add_action(smoother_server)
+    ld.add_action(upstream_planner)
     # Add the actions to launch all of the navigation nodes
     ld.add_action(load_nodes)
     ld.add_action(load_composable_nodes)

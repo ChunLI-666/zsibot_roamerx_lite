@@ -16,6 +16,7 @@
 #ifndef NAV2_LIFECYCLE_MANAGER__LIFECYCLE_MANAGER_HPP_
 #define NAV2_LIFECYCLE_MANAGER__LIFECYCLE_MANAGER_HPP_
 
+#include <atomic>
 #include <map>
 #include <memory>
 #include <string>
@@ -261,6 +262,7 @@ protected:
   // Whether to automatically start up the system
   bool autostart_;
   bool attempt_respawn_reconnection_;
+  std::atomic_bool stopping_{false};
 
   NodeState managed_nodes_state_{NodeState::UNCONFIGURED};
   diagnostic_updater::Updater diagnostics_updater_;

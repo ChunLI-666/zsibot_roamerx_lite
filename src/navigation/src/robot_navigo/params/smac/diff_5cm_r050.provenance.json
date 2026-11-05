@@ -1,0 +1,18 @@
+{
+  "schema": "robot_navigo.upstream_lattice_primitive_provenance.v1",
+  "source_project": "https://github.com/ros-navigation/navigation2",
+  "source_package": "nav2_smac_planner",
+  "source_package_version": "1.3.13",
+  "source_relative_path": "sample_primitives/5cm_resolution/0.5m_turning_radius/diff/output.json",
+  "artifact": "diff_5cm_r050.json",
+  "sha256": "105b37351d15e340cc2921fa8878c8ea727a65cd7e89c39c977be0654be3b2a9",
+  "license": "Apache-2.0",
+  "copied_without_modification": true,
+  "upstream_generated_date": "2022-03-17",
+  "grid_resolution_m": 0.05,
+  "heading_count": 16,
+  "trajectory_count": 112,
+  "in_place_rotation_trajectory_count": 32,
+  "robot_footprint_encoded_in_primitive": false,
+  "acceptance": "Upstream differential sample primitive; not hardware acceptance. Pair with MPPI DiffDrive and vy_max=0."
+}
