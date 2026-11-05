@@ -80,6 +80,20 @@ def error(pose, goal):
             'pose': pose}
 
 
+def validate_numeric_arguments(args):
+    for name in ['observe_seconds', 'preflight_seconds', 'stable_preflight_seconds',
+                 'timeout', 'settle_seconds', 'cancel_after']:
+        value = getattr(args, name)
+        if value is not None and (not math.isfinite(value) or value < 0):
+            raise ValueError('--'+name.replace('_', '-')+' must be finite and nonnegative')
+    if args.stable_preflight_seconds > args.preflight_seconds:
+        raise ValueError('--stable-preflight-seconds must not exceed --preflight-seconds')
+    for name in ['goal', 'relative_goal']:
+        value = getattr(args, name)
+        if value is not None and not all(math.isfinite(v) for v in value):
+            raise ValueError('--'+name.replace('_', '-')+' must be finite SE2')
+
+
 class Pilot(Node):
     def __init__(self, args, output):
         super().__init__('matrix_independent_goal_pilot')
@@ -260,6 +274,56 @@ class Pilot(Node):
             if predicate():return True
         return False
 
+    def wait_stable_preflight(self, deadline, preflight_started):
+        """Accumulate healthy time only after Action discovery, within one budget."""
+        started = time.monotonic()
+        required = self.args.stable_preflight_seconds
+        evidence = dict(required_continuous_healthy_s=required,
+            preflight_timeout_s=self.args.preflight_seconds,
+            preflight_started_steady_s=preflight_started,
+            action_discovery_completed_steady_s=started, deadline_steady_s=deadline,
+            checks=0, unhealthy_checks=0, reset_count=0,
+            max_continuous_healthy_s=0., completed=False)
+        self.stable_preflight_evidence = evidence
+        self.emit('stable_preflight_started', **evidence)
+        stable_since = None
+        issues = ['stable_preflight_not_checked']
+        snapshot = self.current_summary()
+        while rclpy.ok():
+            remaining = deadline-time.monotonic()
+            if remaining <= 0:break
+            rclpy.spin_once(self, timeout_sec=min(.02, remaining))
+            valid, issues, snapshot = self.execution_ready(require_stopped=True)
+            checked = time.monotonic()
+            evidence['checks'] += 1
+            if valid:
+                if stable_since is None:
+                    stable_since = checked
+                    self.emit('stable_preflight_interval_started', checked_steady_s=checked)
+                continuous = checked-stable_since
+                evidence['max_continuous_healthy_s'] = max(evidence['max_continuous_healthy_s'], continuous)
+                if continuous >= required and checked <= deadline:
+                    evidence.update(completed=True, reason='continuous_health_satisfied',
+                        finished_steady_s=checked, continuous_healthy_s=continuous,
+                        total_preflight_elapsed_s=checked-preflight_started)
+                    self.emit('stable_preflight_finished', **evidence)
+                    return True, [], snapshot
+            else:
+                evidence['unhealthy_checks'] += 1
+                if stable_since is not None:
+                    evidence['reset_count'] += 1
+                    self.emit('stable_preflight_reset', reset_count=evidence['reset_count'],
+                        interrupted_healthy_s=checked-stable_since, issues=issues, snapshot=snapshot)
+                stable_since = None
+        finished = time.monotonic()
+        reason = 'preflight_deadline' if finished >= deadline else 'context_stopped'
+        issues = list(issues)+['stable_preflight_incomplete:'+reason]
+        evidence.update(reason=reason, finished_steady_s=finished,
+            continuous_healthy_s=0. if stable_since is None else finished-stable_since,
+            total_preflight_elapsed_s=finished-preflight_started)
+        self.emit('stable_preflight_finished', issues=issues, **evidence)
+        return False, issues, snapshot
+
     def wait_settled(self, seconds):
         stable_since=None;end=time.monotonic()+seconds
         while rclpy.ok() and time.monotonic()<end:
@@ -280,6 +344,13 @@ class Pilot(Node):
         if not self.spin_until(lambda:self.event_pub.get_subscription_count()>0,5.):
             self.emit('preflight_failed',issues=['goal_event_topic_has_no_recorder_subscriber'])
             return {'classification':'invalid_event_recording_not_ready_goal_not_sent'}
+        preflight_started=time.monotonic()
+        stable_required=self.args.stable_preflight_seconds > 0
+        preflight_deadline=preflight_started+self.args.preflight_seconds
+        if stable_required:
+            self.emit('preflight_budget_started', timeout_s=self.args.preflight_seconds,
+                required_continuous_healthy_s=self.args.stable_preflight_seconds,
+                deadline_steady_s=preflight_deadline)
         if not self.spin_until(lambda:self.execution_ready(require_stopped=True)[0],self.args.preflight_seconds):
             valid,issues,s=self.execution_ready(require_stopped=True)
             self.emit('preflight_failed',issues=issues,snapshot=s)
@@ -289,11 +360,23 @@ class Pilot(Node):
         if self.args.relative_goal is None and math.hypot(self.args.goal[0]-start_pose['x'],self.args.goal[1]-start_pose['y'])>=8.0:
             return {'classification':'invalid_goal_outside_reviewed_rolling_window','snapshot':start_snapshot}
         client=ActionClient(self,NavigateToPose,'/navigate_to_pose')
-        if not client.wait_for_server(timeout_sec=5.):
+        discovery_timeout=min(5., max(0., preflight_deadline-time.monotonic())) if stable_required else 5.
+        if not client.wait_for_server(timeout_sec=discovery_timeout):
+            if stable_required:
+                issues=['action_server_unavailable_during_preflight']
+                self.emit('preflight_failed', issues=issues, snapshot=start_snapshot,
+                    total_preflight_elapsed_s=time.monotonic()-preflight_started)
+                return {'classification':'invalid_preflight_not_sent','issues':issues,'snapshot':start_snapshot}
             return {'classification':'invalid_action_server_unavailable','snapshot':start_snapshot}
         # Action discovery can block. Pump and re-read the lease and live sources
         # immediately before creating the request instead of using the earlier snapshot.
-        self.spin_until(lambda:self.execution_ready(require_stopped=True)[0],1.)
+        if stable_required:
+            valid,issues,start_snapshot=self.wait_stable_preflight(preflight_deadline,preflight_started)
+            if not valid:
+                self.emit('preflight_failed',issues=issues,snapshot=start_snapshot)
+                return {'classification':'invalid_preflight_not_sent','issues':issues,'snapshot':start_snapshot}
+        else:
+            self.spin_until(lambda:self.execution_ready(require_stopped=True)[0],1.)
         valid,issues,start_snapshot=self.execution_ready(require_stopped=True)
         if not valid:
             self.emit('preflight_failed',issues=issues,snapshot=start_snapshot)
@@ -400,6 +483,8 @@ def main():
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--observe-seconds',type=float,default=8.)
     parser.add_argument('--preflight-seconds',type=float,default=10.)
+    parser.add_argument('--stable-preflight-seconds',type=float,default=0.,
+        help='Require this continuous healthy stopped interval after Action discovery, within the total preflight budget; 0 preserves the original first-ready behavior')
     parser.add_argument('--timeout',type=float,default=120.)
     parser.add_argument('--settle-seconds',type=float,default=8.)
     parser.add_argument('--cancel-after',type=float)
@@ -408,6 +493,8 @@ def main():
     parser.add_argument('--camera-topic',default='/camera/front/image/compressed')
     parser.add_argument('--camera-info-topic',default='/camera/front/camera_info')
     args=parser.parse_args()
+    try:validate_numeric_arguments(args)
+    except ValueError as exc:parser.error(str(exc))
     args.output=args.output.resolve()
     if HERE not in args.output.parents:parser.error('Output must be inside this pilot directory')
     if args.output.exists():parser.error('Output already exists; do not overwrite an attempt')
@@ -421,8 +508,6 @@ def main():
     try:
         if os.environ.get('ROS_DOMAIN_ID')!='185':raise ValueError('Only isolated Matrix domain185 is supported')
         if args.execute and (args.ready is None or args.goal is None and args.relative_goal is None):raise ValueError('--execute requires --ready and --goal or --relative-goal')
-        if args.goal is not None and not all(math.isfinite(v) for v in args.goal):raise ValueError('Goal must be finite map SE2')
-        if args.relative_goal is not None and not all(math.isfinite(v) for v in args.relative_goal):raise ValueError('Relative goal must be finite SE2')
         rclpy.init();node=Pilot(args,args.output)
         if args.execute:
             result=node.run_case()
@@ -443,6 +528,8 @@ def main():
                 if service.wait_for_service(timeout_sec=2.):
                     cancel=service.call_async(request);result['exception_uuid_cancel_response_observed']=node.spin_until(cancel.done,3.)
     finally:
+        if node is not None and hasattr(node,'stable_preflight_evidence'):
+            result['stable_preflight']=node.stable_preflight_evidence
         result.update(attempt_uuid=attempt_uuid,case_id=args.case_id,variant=args.variant,kind=args.kind,
             pilot_sha256=hashlib.sha256(source).hexdigest(),goals_sent=int(node is not None and node.goal_sent_ns is not None),created_ns=created_ns,finished_ns=time.time_ns())
         (args.output/'result.json').write_text(json.dumps(result,indent=2,ensure_ascii=False,allow_nan=False)+'\n')
