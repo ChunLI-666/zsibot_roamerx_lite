@@ -172,7 +172,7 @@ def run(args,out,selected_install,manifest):
     from lifecycle_msgs.srv import GetState
     from rcl_interfaces.srv import ListParameters,GetParameters
     from tf2_ros import Buffer,TransformListener
-    from rclpy.qos import qos_profile_sensor_data
+    from rclpy.qos import qos_profile_sensor_data,QoSProfile,ReliabilityPolicy,DurabilityPolicy
     import cv2,numpy as np
     stopped=False;static_snapshots=[]
     def request_stop(*unused):
@@ -185,9 +185,11 @@ def run(args,out,selected_install,manifest):
         event_stream.write(json.dumps(dict(time_ns=node.get_clock().now().nanoseconds,steady=time.monotonic(),kind=kind,**kw))+'\n');event_stream.flush()
     def receive(topic,msg):latest[topic]=(time.monotonic(),msg);counts[topic]=counts.get(topic,0)+1
     subscriptions=[]
+    costmap_evidence_qos=QoSProfile(depth=1,reliability=ReliabilityPolicy.RELIABLE,durability=DurabilityPolicy.TRANSIENT_LOCAL)
     for topic,kind in [(args.odom_topic,Odometry),('/lightning/loc_status',UInt8),('/lightning/pose_valid',Bool),(args.scan_topic,LaserScan),(args.camera_topic,CompressedImage),(args.camera_info_topic,CameraInfo),
                        ('/global_costmap/costmap_raw',Costmap),('/local_costmap/costmap_raw',Costmap)]:
-        subscriptions.append(node.create_subscription(kind,topic,lambda m,t=topic:receive(t,m),qos_profile_sensor_data))
+        qos=costmap_evidence_qos if topic in ('/global_costmap/costmap_raw','/local_costmap/costmap_raw') else qos_profile_sensor_data
+        subscriptions.append(node.create_subscription(kind,topic,lambda m,t=topic:receive(t,m),qos))
     tf=Buffer();listener=TransformListener(tf,node)
     def source_health():
         now=node.get_clock().now().nanoseconds/1e9
