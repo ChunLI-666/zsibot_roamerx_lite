@@ -8,11 +8,17 @@ goal pilot sends each explicitly recorded Action.
 
 Select `official`, `segmented`, or the auxiliary `hybrid` control with `--variant`.
 Supply `--map`, `--footprint`, `--padding`, `--output`, the appropriate explicit
-`--official-install` or `--segmented-install`, and `--build-receipt`. Preparation
+`--official-install` or `--segmented-install`, `--build-receipt`, and a custom-message
+`--message-install` prefix. Preparation
 is the default; `--run` starts the stack. The build receipt must bind selected
 sources to a full local commit and list installation artifact SHA256 values.
 Every listed artifact, including the segmented executable, is checked before
 launch. The actual loaded Nav2 libraries and runtime parameters are also saved.
+The message prefix is copied and applied only to the recorder process. Its
+CustomMsg, projection debug, build metadata and Lightning debug types must load,
+and recorder subscriptions must be present before READY. Do not substitute an
+old full navigation overlay. A bag without these interfaces is incomplete even
+when its raw sensors and front camera are available.
 
 The fresh map retains 1 cm geometry and its mapping evidence uses 5 cm cells.
 Navigation uses a 20 m rolling global costmap and 6 m local costmap at 1 cm.
@@ -22,6 +28,10 @@ The launcher writes a 0.5 s readiness lease and continuously revokes it for stal
 odom/TF/scan/camera or invalid localization. The pilot must additionally check
 current inputs immediately before each goal. Runtime command guards remain active
 even if the observer exits.
+Use a local DDS initial-peer range sufficient for all participants (the validated
+November 5 environment uses 64). For the verified local fragmented CustomMsg loss,
+the projector supports `sensor_input_reliable:=true`; its original default remains
+false. This changes neither sampling stamps nor the 0.3 s stale-input rejection.
 
 `matrix_profile.yaml` is an explicit open-area dynamic profile, separate from the
 strict ideal-plant reference in `profile_template.yaml`. Before goal experiments,
