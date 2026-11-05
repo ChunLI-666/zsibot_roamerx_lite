@@ -15,6 +15,7 @@
 #include <pluginlib/class_loader.hpp>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include "official_lattice_rpp_adapter/feasible_path_handler.hpp"
+#include "official_lattice_rpp_adapter/planner_goal_contract.hpp"
 #include "robot_feasible_navigation/footprint_sweep.hpp"
 
 namespace official_lattice_rpp_adapter {
@@ -380,6 +381,15 @@ public:
     }
     auto raw=planner_->createPlan(start,goal,cancel);
     require(!raw.poses.empty()&&raw.poses.size()<1000000,"invalid official planner output");
+    // Jazzy Lattice's same-cell shortcut returns start XY with goal yaw, not
+    // float-converted goal XY. Accept only its exact documented singleton and
+    // the existing in-place path equivalence; larger subcell moves still fail.
+    const bool native_same_cell=stop_turn_ &&
+      nativeLatticeSameCellSingleton(raw,start,goal,*map);
+    if (native_same_cell) {
+      require(withinPathRotationXYEquivalence(start.pose,goal.pose),
+        "official same-cell path exceeds rotation XY equivalence");
+    }
     // Restore only the documented FLOAT cell/origin round trip, including sameXY rotation samples.
     const auto rounded=[&](const geometry_msgs::msg::Pose & p) {
       return std::pair<double,double>{static_cast<float>(map->getOriginX())+
@@ -387,19 +397,21 @@ public:
         static_cast<float>(map->getOriginY())+
         static_cast<float>((p.position.y-map->getOriginY())/map->getResolution())*map->getResolution()};
     };
-    for (auto & p:raw.poses) {
-      for (const auto * exact:{&start,&goal}) {
-        const auto [x,y]=rounded(exact->pose);
-        const double bound=64.*std::numeric_limits<double>::epsilon()*std::max({1.,std::abs(x),std::abs(y)});
-        if (std::abs(p.pose.position.x-x)<=bound) {p.pose.position.x=exact->pose.position.x;}
-        if (std::abs(p.pose.position.y-y)<=bound) {p.pose.position.y=exact->pose.position.y;}
+    if (!native_same_cell) {
+      for (auto & p:raw.poses) {
+        for (const auto * exact:{&start,&goal}) {
+          const auto [x,y]=rounded(exact->pose);
+          const double bound=64.*std::numeric_limits<double>::epsilon()*std::max({1.,std::abs(x),std::abs(y)});
+          if (std::abs(p.pose.position.x-x)<=bound) {p.pose.position.x=exact->pose.position.x;}
+          if (std::abs(p.pose.position.y-y)<=bound) {p.pose.position.y=exact->pose.position.y;}
+        }
       }
     }
-    // Exact-search output must retain the original goal XY after proven float restoration.
+    // Other exact-search output must retain the goal XY after proven float restoration.
     const auto sameXY=[](const auto & a,const auto & b) {
       return std::hypot(a.position.x-b.position.x,a.position.y-b.position.y)<1e-9;
     };
-    require(sameXY(raw.poses.back().pose,goal.pose),
+    require(native_same_cell || sameXY(raw.poses.back().pose,goal.pose),
       "official path did not preserve exact goal XY");
     // Installed official search emits its first primitive sample, not always the
     // exact start node (observed first sample is 1mm). Preserve the actual start

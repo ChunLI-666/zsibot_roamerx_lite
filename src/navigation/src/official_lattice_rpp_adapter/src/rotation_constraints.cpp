@@ -44,7 +44,7 @@ unsigned int findFirstPathConstraint(
     }
 
     // Check inversion
-    if (enforce_path_inversion && trans > 1e-4) {
+    if (enforce_path_inversion && trans > kPathRotationXYEpsilon) {
       if (idx >= 1) {
         // Checking for the existence of cusp, in the path, using the dot product.
         float dot_product = prev_dx * dx + prev_dy * dy;
@@ -58,7 +58,7 @@ unsigned int findFirstPathConstraint(
     }
 
     // Check in place rotation
-    if (check_rotation && trans < 1e-4 && rotation_idx == path.poses.size()) {
+    if (check_rotation && trans < kPathRotationXYEpsilon && rotation_idx == path.poses.size()) {
       float accumulated_rotation = 0.0f;
       unsigned int end_idx = idx;
 
@@ -68,7 +68,7 @@ unsigned int findFirstPathConstraint(
         const auto & current = path.poses[end_idx].pose;
         const auto & next = path.poses[end_idx + 1].pose;
         if (hypot(next.position.x - current.position.x,
-          next.position.y - current.position.y) > 1e-4) {break;}
+          next.position.y - current.position.y) > kPathRotationXYEpsilon) {break;}
         accumulated_rotation += fabs(angles::shortest_angular_distance(
           tf2::getYaw(current.orientation), tf2::getYaw(next.orientation)));
         ++end_idx;

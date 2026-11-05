@@ -15,6 +15,16 @@ heading primitive file. `CheckedHybrid` provides a separate DUBIN control group;
 its same-position rotation shortcut does not establish native DUBIN turn-in-place
 capability.
 
+Jazzy 1.3.13 Lattice returns one pose containing the exact start position and
+goal orientation when both requests occupy the same continuous-map cell.
+The adapter recognizes that verbatim output before float restoration only when
+the XY displacement is strictly below the path rotation equivalence of 0.1 mm.
+It retains the original start, checks the complete filled rotation and tiny
+terminal connection, and appends the exact original goal. Larger same-cell
+displacements and other malformed endpoints still fail; the general 1 nm goal
+XY check remains. This compatibility does not request a bearing turn to correct
+localization noise or change controller goal tolerances.
+
 `COLCON_IGNORE` deliberately keeps this experiment out of the product build.
 Build with a clean Jazzy environment, a separate CMake build directory and install
 prefix, then run CTest. The sibling `robot_feasible_navigation` supplies the shared

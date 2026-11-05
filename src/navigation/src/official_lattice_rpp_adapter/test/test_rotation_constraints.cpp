@@ -19,3 +19,13 @@ TEST(RotationConstraint, FinalTurnKeepsOriginalGoal) {
   EXPECT_EQ(removePosesAfterFirstConstraint(p,true,.05),0u);
   ASSERT_EQ(p.poses.size(),3u);EXPECT_NEAR(tf2::getYaw(p.poses.back().pose.orientation),1.92,1e-9);
 }
+TEST(RotationConstraint, TinyTerminalConnectionRemainsInCompleteRotationPrefix) {
+  nav_msgs::msg::Path p;p.poses.push_back(at(-1.,0.,0.));
+  for (int i=0;i<=32;++i) {p.poses.push_back(at(0.,0.,M_PI_2*i/32.));}
+  p.poses.push_back(at(3.649398296081995e-6,0.,M_PI_2));
+  p.poses.push_back(at(1.,0.,M_PI_2));
+  EXPECT_EQ(removePosesAfterFirstConstraint(p,true,.05),35u);
+  ASSERT_EQ(p.poses.size(),35u);
+  EXPECT_DOUBLE_EQ(p.poses.back().pose.position.x,3.649398296081995e-6);
+  EXPECT_NEAR(tf2::getYaw(p.poses.back().pose.orientation),M_PI_2,1e-9);
+}

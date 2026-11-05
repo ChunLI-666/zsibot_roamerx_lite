@@ -7,6 +7,8 @@
 #include <tf2/utils.hpp>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 namespace official_lattice_rpp_adapter::backport {
+// Existing path-rotation translation equivalence, in metres.
+inline constexpr double kPathRotationXYEpsilon = 1e-4;
 unsigned int findFirstPathConstraint(nav_msgs::msg::Path &, bool, float);
 unsigned int removePosesAfterFirstConstraint(nav_msgs::msg::Path &, bool, float);
 }
