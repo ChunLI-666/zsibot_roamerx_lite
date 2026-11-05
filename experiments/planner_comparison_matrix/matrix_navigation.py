@@ -208,11 +208,26 @@ def run(args,out,selected_install,manifest):
     def pump(seconds):
         end=time.monotonic()+seconds
         while time.monotonic()<end and rclpy.ok():rclpy.spin_once(node,timeout_sec=.02)
-    def wait(future,timeout=3.):
-        end=time.monotonic()+timeout
-        while not future.done() and time.monotonic()<end and not stopped:rclpy.spin_once(node,timeout_sec=.02)
-        if not future.done():raise TimeoutError('service response timeout')
-        return future.result()
+    def wait(future,timeout=3.,operation=None):
+        started=time.monotonic();end=started+timeout;outcome=None
+        def rpc_event(kind,**kw):
+            if operation:event(kind,operation=operation,elapsed_sec=time.monotonic()-started,timeout_sec=timeout,**kw)
+        rpc_event('rpc_begin')
+        try:
+            while not future.done() and time.monotonic()<end and not stopped:rclpy.spin_once(node,timeout_sec=.02)
+            if not future.done():
+                future.cancel();outcome='rpc_stopped' if stopped else 'rpc_timeout'
+                rpc_event(outcome,cancel_requested=True)
+                raise TimeoutError((operation or 'service response')+(' stopped' if stopped else ' timeout'))
+            response=future.result()
+        except Exception as e:
+            if not future.done():future.cancel()
+            if operation and outcome is None:
+                rpc_event('rpc_error',error=repr(e))
+                raise RuntimeError(operation+': '+repr(e)) from e
+            raise
+        rpc_event('rpc_complete')
+        return response
     runtime=out/'runtime_install';shutil.copytree(selected_install,runtime)
     receipt=json.loads((out/'source_build_receipt.json').read_text())
     commit=receipt.get('repository_commit','')
@@ -300,8 +315,8 @@ def run(args,out,selected_install,manifest):
         for name in ['map_server','planner_server','controller_server','local_costmap/local_costmap','global_costmap/global_costmap','velocity_smoother','bt_navigator','nav_safety_gate']:
             lc=node.create_client(ListParameters,'/'+name+'/list_parameters');gc=node.create_client(GetParameters,'/'+name+'/get_parameters')
             if not lc.wait_for_service(timeout_sec=2.):raise RuntimeError('parameter service unavailable '+name)
-            names=wait(lc.call_async(ListParameters.Request())).result.names;req=GetParameters.Request();req.names=names
-            params[name]={n:message_to_ordereddict(v) for n,v in zip(names,wait(gc.call_async(req)).values)}
+            names=wait(lc.call_async(ListParameters.Request()),timeout=10.,operation='/'+name+'/list_parameters').result.names;req=GetParameters.Request();req.names=names
+            params[name]={n:message_to_ordereddict(v) for n,v in zip(names,wait(gc.call_async(req),timeout=10.,operation='/'+name+'/get_parameters').values)}
         write(out/'runtime_parameters.json',params)
         static_snapshots=capture_static_layers(node,out,recorder_name,pump,lambda:stopped)
         actual_maps={}
