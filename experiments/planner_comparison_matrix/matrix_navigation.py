@@ -91,6 +91,7 @@ def prepare(args):
 def run(args,out,selected_install,manifest):
     if os.environ.get('ROS_DOMAIN_ID')!='185':raise RuntimeError('Matrix navigation requires the isolated domain185 environment from simulation_setup')
     if not args.build_receipt:raise RuntimeError('--run requires a concrete selected-artifact --build-receipt')
+    if not args.message_install:raise RuntimeError('--run requires an isolated custom-message --message-install for complete recording')
     import rclpy
     from rclpy.node import Node
     from rclpy.signals import SignalHandlerOptions
@@ -157,19 +158,31 @@ def run(args,out,selected_install,manifest):
         artifact=(runtime/rel).resolve()
         if not artifact.is_relative_to(runtime.resolve()) or not artifact.is_file() or sha(artifact)!=digest:raise RuntimeError('Selected runtime does not match concrete build receipt: '+rel)
     env=os.environ.copy();env['AMENT_PREFIX_PATH']=str(runtime)+':/opt/ros/jazzy';env['LD_LIBRARY_PATH']=str(runtime/'lib')+':/opt/ros/jazzy/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu'
+    message_runtime=out/'message_runtime';shutil.copytree(pathlib.Path(args.message_install).resolve(),message_runtime)
+    recorder_env=env.copy()
+    recorder_env['AMENT_PREFIX_PATH']=str(message_runtime)+':'+env['AMENT_PREFIX_PATH']
+    recorder_env['LD_LIBRARY_PATH']=str(message_runtime/'lib')+':'+env['LD_LIBRARY_PATH']
+    recorder_env['PYTHONPATH']=str(message_runtime/'lib/python3.12/site-packages')+':'+env.get('PYTHONPATH','')
+    recorder_env['PYTHONDONTWRITEBYTECODE']='1'
+    recorder_name='matrix_recorder_'+str(os.getpid());manifest['recorder_node_name']=recorder_name
+    custom_types=['livox_ros_driver2/msg/CustomMsg','robots_dog_msgs/msg/LivoxBridgeDebug','robot_debug_msgs/msg/BuildInfo','lightning/msg/LightningDebug']
+    verify_code='from rosidl_runtime_py.utilities import get_message\nfrom rclpy.type_support import check_for_type_support\nimport sys\nfor name in sys.argv[1:]:\n cls=get_message(name);check_for_type_support(cls);print(name)\n'
+    checked=subprocess.run(['/usr/bin/python3','-c',verify_code,*custom_types],env=recorder_env,text=True,capture_output=True,check=True)
+    manifest['message_runtime']=dict(source=str(pathlib.Path(args.message_install).resolve()),required_types=custom_types,
+      import_check_stdout=checked.stdout,files_sha256={str(p.relative_to(message_runtime)):sha(p) for p in message_runtime.rglob('*') if p.is_file()})
     plugins='\n'.join(p.read_text() for p in (runtime/'share').rglob('*.xml') if 'plugin' in p.name)
     if manifest['variant']=='hybrid' and 'official_lattice_rpp_adapter::CheckedHybrid' not in plugins:raise RuntimeError('CheckedHybrid not installed; refusing an unguarded fallback')
     manifest['environment']={k:env.get(k) for k in ['ROS_DOMAIN_ID','ROS_AUTOMATIC_DISCOVERY_RANGE','RMW_IMPLEMENTATION','FASTRTPS_DEFAULT_PROFILES_FILE','FASTDDS_DEFAULT_PROFILES_FILE','AMENT_PREFIX_PATH','LD_LIBRARY_PATH']}
     manifest['runtime_install_files']={str(p.relative_to(runtime)):sha(p) for p in runtime.rglob('*') if p.is_file()}
     write(out/'runtime_manifest.json',manifest)
-    def launch(name,cmd):
-        log=(out/(name+'.log')).open('w');logs.append(log);proc=subprocess.Popen(cmd,env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True);procs.append((name,proc));event('process_started',name=name,pid=proc.pid,argv=cmd)
+    def launch(name,cmd,process_env=None):
+        log=(out/(name+'.log')).open('w');logs.append(log);proc=subprocess.Popen(cmd,env=env if process_env is None else process_env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True);procs.append((name,proc));event('process_started',name=name,pid=proc.pid,argv=cmd)
     try:
         pump(2.)
         for topic in ['/cmd_vel_nav','/cmd_vel','/cmd_vel_safe']:
             if node.get_publishers_info_by_topic(topic):raise RuntimeError('Existing velocity publisher requires owner cleanup before this run: '+topic)
         # Recorder covers preflight source data, all lifecycle transitions, full maps, camera and actions.
-        launch('recorder',['/opt/ros/jazzy/bin/ros2','bag','record','-a','--include-hidden-topics','-s','mcap','--storage-preset-profile','zstd_fast','--max-cache-size','268435456','-o',str(out/'bag')])
+        launch('recorder',['/opt/ros/jazzy/bin/ros2','bag','record','--node-name',recorder_name,'-a','--include-hidden-topics','-s','mcap','--storage-preset-profile','zstd_fast','--max-cache-size','268435456','-o',str(out/'bag')],recorder_env)
         deadline=time.monotonic()+args.preflight_timeout;preflight={}
         while time.monotonic()<deadline and not stopped:
             pump(.1)
@@ -240,6 +253,13 @@ def run(args,out,selected_install,manifest):
             identities[name]=dict(pid=p.pid,cmdline=pathlib.Path(f'/proc/{p.pid}/cmdline').read_bytes().replace(b'\0',b' ').decode(),maps=maps,
               selected_libraries_sha256={library:sha(library) for library in libraries if pathlib.Path(library).is_file()})
         write(out/'runtime_identities.json',identities)
+        recording_topics=[args.camera_topic,args.camera_info_topic,args.odom_topic,args.scan_topic,
+          '/livox/lidar','/livox/imu','/lightning_bridge/debug','/lightning/debug','/debug/build_info',
+          '/tf','/tf_static','/global_costmap/costmap_raw','/local_costmap/costmap_raw']
+        recording_subscriptions={topic:[info.node_name for info in node.get_subscriptions_info_by_topic(topic)] for topic in recording_topics}
+        write(out/'recording_subscriptions.json',recording_subscriptions)
+        missing=[topic for topic,names in recording_subscriptions.items() if recorder_name not in names]
+        if missing:raise RuntimeError('Recorder subscriptions missing before READY: '+repr(missing))
         # Startup may take time. Recheck the current source values immediately before
         # authorizing a separate goal pilot, rather than reusing an earlier preflight.
         pump(.2);ready_now=node.get_clock().now().nanoseconds/1e9
@@ -295,7 +315,7 @@ def run(args,out,selected_install,manifest):
         metadata=out/'bag/metadata.yaml'
         if metadata.exists():
             md=yaml.safe_load(metadata.read_text())['rosbag2_bagfile_information'];topic_counts={x['topic_metadata']['name']:x['message_count'] for x in md['topics_with_message_count']}
-            required=[args.camera_topic,args.camera_info_topic,args.odom_topic,'/tf','/tf_static','/map','/global_costmap/costmap_raw','/local_costmap/costmap_raw','/cmd_vel_nav','/cmd_vel','/cmd_vel_safe']
+            required=[args.camera_topic,args.camera_info_topic,args.odom_topic,args.scan_topic,'/livox/lidar','/livox/imu','/lightning_bridge/debug','/lightning/debug','/debug/build_info','/tf','/tf_static','/map','/global_costmap/costmap_raw','/local_costmap/costmap_raw','/cmd_vel_nav','/cmd_vel','/cmd_vel_safe','/simulation/command_adapter/policy_cmd']
             write(out/'final_audit.json',dict(message_count=md['message_count'],topic_counts=topic_counts,required_topics_nonempty={t:topic_counts.get(t,0)>0 for t in required},
               mcap_sha256={p.name:sha(p) for p in (out/'bag').glob('*.mcap')},note='Sequential decode and per-case action/results remain required before acceptance.'))
         event('stopped',observed_counts=counts);event_stream.close();node.destroy_node();rclpy.shutdown()
@@ -309,8 +329,13 @@ def main():
     p.add_argument('--official-install');p.add_argument('--segmented-install')
     p.add_argument('--rotate-threshold',type=float,help='Explicit RPP heading threshold override; otherwise frozen template value')
     p.add_argument('--xy-tolerance',type=float,default=.15);p.add_argument('--yaw-tolerance',type=float,default=.08)
-    p.add_argument('--build-receipt');p.add_argument('--preflight-timeout',type=float,default=30.);p.add_argument('--run',action='store_true')
+    p.add_argument('--build-receipt');p.add_argument('--message-install');p.add_argument('--preflight-timeout',type=float,default=30.);p.add_argument('--run',action='store_true')
     args=p.parse_args();out,install,manifest=prepare(args)
-    if args.run:run(args,out,install,manifest)
+    if args.run:
+        try:run(args,out,install,manifest)
+        except Exception as error:
+            if not (out/'failed.json').exists():write(out/'failed.json',dict(error=repr(error),stage='receipt_or_runtime_setup'))
+            write(out/'ready.json',dict(ready=False,stopped_at_ns=time.time_ns()))
+            raise
     else:print(str(out/'runtime_manifest.json'))
 if __name__=='__main__':main()
