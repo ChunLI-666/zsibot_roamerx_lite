@@ -20,6 +20,49 @@ and recorder subscriptions must be present before READY. Do not substitute an
 old full navigation overlay. A bag without these interfaces is incomplete even
 when its raw sensors and front camera are available.
 
+For a frozen deployment without `.git`, pass `--source-snapshot <JSON>`. Build
+the deployment from the retained canonical commit (for example with `git archive`),
+then generate the manifest from the exact exported bytes. No linked worktree or
+second Git checkout is needed. The manifest has this versioned shape:
+
+```json
+{
+  "schema_version": 1,
+  "origin": {
+    "kind": "canonical_checkout_snapshot",
+    "canonical_repository": "/absolute/original/canonical/repository",
+    "commit": "<40 lowercase hex characters>",
+    "branch": "<observed canonical branch>",
+    "status": "<exact git status --short output; empty when clean>"
+  },
+  "files_sha256": {
+    "experiments/planner_comparison_matrix/matrix_navigation.py": "<SHA256>",
+    "experiments/planner_comparison_matrix/static_layer_snapshot.py": "<SHA256>",
+    "experiments/planner_comparison_matrix/run_matrix_navigation.sh": "<SHA256>",
+    "experiments/planner_comparison_matrix/matrix_profile.yaml": "<SHA256>",
+    "src/navigation/src/robot_navigo/scripts/nav_safety_gate.py": "<SHA256>"
+  }
+}
+```
+
+Replace every placeholder with the captured value. Include the selected
+`--template` file if it differs from `matrix_profile.yaml`. Every listed file,
+including additional entries, must have its lowercase SHA256 checked against a
+normalized path relative to the deployed navigation root. Missing required
+entries, duplicate JSON keys, malformed origin/schema/hash values, `..`, absolute
+paths, external templates and symlinks escaping that root are rejected before
+creating the run directory. The source manifest is copied unchanged into the run
+and recorded with its digest and origin. Before runtime setup, its copied bytes
+must still match that recorded digest and its source hashes are checked again.
+`source_repository_observation` is null
+because the deployment does not inspect Git. Its recorded canonical commit is
+an origin observation, not an assertion that the deployed host has that checkout
+or that the selected binaries were built there. The independent build receipt
+and full artifact checks remain required. Omitting this option preserves the
+existing canonical Git observation. Domain 185 also supports a verified same-host
+loopback environment; transport selection does not change source timestamps or
+freshness limits.
+
 The fresh map retains 1 cm geometry and its mapping evidence uses 5 cm cells.
 Navigation uses a 20 m rolling global costmap and 6 m local costmap at 1 cm.
 Both publish full raw master costmaps; the recorder includes hidden topics,
