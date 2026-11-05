@@ -248,10 +248,20 @@ bool SegmentCoordinator::orderedProgressReached(double xy_tolerance, double yaw_
 }
 bool SegmentCoordinator::geometryReached(const geometry_msgs::msg::Pose & pose) const
 {
+  return geometryReached(pose, config_.xy_tolerance);
+}
+bool SegmentCoordinator::geometryReached(const geometry_msgs::msg::Pose & pose,
+  double maximum_track_xy_tolerance) const
+{
+  if (!std::isfinite(maximum_track_xy_tolerance) || maximum_track_xy_tolerance <= 0.0) {
+    return false;
+  }
+  const double xy_tolerance = rotating() ? config_.xy_tolerance :
+    std::min(config_.xy_tolerance, maximum_track_xy_tolerance);
   const auto & target = active().path.poses.back().pose;
-  return distance(pose, target) <= config_.xy_tolerance &&
+  return distance(pose, target) <= xy_tolerance &&
          (!rotating() || std::abs(angle(yaw(target) - yaw(pose))) <= config_.yaw_tolerance) &&
-         orderedProgressReached(config_.xy_tolerance * 2.0, config_.yaw_tolerance);
+         orderedProgressReached(xy_tolerance * 2.0, config_.yaw_tolerance);
 }
 bool SegmentCoordinator::stopped(const geometry_msgs::msg::Twist & velocity) const
 {
@@ -294,13 +304,38 @@ bool SegmentCoordinator::terminalWindowEligible(const geometry_msgs::msg::Pose &
     !std::isfinite(tolerance) || tolerance <= 0.0 ||
     distance(actual_pose, original_goal) > tolerance)
   {return false;}
-  // Include the actual-to-prefix residual; never use a global nearest equal-XY point.
-  const double remaining = remainingDistance() +
-    distance(actual_pose, active().path.poses[cursor_].pose);
+  // Project only onto the current TRACK edge. The nearest discrete sample may be
+  // slightly behind the body; adding that distance to the remaining route would
+  // count already completed travel twice and deadlock at the final XY tolerance.
+  // No later segment or equal-XY occurrence is searched here.
+  const auto & active_poses = active().path.poses;
+  auto prefix = active_poses[cursor_].pose;
+  double completed_edge_distance = 0.0;
+  std::size_t remaining_first = cursor_;
+  if (!rotating() && cursor_ + 1 < active_poses.size()) {
+    const auto & next = active_poses[cursor_ + 1].pose;
+    const double dx = next.position.x - prefix.position.x;
+    const double dy = next.position.y - prefix.position.y;
+    const double length_squared = dx * dx + dy * dy;
+    if (length_squared > 0.0) {
+      const double fraction = std::clamp(((actual_pose.position.x - prefix.position.x) * dx +
+        (actual_pose.position.y - prefix.position.y) * dy) / length_squared, 0.0, 1.0);
+      prefix.position.x += fraction * dx;
+      prefix.position.y += fraction * dy;
+      completed_edge_distance = fraction * std::sqrt(length_squared);
+      if (fraction > 0.0) {remaining_first = cursor_ + 1;}
+    }
+  }
+  // Route progress and current goal geometry are separate tests. Lateral
+  // tracking error is already bounded by the Euclidean goal check above;
+  // adding it here creates a stricter taxicab threshold that can prevent the
+  // explicit final rotation even though the original XY tolerance is met.
+  const double remaining = remainingDistance() - completed_edge_distance;
   if (remaining > tolerance) {return false;}
+  if (distance(prefix, original_goal) > tolerance) {return false;}
   for (std::size_t phase = index_; phase < segments_.size(); ++phase) {
     const auto & poses = segments_[phase].path.poses;
-    const std::size_t first = phase == index_ ? cursor_ : 0;
+    const std::size_t first = phase == index_ ? remaining_first : 0;
     for (std::size_t i = first; i < poses.size(); ++i) {
       if (distance(poses[i].pose, original_goal) > tolerance) {return false;}
     }

@@ -221,6 +221,68 @@ TEST(SegmentCoordinator, OriginalGoalGeometryUsesCurrentXYAndYawWithoutStatefulL
   EXPECT_FALSE(SegmentCoordinator::originalGoalGeometryReached(pose(.26, 0, 0), goal, .25, .25));
   EXPECT_FALSE(SegmentCoordinator::originalGoalGeometryReached(pose(0, 0, .26), goal, .25, .25));
 }
+TEST(SegmentCoordinator, FinalGeometryCoincidenceCannotSkipRemainingRoute)
+{
+  nav_msgs::msg::Path p; p.header.frame_id = "map";
+  for (int i = 0; i <= 60; ++i) {p.poses.push_back(path({pose(i*.01, 0, 0)}).poses[0]);}
+  p.poses.push_back(path({pose(.6, 0, pi/2)}).poses[0]);
+  p.poses.push_back(path({pose(.6, 0, pi)}).poses[0]);
+  for (int i = 59; i >= 0; --i) {p.poses.push_back(path({pose(i*.01, 0, pi)}).poses[0]);}
+  p.poses.push_back(path({pose(0, 0, -pi/2)}).poses[0]);
+  p.poses.push_back(path({pose(0, 0, 0)}).poses[0]);
+  for (int i = 1; i <= 30; ++i) {p.poses.push_back(path({pose(i*.01, 0, 0)}).poses[0]);}
+  SegmentCoordinator c; c.setPath(p); walk(c, 0, .3);
+  const auto goal = pose(.3, 0, 0);
+  ASSERT_TRUE(SegmentCoordinator::originalGoalGeometryReached(goal, goal, .05, .08));
+  EXPECT_FALSE(c.terminalWindowEligible(goal, goal, .05));
+  while (!c.finalSegment()) {
+    for (const auto & sample : c.active().path.poses) {c.observe(sample.pose);}
+    ASSERT_TRUE(c.advance());
+  }
+  walk(c, 0, .3);
+  EXPECT_TRUE(c.terminalWindowEligible(goal, goal, .05));
+}
+TEST(SegmentCoordinator, TrackHandoffRespectsStricterFinalToleranceWithoutChangingRotationAnchor)
+{
+  SegmentCoordinator::Config config; config.xy_tolerance = .06; config.yaw_tolerance = .08;
+  SegmentCoordinator c(config);
+  nav_msgs::msg::Path p; p.header.frame_id = "map";
+  for (int i = 0; i <= 20; ++i) {p.poses.push_back(path({pose(i*.01, 0, 0)}).poses[0]);}
+  p.poses.push_back(path({pose(.2, 0, pi/2)}).poses[0]);
+  c.setPath(p); walk(c, 0, .14);
+  EXPECT_TRUE(c.geometryReached(pose(.141, 0, 0)));
+  EXPECT_FALSE(c.geometryReached(pose(.141, 0, 0), .05));
+  c.observe(pose(.151, 0, 0));
+  EXPECT_TRUE(c.geometryReached(pose(.151, 0, 0), .05));
+  EXPECT_FALSE(c.geometryReached(pose(.151, 0, 0), 0.0));
+  ASSERT_TRUE(c.advance());
+  EXPECT_DOUBLE_EQ(c.config().xy_tolerance, .06);
+  EXPECT_TRUE(c.rotationAnchorReached(pose(.141, 0, 0)));
+  c.observe(pose(.141, 0, 0)); c.observe(pose(.141, 0, pi/2));
+  EXPECT_TRUE(c.geometryReached(pose(.141, 0, pi/2), .05));
+}
+TEST(SegmentCoordinator, TerminalWindowCountsOnlyUncompletedPartOfCurrentEdge)
+{
+  nav_msgs::msg::Path p; p.header.frame_id = "map";
+  for (int i = 0; i <= 60; ++i) {p.poses.push_back(path({pose(i*.01, 0, 0)}).poses[0]);}
+  SegmentCoordinator c; c.setPath(p); walk(c, 0, .55);
+  c.observe(pose(.553, 0, 0));
+  EXPECT_TRUE(c.terminalWindowEligible(pose(.553, 0, 0), pose(.6, 0, 0), .049));
+  EXPECT_FALSE(c.terminalWindowEligible(pose(.549, 0, 0), pose(.6, 0, 0), .049));
+  EXPECT_FALSE(c.terminalWindowEligible(pose(.553, .02, 0), pose(.6, 0, 0), .049));
+}
+TEST(SegmentCoordinator, TerminalWindowDoesNotAddLateralErrorToEuclideanGoalTolerance)
+{
+  nav_msgs::msg::Path p; p.header.frame_id = "map";
+  for (int i = 0; i <= 60; ++i) {p.poses.push_back(path({pose(i*.01, 0, 0)}).poses[0]);}
+  SegmentCoordinator c; c.setPath(p); walk(c, 0, .57);
+  const auto actual = pose(.57, .03, .28);
+  c.observe(actual);
+  // XY error is sqrt(.03^2+.03^2), while remaining route is only .03m.
+  // The explicit terminal rotation must be allowed to correct the .28rad yaw.
+  EXPECT_TRUE(c.terminalWindowEligible(actual, pose(.6, 0, 0), .05));
+  EXPECT_FALSE(c.terminalWindowEligible(pose(.57, .05, .28), pose(.6, 0, 0), .05));
+}
 TEST(SegmentCoordinator, UnstartedRotationRejectsStalePlanOriginWithoutRelaxingTolerance)
 {
   SegmentCoordinator c;

@@ -25,6 +25,7 @@
 #include <mutex>
 #include <optional>
 #include <chrono>
+#include <utility>
 #include "robot_feasible_navigation/segment_coordinator.hpp"
 
 #include "nav2_core/controller.hpp"
@@ -186,6 +187,7 @@ protected:
    * @return true or false
    */
   bool isGoalReached();
+  std::pair<double, double> originalGoalTolerances();
   /**
    * @brief Obtain current pose of the robot
    * @param pose To store current pose of the robot
