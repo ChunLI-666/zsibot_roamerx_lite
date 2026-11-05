@@ -93,6 +93,9 @@ double FeasiblePathHandler::getCostmapMaxExtent() const
 
 void FeasiblePathHandler::prunePlan(nav_msgs::msg::Path & plan, const PathIterator end)
 {
+  const auto count=static_cast<std::size_t>(std::distance(plan.poses.begin(),end));
+  if (&plan==&global_plan_) {global_offset_+=count;}
+  if (&plan==&global_plan_up_to_constraint_) {prefix_offset_+=count;}
   plan.poses.erase(plan.poses.begin(), end);
 }
 
@@ -109,18 +112,35 @@ bool FeasiblePathHandler::isWithinInversionTolerances(
     tf2::getYaw(robot_pose.pose.orientation),
     tf2::getYaw(last_pose.pose.orientation));
 
-  return distance <= inversion_xy_tolerance_ &&
+  return (!ordered_rotations_||constraint_headings_.complete()) && distance <= inversion_xy_tolerance_ &&
          fabs(angle_distance) <= inversion_yaw_tolerance_;
+}
+
+void FeasiblePathHandler::refreshConstraintHeadings()
+{
+  constraint_headings_.reset({});
+  constraint_near_anchor_=false;
+  if (!ordered_rotations_||constraint_locale_==0u||global_plan_up_to_constraint_.poses.empty()) {return;}
+  const auto & poses=global_plan_up_to_constraint_.poses;
+  std::size_t first=poses.size()-1;const auto & end=poses.back().pose.position;
+  while (first>0&&std::hypot(poses[first-1].pose.position.x-end.x,
+    poses[first-1].pose.position.y-end.y)<kPathRotationXYEpsilon) {--first;}
+  std::vector<double> headings;
+  for (std::size_t i=first;i<poses.size();++i) {headings.push_back(tf2::getYaw(poses[i].pose.orientation));}
+  constraint_heading_start_=prefix_offset_+first;
+  constraint_headings_.reset(std::move(headings));
 }
 
 void FeasiblePathHandler::setPlan(const nav_msgs::msg::Path & path)
 {
+  global_offset_=prefix_offset_=0u;
   global_plan_ = path;
   global_plan_up_to_constraint_ = global_plan_;
   if (enforce_path_inversion_ || enforce_path_rotation_) {
     constraint_locale_ = official_lattice_rpp_adapter::backport::removePosesAfterFirstConstraint(global_plan_up_to_constraint_,
       enforce_path_inversion_, minimum_rotation_angle_);
   }
+  refreshConstraintHeadings();
 }
 
 geometry_msgs::msg::PoseStamped FeasiblePathHandler::transformToGlobalPlanFrame(
@@ -150,12 +170,30 @@ PathSegment FeasiblePathHandler::findPlanSegment(
   const geometry_msgs::msg::PoseStamped & pose)
 {
   global_pose_ = transformToGlobalPlanFrame(pose);
+  constraint_near_anchor_=false;
+  if (ordered_rotations_&&constraint_locale_!=0u&&!global_plan_up_to_constraint_.poses.empty()) {
+    const auto & anchor=global_plan_up_to_constraint_.poses.back().pose.position;
+    constraint_near_anchor_=std::hypot(global_pose_.pose.position.x-anchor.x,global_pose_.pose.position.y-anchor.y)<=inversion_xy_tolerance_;
+    if (constraint_near_anchor_) {
+      constraint_headings_.advance(tf2::getYaw(global_pose_.pose.orientation),inversion_yaw_tolerance_);
+    }
+  }
 
   // Limit the search for the closest pose up to max_robot_pose_search_dist on the path
   auto closest_pose_upper_bound =
     nav2_util::geometry_utils::first_after_integrated_distance(
     global_plan_up_to_constraint_.poses.begin(), global_plan_up_to_constraint_.poses.end(),
       max_robot_pose_search_dist_);
+  // Jazzy min_by chooses the LAST equal-distance pose. A rotation's later
+  // identical XY samples must never move the cursor past its next heading.
+  if (ordered_rotations_&&constraint_locale_!=0u&&!constraint_headings_.complete()) {
+    const auto target=constraint_heading_start_+constraint_headings_.next();
+    if (target<prefix_offset_ || target-prefix_offset_>=global_plan_up_to_constraint_.poses.size()) {
+      throw nav2_core::InvalidPath("Ordered rotation checkpoint left the active prefix");
+    }
+    closest_pose_upper_bound=std::min(closest_pose_upper_bound,
+      global_plan_up_to_constraint_.poses.begin()+(target-prefix_offset_)+1);
+  }
 
   // First find the closest pose on the path to the robot
   // bounded by when the path turns around (if it does) so we don't get a pose from a later
@@ -189,6 +227,19 @@ nav_msgs::msg::Path FeasiblePathHandler::transformLocalPlan(
   const PathIterator & closest_point,
   const PathIterator & pruned_plan_end)
 {
+  auto segment_end=pruned_plan_end;
+  if (ordered_rotations_&&constraint_locale_!=0u&&!constraint_headings_.complete()) {
+    const auto target=constraint_heading_start_+constraint_headings_.next();
+    if (target>=prefix_offset_) {
+      const auto offset=target-prefix_offset_;
+      if (offset<global_plan_up_to_constraint_.poses.size()) {
+        segment_end=std::min(segment_end,global_plan_up_to_constraint_.poses.begin()+offset+1);
+      }
+    }
+  }
+  if (closest_point>=segment_end) {
+    throw nav2_core::InvalidPath("Ordered path segment has an invalid iterator interval");
+  }
   nav_msgs::msg::Path transformed_plan;
   transformed_plan.header.frame_id = costmap_ros_->getGlobalFrameID();
   transformed_plan.header.stamp = global_pose_.header.stamp;
@@ -196,7 +247,7 @@ nav_msgs::msg::Path FeasiblePathHandler::transformLocalPlan(
   // Find the furthest relevant pose on the path to consider within costmap
   // bounds
   // Transforming it to the costmap frame in the same loop
-  for (auto global_plan_pose = closest_point; global_plan_pose != pruned_plan_end;
+  for (auto global_plan_pose = closest_point; global_plan_pose != segment_end;
     ++global_plan_pose)
   {
     // Transform from global plan frame to costmap frame
@@ -227,8 +278,10 @@ nav_msgs::msg::Path FeasiblePathHandler::transformLocalPlan(
     if (isWithinInversionTolerances(global_pose_)) {
       prunePlan(global_plan_, global_plan_.poses.begin() + constraint_locale_);
       global_plan_up_to_constraint_ = global_plan_;
+      prefix_offset_=global_offset_;
       constraint_locale_ = official_lattice_rpp_adapter::backport::removePosesAfterFirstConstraint(global_plan_up_to_constraint_,
         enforce_path_inversion_, minimum_rotation_angle_);
+      refreshConstraintHeadings();
     }
   }
 

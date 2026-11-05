@@ -132,7 +132,12 @@ def prepare(args):
             planner.pop('lattice_filepath',None);planner.update(motion_model_for_search='DUBIN',angle_quantization_bins=72,
               minimum_turning_radius=.5,analytic_expansion_max_length=3.,analytic_expansion_ratio=3.5)
             manifest['control_only']='Hybrid is auxiliary control; primary comparison is segmented versus official Lattice.'
-        else:planner['lattice_filepath']=str(selected_install/'share/official_lattice_rpp_adapter/params/stop_turn_1cm_h16_small_radius.json')
+        else:
+            planner['lattice_filepath']=str(selected_install/'share/official_lattice_rpp_adapter/params/stop_turn_1cm_h16_small_radius.json')
+            planner.update(terminal_goal_binding=True,terminal_global_resolution=.01)
+            controller['FollowPath'].update(terminal_goal_binding=True,terminal_global_resolution=.01,terminal_global_extent=20.)
+            manifest['terminal_goal_binding']=dict(enabled=True,global_resolution=.01,global_extent=20.,
+                semantics='Original path.back goal is retained for server acceptance; RPP executes checked prefix and ordered actual-origin terminal headings, never an artificial quantization tail.')
     # Freeze the actual primitive input instead of depending on subsequent canonical branch switches.
     if 'lattice_filepath' in planner:
         source=pathlib.Path(planner['lattice_filepath']);shutil.copy2(source,out/'lattice.json');planner['lattice_filepath']=str(out/'lattice.json');manifest['lattice_sha256']=sha(out/'lattice.json')
@@ -303,6 +308,16 @@ def run(args,out,selected_install,manifest):
             names=wait(lc.call_async(ListParameters.Request())).result.names;req=GetParameters.Request();req.names=names
             params[name]={n:message_to_ordereddict(v) for n,v in zip(names,wait(gc.call_async(req)).values)}
         write(out/'runtime_parameters.json',params)
+        if args.variant=='official':
+            def parameter_value(node,key):
+                value=params[node].get(key,{})
+                return value.get('bool_value') if value.get('type')==1 else value.get('double_value')
+            if parameter_value('planner_server','GridBased.terminal_goal_binding') is not True or parameter_value('controller_server','FollowPath.terminal_goal_binding') is not True:
+                raise RuntimeError('paired terminal goal-binding mode not active')
+            if any(abs(parameter_value(node,key)-.01)>1e-12 for node,key in [
+                ('planner_server','GridBased.terminal_global_resolution'),('controller_server','FollowPath.terminal_global_resolution'),
+                ('global_costmap/global_costmap','resolution'),('local_costmap/local_costmap','resolution')]):
+                raise RuntimeError('paired goal-binding resolution readback mismatch')
         static_snapshots=capture_static_layers(node,out,recorder_name,pump,lambda:stopped)
         actual_maps={}
         for name,size in [('global_costmap',2000),('local_costmap',600)]:

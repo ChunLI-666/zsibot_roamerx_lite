@@ -29,7 +29,11 @@
     "Installed official raw path first primitive sample is joined to actual start with bounded forward connector plus checked heading alignment; proven float round-trip is restored independently per axis",
     "Sparse FollowPath input is subdivided along its existing line/yaw geometry to <=1cm and <=0.02rad; original final goal retained",
     "Both controller routes share resolution-adaptive filled constant-twist commandSweepFree; this is not physical braking or leg-motion acceptance",
-    "CheckedHybrid is an explicit DUBIN control group using installed SmacPlannerHybrid, with the same filled path/final-goal guards; its curved first sample does not use the stop-turn lateral alignment contract"
+    "CheckedHybrid is an explicit DUBIN control group using installed SmacPlannerHybrid, with the same filled path/final-goal guards; its curved first sample does not use the stop-turn lateral alignment contract",
+    "Default-off paired Lattice goal-cell binding proves native or float-emitted goal-cell endpoints, retains exact original server goal, and separates the optional terminal position region from the executable raw prefix",
+    "Opt-in active nonterminal and final rotations use monotonic absolute heading checkpoints, with actual-origin full remaining rotation sweeps; RPP never tracks an artificial quantization tail and external goal tolerances are unchanged",
+    "Numerical co-location applies to the whole run about its first anchor, preventing tiny translated samples from disguising a curved loop as an in-place rotation",
+    "Opt-in GoalChecker rechecks latest real body TF directly in the immutable original-goal frame with original tolerances and freshness limits, then atomically revalidates the plan/cycle binding; reset-after-setPlan preserves the new goal while clearing completion"
   ],
   "scope": "Experimental compatibility adapter; not native rolling Nav2 ControllerServer"
 }

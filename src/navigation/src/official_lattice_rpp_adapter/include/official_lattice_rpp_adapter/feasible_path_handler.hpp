@@ -17,6 +17,8 @@
 #ifndef NAV2_CONTROLLER__PLUGINS__FEASIBLE_PATH_HANDLER_HPP_
 #define NAV2_CONTROLLER__PLUGINS__FEASIBLE_PATH_HANDLER_HPP_
 
+#include "official_lattice_rpp_adapter/terminal_goal_binding.hpp"
+
 #include <string>
 #include <vector>
 #include <memory>
@@ -99,8 +101,16 @@ public:
   // Jazzy's server has no path-aware goal checker. Expose ordered progress;
   // do not search later path intersections again when deciding completion.
   bool finalPrefixWithin(double remaining_length) const;
+  void enableOrderedRotations(bool enabled) {ordered_rotations_=enabled;}
+  const goal_region::HeadingCursor & constraintHeadings() const {return constraint_headings_;}
+  bool constraintRotationActive() const {return ordered_rotations_&&constraint_locale_!=0u&&constraint_near_anchor_;}
+  bool finalPrefixActive() const {return constraint_locale_==0u;}
+  bool terminalHandoffReady(std::size_t suffix_begin,double limit) const {
+    return prefix_offset_>=suffix_begin && finalPrefixWithin(limit);
+  }
 
 protected:
+  void refreshConstraintHeadings();
   /**
     * @brief Transform a pose to the global reference frame
     * @param pose Current pose
@@ -139,6 +149,11 @@ protected:
   nav_msgs::msg::Path global_plan_up_to_constraint_;
   geometry_msgs::msg::PoseStamped global_pose_;
   unsigned int constraint_locale_{0u};
+  std::size_t global_offset_{0u},prefix_offset_{0u};
+  bool ordered_rotations_=false;
+  bool constraint_near_anchor_=false;
+  std::size_t constraint_heading_start_=0;
+  goal_region::HeadingCursor constraint_headings_;
   bool reject_unit_path_, enforce_path_inversion_, enforce_path_rotation_;
   double max_robot_pose_search_dist_, transform_tolerance_, prune_distance_;
   float inversion_xy_tolerance_, inversion_yaw_tolerance_, minimum_rotation_angle_;

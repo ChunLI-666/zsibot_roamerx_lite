@@ -14,8 +14,10 @@
 #include <pluginlib/class_list_macros.hpp>
 #include <pluginlib/class_loader.hpp>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <nav2_util/robot_utils.hpp>
 #include "official_lattice_rpp_adapter/feasible_path_handler.hpp"
 #include "official_lattice_rpp_adapter/planner_goal_contract.hpp"
+#include "official_lattice_rpp_adapter/terminal_goal_binding.hpp"
 #include "robot_feasible_navigation/footprint_sweep.hpp"
 
 namespace official_lattice_rpp_adapter {
@@ -58,22 +60,7 @@ auto freeze(const rclcpp_lifecycle::LifecycleNode::SharedPtr & node, std::string
 }
 }
 
-struct CompletionState {
-  std::mutex mutex;
-  std::uint64_t generation=0;
-  bool ready=false;
-  std::chrono::steady_clock::time_point updated;
-  void invalidate() {std::lock_guard<std::mutex> l(mutex);ready=false;++generation;}
-  std::uint64_t beginCycle() {std::lock_guard<std::mutex> l(mutex);ready=false;return generation;}
-  void finishCycle(std::uint64_t g,bool complete) {
-    std::lock_guard<std::mutex> l(mutex);
-    if (g==generation) {ready=complete;updated=std::chrono::steady_clock::now();}
-  }
-  bool eligible() {
-    std::lock_guard<std::mutex> l(mutex);
-    return ready && std::chrono::steady_clock::now()-updated<std::chrono::milliseconds(250);
-  }
-};
+using CompletionState=goal_region::CompletionGate;
 static std::shared_ptr<CompletionState> completionState(
   const rclcpp_lifecycle::LifecycleNode::SharedPtr & node,const std::string & controller) {
   static std::mutex mutex;
@@ -91,27 +78,75 @@ public:
   void initialize(const rclcpp_lifecycle::LifecycleNode::WeakPtr & parent,const std::string & name,
     const std::shared_ptr<nav2_costmap_2d::Costmap2DROS> map) override {
     auto node=parent.lock();require(bool(node),"missing goal checker node");
+    node_=parent;map_=map;tf_=map->getTfBuffer();
     require(!parameter(node,name+".stateful",false),"GoalChecker stateful must also be false");
-    state_=completionState(node,parameter<std::string>(node,name+".controller_name","FollowPath"));
+    const auto controller=parameter<std::string>(node,name+".controller_name","FollowPath");
+    state_=completionState(node,controller);
+    odom_timeout_=parameter(node,controller+".odom_timeout",0.3);
+    require(std::isfinite(odom_timeout_)&&odom_timeout_>0.&&odom_timeout_<=0.5,"invalid goal-checker TF timeout");
     state_->invalidate();
     inner_=loader_.createSharedInstance("nav2_controller::SimpleGoalChecker");
     inner_->initialize(parent,name,map);
     guard_=freeze(node,name);
   }
-  void reset() override {state_->invalidate();inner_->reset();}
+  void reset() override {
+    state_->invalidate();std::lock_guard<std::mutex> lock(inner_mutex_);inner_->reset();
+  }
   bool isGoalReached(const geometry_msgs::msg::Pose & pose,const geometry_msgs::msg::Pose & goal,
     const geometry_msgs::msg::Twist & velocity) override {
-    return state_->eligible() && inner_->isGoalReached(pose,goal,velocity);
+    const auto token=state_->snapshot();
+    geometry_msgs::msg::Pose actual=pose;
+    if (token.binding&&!latestBody(token.binding->original_goal.header.frame_id,actual)) {return false;}
+    if (!token.ready) {return false;}
+    bool reached;
+    {
+      std::lock_guard<std::mutex> lock(inner_mutex_);
+      reached=inner_->isGoalReached(actual,
+        token.binding?token.binding->original_goal.pose:goal,velocity);
+    }
+    return reached&&state_->stillEligible(token);
   }
   bool getTolerances(geometry_msgs::msg::Pose & p,geometry_msgs::msg::Twist & v) override {
-    return inner_->getTolerances(p,v);
+    std::lock_guard<std::mutex> lock(inner_mutex_);return inner_->getTolerances(p,v);
   }
   std::shared_ptr<CompletionState> bindingState() const {return state_;}
 private:
   pluginlib::ClassLoader<nav2_core::GoalChecker> loader_;
   nav2_core::GoalChecker::Ptr inner_;
   std::shared_ptr<CompletionState> state_;
+  rclcpp_lifecycle::LifecycleNode::WeakPtr node_;
+  std::shared_ptr<nav2_costmap_2d::Costmap2DROS> map_;
+  std::shared_ptr<tf2_ros::Buffer> tf_;
+  double odom_timeout_=0.3;
+  std::mutex inner_mutex_,history_mutex_;
+  struct TransformHistory {
+    std::int64_t stamp=0;
+    std::chrono::steady_clock::time_point advanced;
+  };
+  std::unordered_map<std::string,TransformHistory> history_;
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr guard_;
+  bool latestBody(const std::string & frame,geometry_msgs::msg::Pose & actual) {
+    // The incoming server pose and transformed end_pose can both describe a
+    // historical TF epoch. Only the latest real body chain checks current G.
+    try {
+      auto node=node_.lock();if (!node) {return false;}
+      const auto transform=tf_->lookupTransform(frame,map_->getBaseFrameID(),tf2::TimePointZero);
+      const auto stamp=rclcpp::Time(transform.header.stamp);
+      const double age=(node->now()-stamp).seconds();
+      if (stamp.nanoseconds()==0||age<-.05||age>odom_timeout_) {return false;}
+      actual.position.x=transform.transform.translation.x;
+      actual.position.y=transform.transform.translation.y;
+      actual.position.z=transform.transform.translation.z;
+      actual.orientation=transform.transform.rotation;
+      if (!finite(actual)) {return false;}
+      std::lock_guard<std::mutex> lock(history_mutex_);
+      auto & history=history_[frame+"/"+map_->getBaseFrameID()];
+      const auto steady=std::chrono::steady_clock::now();
+      if (stamp.nanoseconds()<history.stamp) {return false;}
+      if (stamp.nanoseconds()>history.stamp) {history.stamp=stamp.nanoseconds();history.advanced=steady;}
+      return std::chrono::duration<double>(steady-history.advanced).count()<=odom_timeout_;
+    } catch (const tf2::TransformException &) {return false;}
+  }
 };
 
 // Read-only observation of installed RPP's rotation decision, using an independent path transformer.
@@ -140,6 +175,23 @@ private:
   nav_msgs::msg::Path observation_plan_;
 };
 
+// Only RPP's internal rotation trigger is narrowed. The server's checker and
+// its original actual-goal acceptance tolerances are never changed.
+class RPPTriggerTolerance : public nav2_core::GoalChecker {
+public:
+  RPPTriggerTolerance(nav2_core::GoalChecker * original,double xy):original_(original),xy_(xy) {}
+  void initialize(const rclcpp_lifecycle::LifecycleNode::WeakPtr &,const std::string &,
+    const std::shared_ptr<nav2_costmap_2d::Costmap2DROS>) override {}
+  void reset() override {}
+  bool isGoalReached(const geometry_msgs::msg::Pose & p,const geometry_msgs::msg::Pose & g,
+    const geometry_msgs::msg::Twist & v) override {return original_->isGoalReached(p,g,v);}
+  bool getTolerances(geometry_msgs::msg::Pose & p,geometry_msgs::msg::Twist & v) override {
+    if (!original_->getTolerances(p,v)) {return false;}p.position.x=p.position.y=xy_;return true;
+  }
+private:
+  nav2_core::GoalChecker * original_;double xy_;
+};
+
 class FeasibleRPP : public nav2_core::Controller {
 public:
   void configure(const rclcpp_lifecycle::LifecycleNode::WeakPtr & parent, std::string name,
@@ -147,7 +199,7 @@ public:
     auto node=parent.lock();require(bool(node),"missing lifecycle node");
     map_=map;tf_=tf;name_=name;
     node_=node;
-    completion_=completionState(node,name);completion_->invalidate();
+    completion_=completionState(node,name);completion_->clearPlan();
     require(sweep::validFootprint(map_->getRobotFootprint()),"convex body footprint required");
     require(!parameter(node,name+".rpp.stateful",false),"RPP stateful must be false");
     require(!parameter(node,name+".rpp.allow_reversing",false),"reverse not enabled in this experiment");
@@ -169,9 +221,19 @@ public:
     remaining_length_=parameter(node,name+".completion_path_length",0.08);
     require(std::isfinite(remaining_length_)&&remaining_length_>0.&&remaining_length_<=0.2,
       "invalid remaining path completion tolerance");
+    terminal_binding_=parameter(node,name+".terminal_goal_binding",false);
+    terminal_resolution_=parameter(node,name+".terminal_global_resolution",0.01);
+    terminal_extent_=parameter(node,name+".terminal_global_extent",20.);
+    if (terminal_binding_) {
+      require(std::isfinite(terminal_resolution_)&&terminal_resolution_>0.&&
+        std::abs(terminal_resolution_-map_->getCostmap()->getResolution())<1e-12,
+        "goal binding global/local resolution mismatch");
+      require(std::isfinite(terminal_extent_)&&terminal_extent_>0.,"invalid terminal global extent");
+    }
     allow_static_path_transform_=parameter(node,name+".allow_static_path_transform",false);
     handler_=std::make_unique<backport::FeasiblePathHandler>();
     handler_->initialize(parent,node->get_logger(),name+".handler",map,tf);
+    handler_->enableOrderedRotations(terminal_binding_);
     rpp_.configure(parent,name+".rpp",tf,map);
     segment_pub_=node->create_publisher<nav_msgs::msg::Path>(name+"/feasible_segment",rclcpp::QoS(1).reliable().transient_local());
     odom_timeout_=parameter(node,name+".odom_timeout",0.3);
@@ -184,31 +246,37 @@ public:
       });
     guard_=freeze(node,name);
   }
-  void cleanup() override {completion_->invalidate();rpp_.cleanup();handler_.reset();segment_pub_.reset();guard_.reset();odom_sub_.reset();completion_.reset();}
+  void cleanup() override {completion_->clearPlan();rpp_.cleanup();handler_.reset();segment_pub_.reset();guard_.reset();odom_sub_.reset();completion_.reset();}
   void activate() override {rpp_.activate();segment_pub_->on_activate();}
   void deactivate() override {completion_->invalidate();rpp_.deactivate();segment_pub_->on_deactivate();}
   void setPlan(const nav_msgs::msg::Path & path) override {
-    completion_->invalidate();
+    const auto plan_generation=completion_->bindPlan();has_plan_=false;
+    terminal_armed_=terminal_cancelled_=false;binding_.reset();
     require(!path.poses.empty()&&!path.header.frame_id.empty(),"empty path/frame");
     for (const auto & p:path.poses) {
       require(finite(p.pose)&&
         (p.header.frame_id.empty()||p.header.frame_id==path.header.frame_id),"invalid planar path/frame");
     }
     path_frame_=path.header.frame_id;
+    auto executable=path;
+    if (terminal_binding_) {
+      try {executable=goal_region::splitBinding(path,terminal_resolution_,terminal_extent_).executable;}
+      catch (const std::exception & e) {throw nav2_core::InvalidPath(e.what());}
+    }
     // Jazzy RPP can select a behind-the-body first endpoint on sparse paths.
     // Subdivide the SAME line/yaw geometry; retain the exact original goal in
     // the server and do not reset this handler on ordinary control ticks.
-    nav_msgs::msg::Path dense;dense.header=path.header;dense.poses.push_back(path.poses.front());
-    for (std::size_t i=1;i<path.poses.size();++i) {
-      const auto & a=path.poses[i-1].pose;
-      const auto & b=path.poses[i].pose;
+    nav_msgs::msg::Path dense;dense.header=executable.header;dense.poses.push_back(executable.poses.front());
+    for (std::size_t i=1;i<executable.poses.size();++i) {
+      const auto & a=executable.poses[i-1].pose;
+      const auto & b=executable.poses[i].pose;
       const double dyaw=angle(yaw(a),yaw(b));
       const double count=std::ceil(std::max(
         std::hypot(b.position.x-a.position.x,b.position.y-a.position.y)/0.01,std::abs(dyaw)/0.02));
       require(std::isfinite(count)&&count<=1000000.-dense.poses.size(),"path subdivision budget exceeded");
       const auto steps=std::max(1,static_cast<int>(count));
       for (int j=1;j<=steps;++j) {
-        auto p=path.poses[i];const double t=double(j)/steps;
+        auto p=executable.poses[i];const double t=double(j)/steps;
         p.pose.position.x=a.position.x+t*(b.position.x-a.position.x);
         p.pose.position.y=a.position.y+t*(b.position.y-a.position.y);
         p.pose.orientation.x=p.pose.orientation.y=0.;
@@ -216,17 +284,24 @@ public:
         p.pose.orientation.w=std::cos((yaw(a)+t*dyaw)/2.);
         dense.poses.push_back(p);
       }
-      dense.poses.back()=path.poses[i];
+      dense.poses.back()=executable.poses[i];
+    }
+    if (terminal_binding_) {
+      auto wire=dense;wire.poses.push_back(path.poses.back());
+      auto binding=goal_region::splitBinding(wire,terminal_resolution_,terminal_extent_);
+      binding.generation=plan_generation;
+      binding_=std::make_shared<const goal_region::Binding>(std::move(binding));
     }
     // This is the only place that resets upstream constraint progression.
     handler_->setPlan(dense);rpp_.reset();has_plan_=true;
+    if (binding_) {completion_->installBinding(binding_);}
   }
-  void reset() override {completion_->invalidate();rpp_.reset();has_plan_=false;}
-  bool cancel() override {completion_->invalidate();return rpp_.cancel();}
+  void reset() override {completion_->clearPlan();rpp_.reset();has_plan_=false;binding_.reset();terminal_armed_=false;}
+  bool cancel() override {completion_->invalidate();terminal_cancelled_=true;return rpp_.cancel();}
   void setSpeedLimit(const double & limit,const bool & percentage) override {rpp_.setSpeedLimit(limit,percentage);}
   geometry_msgs::msg::TwistStamped computeVelocityCommands(const geometry_msgs::msg::PoseStamped & pose,
     const geometry_msgs::msg::Twist & velocity, nav2_core::GoalChecker * checker) override {
-    const auto generation=completion_->beginCycle();
+    const auto generation=completion_->beginCycle(binding_?binding_->generation:0);
     auto * feasible_checker=dynamic_cast<FeasibleGoalChecker *>(checker);
     require(feasible_checker && feasible_checker->bindingState()==completion_,
       "FeasibleRPP requires the correctly bound FeasibleGoalChecker");
@@ -235,6 +310,11 @@ public:
     require(checker && checker->getTolerances(tolerance,velocity_tolerance),"goal tolerance unavailable");
     require(tolerance.position.x>0. && tolerance.position.x<=xy_,"RPP goal XY exceeds path handoff XY");
     require(tolerance.position.x<=remaining_length_,"completion path length is smaller than RPP XY threshold");
+    const double yaw_tolerance=std::abs(yaw(tolerance));
+    if (terminal_binding_) {
+      require(binding_&&std::isfinite(yaw_tolerance)&&yaw_tolerance>0.,"missing terminal binding/yaw tolerance");
+      require(binding_->error<tolerance.position.x,"original XY tolerance does not contain goal-cell endpoint");
+    }
     require(pose.header.frame_id==map_->getGlobalFrameID()&&finite(pose.pose),"pose must be in costmap frame");
     require(std::isfinite(velocity.linear.x)&&std::isfinite(velocity.linear.y)&&
       std::isfinite(velocity.linear.z)&&std::isfinite(velocity.angular.x)&&
@@ -262,14 +342,81 @@ public:
     if (!sweep::footprintFree(*map,fp,pose.pose.position.x,pose.pose.position.y,yaw(pose.pose))) {
       throw nav2_core::NoValidControl("Filled actual footprint occupied");
     }
-    auto [begin,end]=handler_->findPlanSegment(pose);
-    auto segment=handler_->transformLocalPlan(begin,end);
+    nav_msgs::msg::Path segment;
+    bool in_original_region=false;
+    geometry_msgs::msg::PoseStamped path_pose=pose;
+    if (terminal_binding_) {
+      if (!nav2_util::transformPoseInTargetFrame(pose,path_pose,*tf_,path_frame_,map_->getTransformTolerance())) {
+        throw nav2_core::ControllerTFError("Unable to evaluate original goal region");
+      }
+      in_original_region=std::hypot(path_pose.pose.position.x-binding_->original_goal.pose.position.x,
+        path_pose.pose.position.y-binding_->original_goal.pose.position.y)<=tolerance.position.x;
+      if (terminal_armed_&&!in_original_region) {
+        throw nav2_core::NoValidControl("Actual body left original goal region during terminal rotation");
+      }
+    }
+    if (!terminal_armed_) {
+      auto [begin,end]=handler_->findPlanSegment(pose);
+      segment=handler_->transformLocalPlan(begin,end);
+      if (terminal_binding_&&handler_->constraintRotationActive()) {
+        const auto & cursor=handler_->constraintHeadings();
+        if (!cursor.complete()&&cursor.next()>0) {
+          const double planned=angle(cursor.headings()[cursor.next()-1],cursor.target());
+          const double remaining=angle(yaw(path_pose.pose),cursor.target());
+          if ((planned>goal_region::kHeadingRoundoff&&remaining<-yaw_tolerance)||
+            (planned<-goal_region::kHeadingRoundoff&&remaining>yaw_tolerance)) {
+            throw nav2_core::NoValidControl("Actual nonterminal rotation would reverse the ordered checkpoint direction");
+          }
+        }
+      }
+      if (terminal_binding_&&in_original_region&&
+        handler_->terminalHandoffReady(binding_->suffix_begin,tolerance.position.x)) {
+        terminal_armed_=true;terminal_headings_.reset(binding_->terminal_headings);
+      }
+    }
+    if (terminal_armed_) {
+      terminal_headings_.advance(yaw(path_pose.pose),yaw_tolerance);
+      segment=nav_msgs::msg::Path();
+      segment.header=pose.header;segment.poses.push_back(pose);
+      auto target=pose;
+      const double heading=terminal_headings_.complete()?yaw(binding_->original_goal.pose):terminal_headings_.target();
+      const double local_heading=yaw(pose.pose)+angle(yaw(path_pose.pose),heading);
+      target.pose.orientation.x=target.pose.orientation.y=0.;
+      target.pose.orientation.z=std::sin(local_heading/2.);target.pose.orientation.w=std::cos(local_heading/2.);
+      segment.poses.push_back(target);
+      double previous=yaw(pose.pose);
+      for (std::size_t i=terminal_headings_.next();i<terminal_headings_.headings().size();++i) {
+        const double next=yaw(pose.pose)+angle(yaw(path_pose.pose),terminal_headings_.headings()[i]);
+        if (!sweep::sweepFree(*map,fp,pose.pose.position.x,pose.pose.position.y,previous,
+          pose.pose.position.x,pose.pose.position.y,next)) {
+          throw nav2_core::NoValidControl("Filled ordered terminal rotation at actual origin blocked");
+        }
+        previous=next;
+      }
+    }
+    if (terminal_binding_&&!terminal_armed_&&handler_->constraintRotationActive()) {
+      const auto & headings=handler_->constraintHeadings();double previous=yaw(pose.pose);
+      for (std::size_t i=headings.next();i<headings.headings().size();++i) {
+        const double next=yaw(pose.pose)+angle(yaw(path_pose.pose),headings.headings()[i]);
+        if (!sweep::sweepFree(*map,fp,pose.pose.position.x,pose.pose.position.y,previous,
+          pose.pose.position.x,pose.pose.position.y,next)) {
+          throw nav2_core::NoValidControl("Filled ordered nonterminal rotation at actual origin blocked");
+        }
+        previous=next;
+      }
+    }
     segment_pub_->publish(segment);
     rpp_.setObservedPlan(segment); // Reset is harmless only with enforced stateful=false.
-    auto cmd=rpp_.computeVelocityCommands(pose,velocity,checker);
+    const double trigger=terminal_binding_&&!terminal_armed_&&handler_->finalPrefixActive()?
+      tolerance.position.x-binding_->error-64.*std::numeric_limits<double>::epsilon()*
+      std::max(1.,tolerance.position.x):tolerance.position.x;
+    require(trigger>0.,"nonpositive original-goal triangle trigger");
+    RPPTriggerTolerance proxy(checker,trigger);
+    auto cmd=rpp_.computeVelocityCommands(pose,velocity,&proxy);
     const auto & v=cmd.twist;
     require(std::isfinite(v.linear.x)&&std::isfinite(v.angular.z)&&v.linear.x>=0.&&
       v.linear.y==0.&&v.linear.z==0.&&v.angular.x==0.&&v.angular.y==0.,"invalid command");
+    require(!terminal_armed_||v.linear.x==0.,"terminal goal-region command must be pure rotation");
     double target_delta=0.;
     if (rpp_.rotationTarget(pose,velocity,target_delta)) {
       // Check the complete remaining rotation at the ACTUAL displaced body origin.
@@ -289,7 +436,9 @@ public:
       yaw(pose.pose),v.linear.x,v.angular.z,horizon_)) {
       throw nav2_core::NoValidControl("Filled command sweep blocked");
     }
-    completion_->finishCycle(generation,handler_->finalPrefixWithin(remaining_length_));
+    completion_->finishCycle(generation,terminal_binding_?
+      (terminal_armed_&&!terminal_cancelled_&&terminal_headings_.complete()&&in_original_region):
+      handler_->finalPrefixWithin(remaining_length_));
     return cmd;
   }
 private:
@@ -301,6 +450,10 @@ private:
   std::string path_frame_;
   std::shared_ptr<CompletionState> completion_;
   double remaining_length_=0.08;
+  bool terminal_binding_=false,terminal_armed_=false,terminal_cancelled_=false;
+  double terminal_resolution_=0.01,terminal_extent_=20.;
+  std::shared_ptr<const goal_region::Binding> binding_;
+  goal_region::HeadingCursor terminal_headings_;
   bool allow_static_path_transform_=false;
   struct TransformHistory {
     std::int64_t stamp=0;
@@ -354,6 +507,14 @@ public:
         "Hybrid control uses the explicit forward-only DUBIN model");
     }
     require(parameter(node,name+".tolerance",0.)==0.,"exact goal search required");
+    terminal_binding_=parameter(node,name+".terminal_goal_binding",false);
+    const double terminal_resolution=parameter(node,name+".terminal_global_resolution",0.01);
+    if (terminal_binding_) {
+      require(stop_turn_,"goal-cell binding is only verified for stop-turn Lattice");
+      require(std::isfinite(terminal_resolution)&&terminal_resolution>0.&&
+        std::abs(terminal_resolution-map_->getCostmap()->getResolution())<1e-12,
+        "goal binding planner resolution mismatch");
+    }
     const double analytic_length=parameter(node,name+".analytic_expansion_max_length",stop_turn_?0.:3.);
     require(std::isfinite(analytic_length)&&analytic_length>=0. && (!stop_turn_||analytic_length==0.),
       "stop-turn Lattice requires no analytic connector; Hybrid uses an explicit nonnegative length");
@@ -386,7 +547,10 @@ public:
     // the existing in-place path equivalence; larger subcell moves still fail.
     const bool native_same_cell=stop_turn_ &&
       nativeLatticeSameCellSingleton(raw,start,goal,*map);
-    if (native_same_cell) {
+    if (terminal_binding_) {
+      require(goal_region::proveGoalCell(raw,start,goal,*map).valid,
+        "official raw endpoint has no bounded goal-cell proof");
+    } else if (native_same_cell) {
       require(withinPathRotationXYEquivalence(start.pose,goal.pose),
         "official same-cell path exceeds rotation XY equivalence");
     }
@@ -411,7 +575,7 @@ public:
     const auto sameXY=[](const auto & a,const auto & b) {
       return std::hypot(a.position.x-b.position.x,a.position.y-b.position.y)<1e-9;
     };
-    require(native_same_cell || sameXY(raw.poses.back().pose,goal.pose),
+    require(terminal_binding_ || native_same_cell || sameXY(raw.poses.back().pose,goal.pose),
       "official path did not preserve exact goal XY");
     // Installed official search emits its first primitive sample, not always the
     // exact start node (observed first sample is 1mm). Preserve the actual start
@@ -437,7 +601,12 @@ public:
     // path/command guards still apply; it is a control group, not stop-turn search.
     nav_msgs::msg::Path output;output.header=raw.header;
     auto first=start;first.header=output.header;output.poses.push_back(first);
-    raw.poses.push_back(goal); // Exact original final yaw, even when the lattice quantizes its search heading.
+    if (terminal_binding_) {
+      auto attitude=raw.poses.back();attitude.pose.orientation=goal.pose.orientation;
+      raw.poses.push_back(attitude); // Checked rotation at the actual executable endpoint.
+    } else {
+      raw.poses.push_back(goal); // Historical numerical co-location mode.
+    }
     for (const auto & p:raw.poses) {
       if (cancel&&cancel()) {throw nav2_core::PlannerCancelled("Filled sweep canceled");}
       const auto a=output.poses.back().pose;
@@ -455,7 +624,11 @@ public:
         output.poses.push_back(q);
       }
     }
-    output.poses.back().pose=goal.pose;
+    if (terminal_binding_) {
+      output.poses.back().pose.orientation=goal.pose.orientation;
+      require(edgeFree(*map,fp,output.poses.back().pose,goal.pose),"filled terminal goal-region certificate blocked");
+      auto original=goal;original.header=output.header;output.poses.push_back(original);
+    } else {output.poses.back().pose=goal.pose;}
     return output;
   }
 protected:
@@ -465,6 +638,7 @@ private:
   pluginlib::ClassLoader<nav2_core::GlobalPlanner> loader_;
   std::string planner_type_;
   bool stop_turn_;
+  bool terminal_binding_=false;
   nav2_core::GlobalPlanner::Ptr planner_;
   std::shared_ptr<nav2_costmap_2d::Costmap2DROS> map_;
   std::mutex mutex_;
