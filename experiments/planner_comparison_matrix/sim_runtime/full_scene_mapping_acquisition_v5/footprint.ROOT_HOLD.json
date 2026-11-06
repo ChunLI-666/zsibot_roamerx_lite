@@ -1,0 +1,19 @@
+{
+  "schema": "locnav.mapping_acquisition.footprint_fragment.v5",
+  "scope": "MAPPING_ACQUISITION_LATERAL_RECT_V5_ONLY",
+  "executable": false,
+  "root_footprint_selected": false,
+  "footprint_mode": "legacy_square",
+  "body_half_xy_m": [0.74, 0.74],
+  "padding_m": 0.15,
+  "footprint_inflation_in_grid_m": 0.0,
+  "body_envelope_proof": null,
+  "rectangle_candidate_not_selected": {
+    "footprint_mode": "certified_full_body_rectangle",
+    "body_half_xy_m": [0.647, 0.530],
+    "required_roll_pitch_each_rad": 0.25,
+    "manifest_sha256": "ebfb6900d7c424b46e9e1e191f774a57427a1c2bcf76d625b31937963a239cc2",
+    "report_sha256": "e18db218e4b4183bafe564530a571b1c939690707f709e9dc8efe81cc787b981",
+    "independent_review_sha256": "669efe13a5f038b6d73adc7b9041e88d1c87c8b3336840ed607108acd0879111"
+  }
+}
