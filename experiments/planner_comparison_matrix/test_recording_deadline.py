@@ -43,7 +43,7 @@ if mode.endswith('_children'):
  child=output/'owned_child.py'
  child.write_text("import json,os,pathlib,signal,sys,time\\noutput=pathlib.Path(sys.argv[1]);name=sys.argv[2]\\ndef event(kind):\\n with (output/('child_'+name+'.jsonl')).open('a') as stream:stream.write(json.dumps(dict(kind=kind,pid=os.getpid(),boottime_sec=time.clock_gettime(time.CLOCK_BOOTTIME)))+'\\\\n')\\ndef stop(signum,frame):\\n event('sigint');sys.exit(0)\\nsignal.signal(signal.SIGINT,stop);event('started')\\nwhile True:\\n if name=='recorder':\\n  with (output/'dummy_recording.bin').open('ab') as stream:stream.write(b'x'*1024)\\n time.sleep(.02)\\n")
  import subprocess
- for name in (['recorder'] if mode.startswith('gap_') else ['controller_server','velocity_smoother','recorder']):
+ for name in (['recorder'] if mode.startswith('gap_') else ['waypoint_follower','controller_server','velocity_smoother','recorder'] if mode=='waypoint_children' else ['controller_server','velocity_smoother','recorder']):
   command,environment=guard.owned_command(name,[sys.executable,'-I',str(child),str(output),name],os.environ)
   process=subprocess.Popen(command,env=environment,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
   guard.runtime_children_started=True
@@ -215,6 +215,22 @@ class RecordingDeadlineTests(unittest.TestCase):
         self.verify_fallback_order(output)
         self.assertFalse(self.observed(output, 'sigint_sent'))
         self.assertEqual(self.observed(output, 'fallback_started')[0]['reason'], 'launcher_exited_before_recording_closed')
+
+    def test_waypoint_follower_is_bound_and_stopped_in_command_producer_phase(self):
+        output = self.output()
+        process = self.spawn(output, 'waypoint_children', 1.5)
+        self.wait_for(lambda: self.observed(output, 'children_registered', 'dummy_events.jsonl'))
+        self.wait_for(lambda: self.observed(output, 'fallback_completed'), timeout=6)
+        signals = self.observed(output, 'fallback_child_sigint_sent')
+        self.assertEqual([row['name'] for row in signals],
+                         ['waypoint_follower', 'controller_server', 'velocity_smoother', 'recorder'])
+        self.assertEqual([row['phase'] for row in signals],
+                         ['command_producers', 'command_producers', 'remaining_navigation', 'recorder'])
+        self.assertLess(signals[1]['boottime_sec']-signals[0]['boottime_sec'], .3)
+        self.assertGreaterEqual(signals[2]['boottime_sec']-signals[1]['boottime_sec'], .95)
+        self.assertGreaterEqual(signals[3]['boottime_sec']-signals[2]['boottime_sec'], .45)
+        self.assertTrue(self.observed(output, 'fallback_completed')[0]['all_registered_owned_processes_exited'])
+        self.assertIsNone(process.poll())
 
     def test_gate_registers_and_stops_recording_when_parent_blocks_immediately_after_popen(self):
         output = self.output()

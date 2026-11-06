@@ -23,7 +23,7 @@ EVENTS = 'recording_deadline_events.jsonl'
 CHILDREN = 'recording_deadline_children.json'
 CHILDREN_ARMED = 'recording_deadline_children_armed.json'
 OWNED_NAMES = ('recorder', 'nav_safety_gate', 'map_server', 'planner_server',
-               'controller_server', 'velocity_smoother', 'bt_navigator', 'lifecycle_manager')
+               'controller_server', 'velocity_smoother', 'bt_navigator', 'waypoint_follower', 'lifecycle_manager')
 RUN_ID_ENV = 'MATRIX_RECORDING_RUN_ID'
 OUTPUT_ENV = 'MATRIX_RECORDING_OUTPUT'
 ROLE_ENV = 'MATRIX_RECORDING_ROLE'
@@ -426,10 +426,10 @@ def watch(manifest_path, digest, run_id):
                         except Exception as error:
                             event('fallback_child_identity_rejected', name=name, error=repr(error))
 
-                stop_phase(('bt_navigator', 'controller_server'), 'command_producers')
+                stop_phase(('waypoint_follower', 'bt_navigator', 'controller_server'), 'command_producers')
                 time.sleep(1.0)
                 stop_phase(tuple(name for name in reversed(OWNED_NAMES)
-                                 if name not in ('recorder', 'bt_navigator', 'controller_server')), 'remaining_navigation')
+                                 if name not in ('recorder', 'waypoint_follower', 'bt_navigator', 'controller_server')), 'remaining_navigation')
                 time.sleep(.5)
                 stop_phase(('recorder',), 'recorder')
                 until = time.monotonic() + 30.
