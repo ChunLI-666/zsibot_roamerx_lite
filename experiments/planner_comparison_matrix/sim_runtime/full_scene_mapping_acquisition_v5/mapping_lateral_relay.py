@@ -102,8 +102,9 @@ def admit(path,digest):
     if r['sources_sha256']['mapping_lateral_relay.py']!=proof.sha(__file__) or r['sources_sha256']['lateral_capability.py']!=proof.sha(Path(__file__).with_name('lateral_capability.py')):raise ValueError('frozen relay/proof module differs')
     if r['sources_sha256']['full_scene_mapping_contract.py']!=proof.sha(Path(__file__).with_name('full_scene_mapping_contract.py')):raise ValueError('frozen endpoint contract module differs')
     import full_scene_mapping_contract as endpoint_contract
-    endpoint_contract.sim_endpoint_from_admission(a,r)
-    admitted=proof.validate_proof(r['lateral_calibration_proof'],r['scene_instance_id'],r['sensor_config_sha256'],r['sensor_adapter_process_identity'])
+    selected_endpoint=endpoint_contract.sim_endpoint_from_admission(a,r)
+    admitted=proof.validate_proof(r['lateral_calibration_proof'],r['scene_instance_id'],r['sensor_config_sha256'],r['sensor_adapter_process_identity'],command_endpoint=selected_endpoint,
+        namespace_binding={key:r.get(key) for key in ['network_namespace','controller_pid_namespace']})
     proof.validate_model_evidence(a['motion_model'],admitted)
     if identity(r['sensor_adapter_process_identity']['pid'])!=r['sensor_adapter_process_identity']:raise ValueError('calibrated adapter changed')
     return a
