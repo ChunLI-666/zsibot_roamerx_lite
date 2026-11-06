@@ -20,6 +20,17 @@ PRIVATE_CAL_SOURCE_SHA={'lateral_once.py':'8c430db01f61a8656466a57c9577329f5c3a7
     'imu_gate.py':'0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66',
     'recording_deadline.py':'e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c',
     'bag_summary.py':'1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792'}
+# Exact frozen v5 eight. Empty/partial/malformed replacement values never
+# select a family; actual new two-sign evidence and Root model remain required.
+PRIVATE_V5_CAL_SOURCE_SHA={'lateral_once.py': '8c430db01f61a8656466a57c9577329f5c3a7284b9231aebdac05c5b2b658cf3',
+ 'lateral_contract.py': '50a3c2defcb38f0e436467b3e222a39f35fff80c4cf4c2667aab81ecd3ff20ea',
+ 'semantic_tool_timed.py': 'a49c203fa4af613d2073466f33c07a03f0f1ab4d28529838e2ea1a9788d7f7ec',
+ 'host_preflight.py': '200ac3f54141963f69eb2cd3923999cfdd953de686fdc284225e0f4734c23d1e',
+ 'calibration_observer.py': '2d8b36b459b74b85fab36557515bb4bad7528bcda7434735fba0e919132a2515',
+ 'imu_gate.py': '0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66',
+ 'recording_deadline.py': 'e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c',
+ 'bag_summary.py': '1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792'}
+PRIVATE_FAMILIES=('private_v4r2','private_v5_camera_refresh')
 LEGACY_ENDPOINT=('127.0.0.1',7447)
 PRIVATE_ENDPOINT=('192.168.1.219',7447)
 PRIVATE_IMAGE='sha256:1e05a178bb34bb6e391150104b1d2924bb733153b6c9e9d9bae1e55ae882917e'
@@ -67,7 +78,11 @@ def complete_identity(value):
 def calibration_family(sources):
     if sources==CAL_SOURCE_SHA:return 'legacy_shared_v4',LEGACY_ENDPOINT,{'new_adapter','bridge24','projector61'}
     if sources==PRIVATE_CAL_SOURCE_SHA:return 'private_v4r2',PRIVATE_ENDPOINT,{'new_adapter','bridge','projector'}
-    raise AdmissionError('exact old8 or exact private8 required; no per-file mixtures or partial family')
+    pending=PRIVATE_V5_CAL_SOURCE_SHA
+    if (isinstance(pending,dict) and set(pending)==CAL_SOURCES
+        and all(isinstance(v,str) and len(v)==64 and all(ch in '0123456789abcdef' for ch in v) for v in pending.values())
+        and sources==pending):return 'private_v5_camera_refresh',PRIVATE_ENDPOINT,{'new_adapter','bridge','projector'}
+    raise AdmissionError('one complete exact reviewed eight required; pending/mixed/partial family is HOLD')
 
 
 def mapping_endpoint(value):
@@ -192,7 +207,7 @@ def validate_proof(reference,scene,sensor_sha,adapter_identity,command_endpoint=
     family,target,source_roles=calibration_family(sources)
     require(mapping_endpoint(command_endpoint)==target,'mapping endpoint and selected complete calibration family differ')
     identity_record=read(files['adapter_identity'])
-    if family=='private_v4r2':require('sources' in identity_record,'new actual private source precheck required; no old adapter relabel')
+    if family in PRIVATE_FAMILIES:require('sources' in identity_record,'new actual private source precheck required; no old adapter relabel')
     if 'sources' in identity_record:
         require(identity_record.get('state')=='PASS' and isinstance(case.get('source_identities'),dict)
             and set(identity_record['sources'])==source_roles
@@ -232,7 +247,7 @@ def validate_proof(reference,scene,sensor_sha,adapter_identity,command_endpoint=
         require(value.is_file() and sha(value)==item['sha256'],'actual MCAP bytes missing/changed')
     require(bag.get('metadata_sha256')==artifacts['bag_metadata']['sha256'],'bag metadata binding differs')
     measurements=read(files['model_measurements'])
-    private_host=private_calibration_binding(proof,case,measurements,files,artifacts,sources,scene,command_endpoint,namespace_binding) if family=='private_v4r2' else None
+    private_host=private_calibration_binding(proof,case,measurements,files,artifacts,sources,scene,command_endpoint,namespace_binding) if family in PRIVATE_FAMILIES else None
     if family=='legacy_shared_v4':
         require(case.get('private_network_endpoint',False) is False and calibration_endpoint(case.get('command_endpoint',list(LEGACY_ENDPOINT)))==LEGACY_ENDPOINT
             and calibration_endpoint(proof.get('command_endpoint',list(LEGACY_ENDPOINT)))==LEGACY_ENDPOINT
