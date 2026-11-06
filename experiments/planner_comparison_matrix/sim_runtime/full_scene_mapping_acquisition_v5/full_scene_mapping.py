@@ -504,11 +504,16 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
               stop_sweep_samples=len(sweep),inflation_m=inflation,visibility=visibility,owner_audit=dict(audit)))
             if not accepted:raise contract.Hold('bounded state writer rejected evidence')
             return truth,yaw
-        def stable(seconds,timeout):
+        def stable(seconds,timeout,heading=None,deadline_steady=None):
             nonlocal active_lateral
             begin=time.monotonic();checker=contract.StableStop(contract.truth_age_limit(model))
             while time.monotonic()-begin<timeout:
                 truth,yaw=tick()
+                if heading is not None:
+                    if time.monotonic()-begin>=timeout or (deadline_steady is not None and time.monotonic()>=deadline_steady):
+                        raise contract.Hold('heading settle exceeded original stop deadline')
+                    if abs(contract.wrap(heading[0]-yaw))>heading[1]:
+                        checker=contract.StableStop(contract.truth_age_limit(model));continue
                 if checker.update(truth,relay.command,time.time_ns(),time.monotonic(),seconds):
                     active_lateral=None;return truth,yaw
             raise contract.Hold('fresh truth/zero-command stable stop not observed')
@@ -561,8 +566,10 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
                 truth,yaw=health()[:2];error=contract.wrap(target-yaw)
                 if abs(error)<=tolerance:break
                 tick(0.,math.copysign(contract.MAX_WZ,error),terminal_deadline_steady=terminal_deadline_steady)
-            remaining=8. if deadline_steady is None else min(8.,max(0.,deadline_steady-time.monotonic()))
-            truth,yaw=stable(contract.STOP_STABLE,remaining)
+            settle_deadline=time.monotonic()+8.
+            if deadline_steady is not None:settle_deadline=min(settle_deadline,deadline_steady)
+            remaining=max(0.,settle_deadline-time.monotonic())
+            truth,yaw=stable(contract.STOP_STABLE,remaining,heading=(target,tolerance),deadline_steady=settle_deadline)
             if deadline_steady is not None and time.monotonic()>deadline_steady:raise contract.Hold('heading settle exceeded correction deadline')
             if abs(contract.wrap(target-yaw))>tolerance:raise contract.Hold('settled heading outside acquisition tolerance')
             return truth,yaw
