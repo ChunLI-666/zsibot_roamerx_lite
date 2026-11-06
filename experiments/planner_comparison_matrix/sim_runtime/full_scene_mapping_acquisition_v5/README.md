@@ -1,4 +1,8 @@
-# Current source revision v10 / protocol v5 — ROOT HOLD
+# Current source revision v11 / protocol v5 — ROOT HOLD
+
+Passive relay file preparation now finishes before ROS initialization and sensor subscription. Process start remains after the original fresh standing and raw-fault checks, with callback pumping during READY. The other six runtime files and all timing, model, geometry and stop thresholds remain exact Source10. This removes one synchronous preparation window from the subscription interval; the new source has no runtime or full-map acceptance.
+
+# Historical source revision v10 / protocol v5 — ROOT HOLD
 
 A separate Root-bound fine-forward subcapability may select fixed policy velocity .2 or .3 m/s (semantic raw .1 or .15) only during explicit terminal fine/correction phases. The default, coarse, lateral and yaw profiles retain their earlier whitelist. Release, route, frozen admission and child parser must agree; traces record the actual applied values. The initial cleanup zero attempt retains its successful parent-pipe issue receipt, with no SDK/engine dispatch claim. Existing body, timestamp, collision, stop and deadline gates remain. No new plant model or runtime acceptance is selected by this source.
 

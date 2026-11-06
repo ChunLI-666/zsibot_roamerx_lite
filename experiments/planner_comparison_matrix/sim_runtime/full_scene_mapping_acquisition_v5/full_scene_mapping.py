@@ -257,6 +257,7 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
     stopped=[];previous={number:signal.signal(number,lambda n,f:stopped.append(n)) for number in [signal.SIGINT,signal.SIGTERM]}
     node=None;executor=None;relay=None;writer=None;stop_verified=False;result={};fault_snapshot=None;last_request=None;stop_observation={}
     try:
+        relay=OwnedRelay(output,release['release_id'],args.root_release,model,own)
         rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
         node=Node('full_scene_mapping_owner_'+release['release_id'],enable_rosout=False,start_parameter_services=False)
         executor=SingleThreadedExecutor(context=node.context);executor.add_node(node);callbacks=BoundedCallbacks(executor)
@@ -309,7 +310,7 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
         while 'truth' not in latest and time.monotonic()<truth_deadline:callbacks.spin()
         contract.standing_before_relay(latest.get('truth'),model,time.time_ns(),time.monotonic())
         if imu_gate_fault is not None:raise contract.Hold('latched raw IMU fault: '+imu_gate_fault['reason'])
-        relay=OwnedRelay(output,release['release_id'],args.root_release,model,own);relay.start(callbacks.spin);allowed.append(relay.identity)
+        relay.start(callbacks.spin);allowed.append(relay.identity)
         audit=dict(valid=False,checked_steady=0.,reason='not_checked',first_violation=None);audit_stop=threading.Event()
         def audit_loop():
             while not audit_stop.is_set():
