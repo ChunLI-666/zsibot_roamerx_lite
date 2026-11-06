@@ -1,0 +1,30 @@
+--- frozen_v7/test_v4_core.py
++++ canonical_locator/test_v4_core.py
+@@ -11,7 +11,10 @@
+ import lateral_capability as proof
+ 
+ HERE=Path(__file__).resolve().parent
+-BASE=next(p for p in HERE.parents if p.name=='planner_comparison_20261105')
++_fixture_roots=[parent for parent in HERE.parents if parent.name=='planner_comparison_20261105']
++_fixture_roots.extend(parent/'analysis_outputs/planner_comparison_20261105' for parent in HERE.parents)
++BASE=next((candidate for candidate in _fixture_roots if candidate.is_dir()),None)
++if BASE is None:raise RuntimeError('Frozen workspace analysis_outputs/planner_comparison_20261105 fixtures required')
+ 
+ class Clock:
+     def __init__(self):self.ns=10_000_000_000;self.sleeps=[]
+--- frozen_v7/test_lifecycle_v7.py
++++ canonical_locator/test_lifecycle_v7.py
+@@ -49,7 +49,12 @@
+         self.assertAlmostEqual(ns['time'].monotonic()-ns['last_send'],.11)
+     def test_checkpoint_uses_bounded_emit_preserving_every_original_receipt_field(self):
+         old_path=HERE.parents[1]/'full_scene_mapping_lateral_owner_v6/review_source_v6/full_scene_mapping.py'
+-        if not old_path.exists():old_path=next(p for p in HERE.parents if p.name=='planner_comparison_20261105')/'full_scene_mapping_lateral_owner_v6/review_source_v6/full_scene_mapping.py'
++        if not old_path.exists():
++            relative=Path('full_scene_mapping_lateral_owner_v6/review_source_v6/full_scene_mapping.py')
++            candidates=[parent/relative for parent in HERE.parents]
++            candidates.extend(parent/'analysis_outputs/planner_comparison_20261105'/relative for parent in HERE.parents)
++            old_path=next((candidate for candidate in candidates if candidate.is_file()),old_path)
++        self.assertTrue(old_path.is_file(),'Frozen revision6 baseline fixture missing from workspace analysis_outputs')
+         old=ast.parse(old_path.read_text());new=ast.parse((HERE/'full_scene_mapping.py').read_text())
+         previous=next(n for n in ast.walk(old) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='atomic_json' and n.args and 'runtime_ready.json' in ast.unparse(n.args[0]))
+         current=next(n for n in ast.walk(new) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='emit' and n.args and isinstance(n.args[0],ast.Constant) and n.args[0].value=='runtime_ready')

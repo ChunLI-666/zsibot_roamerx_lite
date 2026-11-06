@@ -198,6 +198,8 @@ def validate_route(value,execute=False):
                 if not isinstance(policy,dict) or policy.get('kind')!='straight_fixed_heading':raise Hold('unsupported acquisition leg policy')
                 if not finite([policy.get(key) for key in ['travel_yaw_rad','max_yaw_error_rad','max_cross_track_m']]):raise Hold('finite fixed-heading/tube bounds required')
                 if not 0<policy['max_yaw_error_rad']<=.08 or not 0<policy['max_cross_track_m']<=.15:raise Hold('fixed-heading/tube bounds exceed supported acquisition tolerance')
+                previous=start if not ids else entries[len(ids)-1]['pose_truth']
+                forward_endpoint_state(previous,pose,previous,policy)
         ids.add(name)
     return value
 
@@ -526,6 +528,7 @@ def audit_route_geometry(oracle,route,model):
             samples+=len(oracle.checked_sweep((x,y,body),(x,y,yaw),model['turn_drift_reserve_m']))
             legs.append(dict(id=point['id'],length_m=length,lateral_sign=sign,body_yaw_rad=body,world_travel_yaw_rad=policy['world_travel_yaw_rad']))
             pose=(x,y,yaw);continue
+        endpoint=forward_endpoint_state(pose,(x,y,yaw),pose,policy)
         heading=policy['travel_yaw_rad'] if policy else math.atan2(y-pose[1],x-pose[0]) if length>.15 else pose[2]
         if policy:straight_leg_state(pose,(x,y,yaw),(pose[0],pose[1],heading),policy)
         samples+=len(oracle.checked_sweep(pose,(*pose[:2],heading),model['turn_drift_reserve_m']))
@@ -533,7 +536,8 @@ def audit_route_geometry(oracle,route,model):
         if policy:inflation+=policy['max_cross_track_m']+radius*policy['max_yaw_error_rad']
         samples+=len(oracle.checked_sweep((*pose[:2],heading),(x,y,heading),inflation))
         samples+=len(oracle.checked_sweep((x,y,heading),(x,y,yaw),model['turn_drift_reserve_m']))
-        legs.append(dict(id=point['id'],length_m=length,travel_yaw_rad=heading,fixed_heading=policy is not None))
+        legs.append(dict(id=point['id'],length_m=length,travel_yaw_rad=heading,fixed_heading=policy is not None,
+            radial_endpoint_tolerance_m=endpoint['radial_tolerance_m'],along_endpoint_tolerance_m=endpoint['along_endpoint_tolerance_m']))
         pose=(x,y,yaw)
     return dict(checked=True,legs=legs,sweep_samples=samples,semantics='Nominal filled-body translation/rotation and fixed-heading tube; original-age stopping reserve is checked before every live packet.')
 
@@ -594,6 +598,21 @@ def lateral_leg_state(start,target,pose,policy):
 def translation_endpoint_tolerance(start,target):
     length=math.hypot(target[0]-start[0],target[1]-start[1])
     return .15 if length<=1e-9 else min(.15,length/4)
+
+
+def forward_endpoint_state(start,target,pose,policy=None):
+    """Old radial test plus an optional frozen-heading along test; no correction."""
+    radial=translation_endpoint_tolerance(start,target)
+    distance=math.hypot(target[0]-pose[0],target[1]-pose[1]);along_tolerance=None;along=None;error=None
+    if policy is not None and 'along_endpoint_tolerance_m' in policy:
+        value=policy['along_endpoint_tolerance_m'];heading=policy.get('travel_yaw_rad')
+        length=math.hypot(target[0]-start[0],target[1]-start[1])
+        if policy.get('kind')!='straight_fixed_heading' or not finite([value,heading,*start,*target,*pose]) or not 0<value<=min(.15,length/4):
+            raise Hold('forward along tolerance must be finite nonbool in(0,min(.15,L/4)]')
+        along_tolerance=value;along=(pose[0]-start[0])*math.cos(heading)+(pose[1]-start[1])*math.sin(heading)
+        error=abs(length-along)
+    return dict(radial_distance_m=distance,radial_tolerance_m=radial,along_endpoint_tolerance_m=along_tolerance,
+        actual_along_m=along,absolute_along_error_m=error,reached=distance<=radial and (along_tolerance is None or error<=along_tolerance))
 
 
 def require_translation_progress(start,target,entry,pose,tolerance):
