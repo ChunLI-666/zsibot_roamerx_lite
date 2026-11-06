@@ -1,0 +1,11 @@
+--- review_source_v9r2/test_forward_terminal_v9.py
++++ canonical/test_forward_terminal_v9.py
+@@ -127,7 +127,7 @@
+             state['stable'].assert_not_called()
+     def test_old_route_branch_and_all_other_runtime_files_preserved(self):
+         from pathlib import Path
+-        root=next(p for p in Path(__file__).resolve().parents if p.name=='planner_comparison_20261105')
++        from test_v4_core import BASE as root
+         base=root/'full_scene_mapping_lateral_owner_v8/review_source_v8';here=Path(__file__).resolve().parent
+         for n in ['mapping_lateral_relay.py','lateral_capability.py','imu_gate.py','dependencies/waypoint_contract.py','dependencies/map_coverage.py']:
+             self.assertEqual((here/n).read_bytes(),(base/n).read_bytes())

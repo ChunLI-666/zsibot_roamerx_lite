@@ -190,6 +190,7 @@ def validate_route(value,execute=False):
         if entry.get('require_stopped') is not True:raise Hold('all acquisition points require a measured stop')
         policy=entry.get('leg_policy')
         if policy is not None:
+            forward_terminal_policy(start if not ids else entries[len(ids)-1]['pose_truth'],pose,policy)
             if isinstance(policy,dict) and policy.get('kind')=='lateral_fixed_body_heading':
                 previous=start if not ids else entries[len(ids)-1]['pose_truth']
                 lateral_leg_state(previous,pose,(*previous[:2],policy['body_yaw_rad']),policy)
@@ -517,6 +518,7 @@ def audit_route_geometry(oracle,route,model):
     pose=tuple(route['start_anchor_truth']);samples=0;legs=[];radius=oracle.padded_radius
     for point in route['waypoints']:
         x,y,yaw=point['pose_truth'];length=math.hypot(x-pose[0],y-pose[1]);policy=point.get('leg_policy')
+        forward_terminal_policy(pose,(x,y,yaw),policy)
         if policy is not None and policy.get('kind')=='lateral_fixed_body_heading':
             sign=policy['lateral_sign'];body=policy['body_yaw_rad'];lat=lateral_model(model,sign)
             if length+LENGTH_COMPARISON_EPS_M<lat['min_controllable_leg_m'] or policy['endpoint_tolerance_m']+LENGTH_COMPARISON_EPS_M<lat['endpoint_accuracy_bound_m']:
@@ -600,8 +602,26 @@ def translation_endpoint_tolerance(start,target):
     return .15 if length<=1e-9 else min(.15,length/4)
 
 
+def forward_terminal_policy(start,target,policy):
+    """Optional same-bridge forward terminal work; no tolerance or axis change."""
+    if not isinstance(policy,dict) or 'forward_terminal' not in policy:return None
+    value=policy['forward_terminal'];length=math.hypot(target[0]-start[0],target[1]-start[1])
+    keys={'kind','coarse_stop_remaining_m','max_corrections','max_extra_work_sec'}
+    along=policy.get('along_endpoint_tolerance_m');heading=policy.get('travel_yaw_rad')
+    if (policy.get('kind')!='straight_fixed_heading' or not isinstance(value,dict) or set(value)!=keys
+        or value.get('kind')!='coarse_stop_then_fine_v1' or not finite([*start,*target,along,heading])
+        or not 0<along<=min(.15,length/4) or abs(wrap(target[2]-heading))>.005):
+        raise Hold('forward terminal requires explicit valid fixed-heading along tolerance and unchanged target heading')
+    coarse=value['coarse_stop_remaining_m'];budget=value['max_extra_work_sec'];count=value['max_corrections']
+    if (not finite([coarse,budget]) or not .05<=coarse<=min(.15,length/2) or coarse<=along
+        or not 0<budget<=20. or type(count) is not int or not 1<=count<=2):
+        raise Hold('forward terminal bounds: coarse[.05,min(.15,L/2)]>along; corrections1..2; work(0,20]')
+    return dict(value)
+
+
 def forward_endpoint_state(start,target,pose,policy=None):
     """Old radial test plus an optional frozen-heading along test; no correction."""
+    forward_terminal_policy(start,target,policy)
     radial=translation_endpoint_tolerance(start,target)
     distance=math.hypot(target[0]-pose[0],target[1]-pose[1]);along_tolerance=None;along=None;error=None
     if policy is not None and 'along_endpoint_tolerance_m' in policy:

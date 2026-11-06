@@ -1,0 +1,38 @@
+{
+  "base_manifest_sha256": "cfdf35a87173f9988a2e51e93b7bbd0a8c1d3b3041f3d812ba88a110578eac32",
+  "runtime_five_exact": {
+    "mapping_lateral_relay.py": true,
+    "lateral_capability.py": true,
+    "imu_gate.py": true,
+    "dependencies/waypoint_contract.py": true,
+    "dependencies/map_coverage.py": true
+  },
+  "ast": {
+    "full_scene_mapping.py": {
+      "changed_functions": [
+        "execute",
+        "tick",
+        "rotate_to",
+        "final_guard"
+      ],
+      "added_functions": [
+        "forward_terminal_leg",
+        "budget",
+        "state",
+        "stop"
+      ],
+      "all_other_original_functions_AST_exact": true
+    },
+    "full_scene_mapping_contract.py": {
+      "changed_functions": [
+        "validate_route",
+        "audit_route_geometry",
+        "forward_endpoint_state"
+      ],
+      "added_functions": [
+        "forward_terminal_policy"
+      ],
+      "all_other_original_functions_AST_exact": true
+    }
+  }
+}

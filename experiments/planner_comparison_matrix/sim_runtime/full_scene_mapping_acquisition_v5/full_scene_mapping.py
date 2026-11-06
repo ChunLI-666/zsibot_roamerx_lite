@@ -368,7 +368,7 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
             for topic in required:
                 if (release['recorder_node_name'],release['recorder_node_namespace']) not in [(info.node_name,info.node_namespace) for info in node.get_subscriptions_info_by_topic(topic)]:raise contract.Hold('raw recorder subscription absent: '+topic)
             return truth,yaw,cloud_cache,(now_ns-truth['stamp_ns'])/1e9
-        def tick(vx=0.,wz=0.,bridge=None,lateral_raw=0.):
+        def tick(vx=0.,wz=0.,bridge=None,lateral_raw=0.,terminal_deadline_steady=None):
             nonlocal last_send,last_request,active_lateral
             contract.primitive_packet(vx,wz,time.time_ns(),lateral_raw)
             last_request=dict(vx=vx,wz=wz,lateral_raw=lateral_raw,requested_unix_ns=time.time_ns())
@@ -404,6 +404,7 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
             # stale positive command with a new packet timestamp.
             final_facts={}
             def final_guard(issued_ns,steady):
+                if terminal_deadline_steady is not None and steady>=terminal_deadline_steady:raise contract.Hold('forward terminal deadline reached before packet send')
                 contract.check_clock(clock_pair,issued_ns,steady)
                 final_facts['issued_steady_sec']=steady
                 final_facts['pose']=contract.command_time_pose_guard(truth,issued_ns,steady,guard_started,age_upper,age_cap)
@@ -411,6 +412,10 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
                     start,target,leg_policy=checked_bridge
                     check=contract.lateral_leg_state if leg_policy.get('kind')=='lateral_fixed_body_heading' else contract.straight_leg_state
                     final_facts['bridge']=check(start,target,(*truth['xyz'][:2],yaw),leg_policy)
+                    if vx and contract.forward_terminal_policy(start,target,leg_policy) is not None:
+                        endpoint=contract.forward_endpoint_state(start,target,(*truth['xyz'][:2],yaw),leg_policy)
+                        if final_facts['bridge']['along_m']>final_facts['bridge']['length_m']+endpoint['along_endpoint_tolerance_m']:
+                            raise contract.Hold('forward terminal overshoot at final packet guard')
                 final_facts['inputs']={key:contract.fresh(value,issued_ns,steady,limit=age_cap if key=='truth' else contract.MAX_INPUT_AGE) for key,value in latest.items()}
                 final_facts['cloud']=contract.fresh(dict(stamp_ns=cloud['stamp_ns'],received_steady=cloud['raw_received_steady']),issued_ns,steady)
                 if last_send is not None and steady-last_send>contract.CONTROL_RENEWAL_LIMIT:raise contract.Hold('guard computation exceeded command renewal bound')
@@ -456,12 +461,12 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
           actual_truth_age_cap_sec=contract.truth_age_limit(model),lateral_magnitude=contract.MAX_LATERAL_RAW,
           scene_identity_basis='root external host attestation; no direct host UE monitoring',controller_pid_namespace=release['controller_pid_namespace'],scene_identity_proof=release['scene_identity_proof'],
           checked_unix_ns=time.time_ns(),checked_steady_ns=time.monotonic_ns(),boundary='Preflight evidence only; no additional motion permission.'))
-        def rotate_to(target,tolerance=.08,deadline_steady=None):
+        def rotate_to(target,tolerance=.08,deadline_steady=None,terminal_deadline_steady=None):
             while True:
                 if deadline_steady is not None and time.monotonic()>=deadline_steady:raise contract.Hold('bounded heading correction deadline expired')
                 truth,yaw=health()[:2];error=contract.wrap(target-yaw)
                 if abs(error)<=tolerance:break
-                tick(0.,math.copysign(contract.MAX_WZ,error))
+                tick(0.,math.copysign(contract.MAX_WZ,error),terminal_deadline_steady=terminal_deadline_steady)
             remaining=8. if deadline_steady is None else min(8.,max(0.,deadline_steady-time.monotonic()))
             truth,yaw=stable(contract.STOP_STABLE,remaining)
             if deadline_steady is not None and time.monotonic()>deadline_steady:raise contract.Hold('heading settle exceeded correction deadline')
@@ -476,6 +481,12 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
                 stable(contract.STOP_STABLE,8.)
                 rotate_to(policy['body_yaw_rad'] if lateral else policy['travel_yaw_rad'],policy['max_yaw_error_rad'])
             entry_truth,entry_yaw=health()[:2];leg_entry=(*entry_truth['xyz'][:2],entry_yaw);corrections=0;correction_used=0.;feedback=None
+            if not lateral and contract.forward_terminal_policy(leg_start,(x,y,heading),policy) is not None:
+                truth,yaw=forward_terminal_leg(leg_start,(x,y,heading),leg_entry,policy,health,tick,stable,rotate_to,
+                    lambda phase,**fields:emit('forward_terminal_phase',index=index,phase=phase,**fields))
+                progress=contract.require_translation_progress(leg_start,(x,y,heading),leg_entry,(*truth['xyz'][:2],yaw),tolerance)
+                emit('point_visited',index=index,truth=truth,target=point,measured_and_commanded_stop=True,actual_leg_progress=progress)
+                continue
             while True:
                 truth,yaw=health()[:2];dx,dy=x-truth['xyz'][0],y-truth['xyz'][1]
                 if lateral:
@@ -583,6 +594,64 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
         for number,handler in previous.items():signal.signal(number,handler)
         lock.close()
     return result
+
+
+def forward_terminal_leg(start,target,entry,policy,health,tick,stable,rotate_to,emit,clock=time):
+    """Bounded optional terminal work. All packets use the original guarded tick."""
+    config=contract.forward_terminal_policy(start,target,policy)
+    if config is None:raise contract.Hold('forward terminal policy was not explicitly selected')
+    bridge=(start,target,policy);deadline=None;corrections=0
+    tolerance=contract.translation_endpoint_tolerance(start,target)
+    def budget():
+        if deadline is not None and clock.monotonic()>=deadline:raise contract.Hold('forward terminal extra work deadline expired')
+    def state(truth,yaw):
+        budget();pose=(*truth['xyz'][:2],yaw)
+        track=contract.straight_leg_state(start,target,pose,policy)
+        endpoint=contract.forward_endpoint_state(start,target,pose,policy)
+        remaining=track['length_m']-track['along_m']
+        if remaining < -endpoint['along_endpoint_tolerance_m']:raise contract.Hold('forward terminal overshoot; no reverse correction')
+        return remaining,endpoint,pose
+    def stop(phase):
+        budget();truth,yaw=stable(contract.STOP_STABLE,min(8.,deadline-clock.monotonic()))
+        remaining,endpoint,pose=state(truth,yaw)
+        emit(phase,truth=truth,remaining_m=remaining,endpoint=endpoint,correction=corrections,
+            deadline_steady=deadline,original_start=start,original_target=target)
+        budget();return truth,yaw
+    # Coarse travel retains the ordinary route/controller deadline. The20s extra
+    # budget begins at the first neutral/stopped terminal transition, not mid-leg.
+    while True:
+        truth,yaw=health()[:2];remaining,endpoint,pose=state(truth,yaw)
+        if remaining<=config['coarse_stop_remaining_m']:
+            deadline=clock.monotonic()+config['max_extra_work_sec']
+            emit('coarse_stop_requested',truth=truth,remaining_m=remaining,deadline_steady=deadline)
+            truth,yaw=stop('coarse_stopped');break
+        tick(contract.MAX_VX,0.,bridge=bridge)
+    while True:
+        remaining,endpoint,pose=state(truth,yaw)
+        emit('fine_started' if corrections==0 else 'correction_started',truth=truth,remaining_m=remaining,correction=corrections)
+        while not endpoint['reached']:
+            if remaining<=endpoint['along_endpoint_tolerance_m']:
+                raise contract.Hold('forward terminal radial miss cannot be repaired by forward-only correction')
+            budget();tick(contract.MAX_VX,0.,bridge=bridge,terminal_deadline_steady=deadline);budget()
+            truth,yaw=health()[:2];remaining,endpoint,pose=state(truth,yaw)
+        contract.require_translation_progress(start,target,entry,pose,tolerance)
+        truth,yaw=stop('fine_stopped')
+        remaining,endpoint,pose=state(truth,yaw)
+        if endpoint['reached']:
+            # No turn begins from an unaccepted translation endpoint. A stopped
+            # undershoot is repaired first, with the same frozen forward bridge.
+            budget();truth,yaw=rotate_to(target[2],deadline_steady=deadline,terminal_deadline_steady=deadline);budget()
+            remaining,endpoint,pose=state(truth,yaw)
+            if endpoint['reached']:
+                contract.require_translation_progress(start,target,entry,pose,tolerance)
+                emit('completed',truth=truth,endpoint=endpoint,correction=corrections,deadline_steady=deadline)
+                budget();return truth,yaw
+        if remaining<=endpoint['along_endpoint_tolerance_m']:
+            raise contract.Hold('settled forward terminal radial/overshoot miss; no feasible forward correction')
+        if corrections>=config['max_corrections']:raise contract.Hold('forward terminal correction count exhausted')
+        corrections+=1
+        # Same frozen start/target/sign and original leg-entry progress reference.
+        # The preceding stop and rotate_to both verified a real zero-command stop.
 
 
 def main():

@@ -1,8 +1,12 @@
-# Current source revision v8 / protocol v5 — ROOT HOLD
+# Current source revision v9r2 / protocol v5 — ROOT HOLD
+
+An explicit `forward_terminal` policy enables coarse stop, measured-stop fine approach and at most two same-leg forward corrections within one 20 second budget. Every packet retains the existing ownership, freshness, full-body collision and stop checks; the same deadline also gates any final yaw packet. Original radial and along endpoint limits remain mandatory before a turn and after final stop. Overshoot cannot trigger reverse correction. The actual source-v8 rebound failure remains preserved; this code has no full-map or native navigation acceptance. Omitted policies retain prior behavior. See `READOUT.txt` and `source_manifest_v9r2.json`.
+
+# Historical source revision v8 / protocol v5 — ROOT HOLD
 
 Fixed-heading forward legs may additionally require `along_endpoint_tolerance_m`, bounded by the unchanged original radial tolerance. Completion requires the original radial condition AND the absolute along error condition, using the frozen leg start and heading. The same helper applies before stop and after measured stop; original progress checks remain. Omitted fields and all lateral behavior retain their previous semantics. This is an optional stricter capture condition, not a new motion model or a successful full-map result.
 
-# Current source revision v7 / protocol v5 — ROOT HOLD
+# Historical source revision v7 / protocol v5 — ROOT HOLD
 
 The live checkpoint is now a complete `runtime_ready` receipt in the bounded events stream and MCAP; enqueue does not imply durable evidence. Writer close/error/drop checks remain authoritative. Every health entry services the existing bounded executor before reading the original sensor stamps and rechecks stop requests. All original age, renewal, collision, model, ownership and stop gates remain. Runtime bytes match source revision7 freeze; only the canonical unit fixture locator additionally finds its historical baseline through workspace `analysis_outputs`.
 
