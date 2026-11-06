@@ -64,7 +64,7 @@ class BoundedCallbacks:
 
 def validate_release(release,route,route_path,oracle_path,output):
     prearm_requalification_enabled(release)
-    contract.sim_endpoint_from_release(release)
+    sim_endpoint=contract.sim_endpoint_from_release(release)
     if release.get('scope')!=contract.SCOPE or release.get('mode')!=contract.MODE or release.get('allow_execute') is not True:
         raise contract.Hold('root release absent or not executable')
     contract.validate_fine_route(release,route)
@@ -108,7 +108,8 @@ def validate_release(release,route,route_path,oracle_path,output):
     if release.get('sensor_config_sha256')!=config_sha:raise contract.Hold('calibrated actual sensor configuration differs')
     adapter=release.get('sensor_adapter_process_identity')
     if not contract.valid_local_identity(adapter) or contract.process_identity(adapter['pid'])!=adapter:raise contract.Hold('exact calibrated replacement adapter absent/changed')
-    admission=lateral_capability.validate_proof(release.get('lateral_calibration_proof',{}),route['scene_instance_id'],config_sha,adapter)
+    admission=lateral_capability.validate_proof(release.get('lateral_calibration_proof',{}),route['scene_instance_id'],config_sha,adapter,command_endpoint=sim_endpoint,
+        namespace_binding={key:release.get(key) for key in ['network_namespace','controller_pid_namespace']})
     lateral_capability.validate_model_evidence(oracle_manifest['motion_model'],admission)
     return admission
 

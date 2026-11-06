@@ -1,4 +1,8 @@
-# Current source revision v15 / protocol v5 — ROOT HOLD
+# Current source revision v16 / protocol v5 — ROOT HOLD
+
+Calibration admission selects one complete reviewed source family: the original loopback pair or the private-network v4r2 pair on the attested simulation endpoint. Every actual case, source artifact, trace, result, measurement, current adapter identity and namespace must agree with that family. Original evidence is preserved; it cannot be relabelled for a new adapter. Parent and child pass the same validated endpoint and namespaces to proof validation. Motion guards and payload remain unchanged. A new actual private pair, measurements and Root model selection are still required. No full-map or native acceptance.
+
+# Historical source revision v15 / protocol v5 — ROOT HOLD
 
 An explicit SIM host endpoint option permits only Root-bound 192.168.1.219:7447, with the original scene attestation and UE process identity. The default remains loopback. Parent, frozen child admission, READY, every command and cleanup zero must agree on the endpoint; the child also verifies its frozen contract. Timing, full-body checks, source freshness, ownership audit and control behavior remain. A new private network and new sensor identities require separate Root releases and runtime validation. No full-map or native acceptance.
 

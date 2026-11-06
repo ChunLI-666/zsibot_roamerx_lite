@@ -1,0 +1,64 @@
+{
+  "base_manifest_sha256": "dde09a666536d8bf4225844e809c379b515f72d06cdf474923c5e91e18959794",
+  "changed_runtime": [
+    "full_scene_mapping.py",
+    "mapping_lateral_relay.py",
+    "lateral_capability.py"
+  ],
+  "other_four_runtime_exact": true,
+  "unchanged_function_class_AST": {
+    "full_scene_mapping.py": [
+      "source_files",
+      "BoundedCallbacks",
+      "atomic_json",
+      "template",
+      "OwnedRelay",
+      "finalize_owned_relay",
+      "execute",
+      "forward_terminal_leg",
+      "prearm_requalification_enabled",
+      "PrearmImuQualification",
+      "qualify_prearm_zero",
+      "main"
+    ],
+    "mapping_lateral_relay.py": [
+      "identity",
+      "validated_axes",
+      "run_loop",
+      "main"
+    ],
+    "lateral_capability.py": [
+      "AdmissionError",
+      "require",
+      "sha",
+      "read",
+      "finite",
+      "validate_model_evidence",
+      "fine_profile",
+      "fine_profile_from_release",
+      "fine_admission_profile"
+    ]
+  },
+  "parent_and_child_callsite_inverse_bytes_exact15": true,
+  "old_test_files_exact15": [
+    "test_lifecycle_v7.py",
+    "test_pulse_event_binding_v14.py",
+    "test_v5_delta.py",
+    "test_forward_along_v8.py",
+    "test_forward_terminal_v9.py",
+    "test_fine_forward_v10.py",
+    "test_fine_pulses_v13.py",
+    "test_sim_endpoint_v15.py",
+    "test_startup_v6.py",
+    "test_prearm_v12.py",
+    "test_v4_core.py",
+    "test_passive_relay_v11.py"
+  ],
+  "old8_constant_exact": true,
+  "new8_constant_equals_final_reviewed_v4r2": true,
+  "private_calibration_source_manifest_sha256": "548a22d29650aed6b93f8f85d0c305bedc48952a2f9c9151c8d0c915858bd1c9",
+  "private_calibration_source_review_sha256": "d9be0d3b431cd991278feeaf243aff4b754686c1116ca4edcee38b1bc1b791f4",
+  "private_actual_pair_not_yet_available": true,
+  "old_proof_case_or_adapter_modified": false,
+  "canonical_modified": false
+}
