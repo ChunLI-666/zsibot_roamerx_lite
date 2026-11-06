@@ -1,0 +1,20 @@
+{
+  "scope": "SIM_IMU_ADAPTER4744_FAULT_RECOVERY_ONLY",
+  "allow_execute": false,
+  "release_id": null,
+  "plan_sha256": "d4acc92dc9e81e69d91938f83712a21a1efa4964bf06fb9da914b61195aaefa8",
+  "driver_sha256": "065b9bb3a565cdaa4b8af859cf482108d3e5e2934d38f55b29c98244e9810027",
+  "output_directory": null,
+  "adapter_release_path": null,
+  "adapter_release_sha256": null,
+  "source_review_path": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_imu_monotonic_gate_independent_review_solmax_v1/review.json",
+  "source_review_sha256": "4c074816a78457a1e6f6e6eaa95208c53a599364bb3070fe048298a606af2717",
+  "host_preflight": {
+    "mode": "root_external_host_attestation",
+    "path": null,
+    "sha256": null,
+    "max_age_sec": 30.0
+  },
+  "sole_adapter_replacement_root_approved": false,
+  "no_Nav_native_command_recorder_active_root_verified": false
+}

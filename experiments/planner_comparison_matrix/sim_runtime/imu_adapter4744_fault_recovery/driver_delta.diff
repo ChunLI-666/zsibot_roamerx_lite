@@ -1,0 +1,57 @@
+--- reviewed_old60
++++ recovery4744
+@@ -1,5 +1,5 @@
+ #!/usr/bin/python3
+-"""Default-HOLD exact old60 SIGINT then one new source start; no ROS client."""
++"""Default-HOLD exact faulted4744 SIGINT then one new source start; no ROS client."""
+ import argparse
+ import hashlib
+ import json
+@@ -11,7 +11,7 @@
+ import time
+ 
+ HERE=Path(__file__).resolve().parent
+-SCOPE='SIM_IMU_ADAPTER60_REPLACEMENT_ONLY'
++SCOPE='SIM_IMU_ADAPTER4744_FAULT_RECOVERY_ONLY'
+ KEYS=('pid','starttime_ticks','cmdline_sha256','argv','boot_id')
+ SOURCE_NAMES={'sim_imu_adapter.py','adapter_with_gate.py','imu_gate.py','matrix_sensor_contract.py'}
+ 
+@@ -78,12 +78,12 @@
+         or plan['pid_namespace']!=os.readlink('/proc/self/ns/pid') or plan['network_namespace']!=os.readlink('/proc/self/ns/net')
+         or any(os.environ.get(k)!=v for k,v in plan['expected_environment'].items())):raise Hold('same Jazzy container185 identity/env differs')
+     old=plan['old_adapter']
+-    if old['pid']!=60 or old['starttime_ticks']!=4460360 or old['cmdline_sha256']!='2182d0da6ae7cd136dfddd47ae1a80e8d514795d2561cd08a796d2eea46705e9':raise Hold('only original exact60 eligible')
++    if old['pid']!=4744 or old['starttime_ticks']!=10531107 or old['cmdline_sha256']!='e85b4fe64d9bc37e109104e834b7aeafb76db87e7726970ff14bd987c100de28':raise Hold('only original exact4744 eligible')
+     if set(plan['retained_sources'])!={'24','61'} or plan['scene_instance_id']['pid']!=1172665 or plan['scene_instance_id']['starttime_ticks']!=9427026:raise Hold('retained sources/newUE differs')
+     if plan['old_exit_timeout_sec']!=15. or plan['new_identity_timeout_sec']!=5.:raise Hold('fixed bounded operation required')
+     if sha(plan['runtime_config'])!=plan['runtime_config_sha256'] or plan['runtime_config_sha256']!='38aab54b3a6ca49570feaaa8e983f4f9bc9ee197060066b186478a70f92ea023':raise Hold('original config changed')
+     for name,digest in plan['old_sources_sha256'].items():
+-        if sha(Path(old['argv'][1]).parent/name)!=digest:raise Hold('old rollback source bytes changed')
++        if sha(Path(old['argv'][2]).parent/name)!=digest:raise Hold('old rollback source bytes changed')
+     if set(plan['new_sources_sha256'])!=SOURCE_NAMES:raise Hold('exact four new source files required')
+     for name,digest in plan['new_sources_sha256'].items():
+         if sha(Path(plan['source_directory'])/name)!=digest:raise Hold('reviewed new source differs')
+@@ -107,18 +107,18 @@
+     try:
+         oldfd=os.pidfd_open(plan['old_adapter']['pid'])
+         exact(plan['old_adapter']);retained(plan);host_proof(plan,release)
+-        claim(release_path.parent/(release['release_id']+'.replace_adapter60_once.json'),dict(plan_sha256=sha(plan_path),release_sha256=sha(release_path),claimed_unix_ns=time.time_ns()))
++        claim(release_path.parent/(release['release_id']+'.replace_adapter4744_once.json'),dict(plan_sha256=sha(plan_path),release_sha256=sha(release_path),claimed_unix_ns=time.time_ns()))
+         write(output/'operation_inputs.json',dict(plan=plan,release=release))
+-        # Sole signal in this program: retained exact original60 kernel object.
+-        if select.select([oldfd],[],[],0)[0]:raise Hold('old60 exited before normal signal; fresh root plan required')
++        # Sole signal in this program: retained exact original4744 kernel object.
++        if select.select([oldfd],[],[],0)[0]:raise Hold('old4744 exited before normal signal; fresh root plan required')
+         exact(plan['old_adapter']);signal.pidfd_send_signal(oldfd,signal.SIGINT);result['old_sigint_sent']=True
+         until=time.monotonic()+15.
+         while not select.select([oldfd],[],[],0)[0]:
+             retained(plan)
+-            if time.monotonic()>=until:raise Hold('old60 did not exit after one normal SIGINT; no escalation/start')
++            if time.monotonic()>=until:raise Hold('old4744 did not exit after one normal SIGINT; no escalation/start')
+             time.sleep(.02)
+         state=retirement(plan['old_adapter'])
+-        if state not in ('Z','ABSENT'):raise Hold('old60 not confirmed Z/absent')
++        if state not in ('Z','ABSENT'):raise Hold('old4744 not confirmed Z/absent')
+         result['old_retired_state']=state;retained(plan);host_proof(plan,release)
+         if sha(plan['runtime_config'])!=plan['runtime_config_sha256']:raise Hold('config changed during replacement')
+         for name,digest in plan['new_sources_sha256'].items():
