@@ -1,3 +1,7 @@
+# Current source revision v7 / protocol v5 — ROOT HOLD
+
+The live checkpoint is now a complete `runtime_ready` receipt in the bounded events stream and MCAP; enqueue does not imply durable evidence. Writer close/error/drop checks remain authoritative. Every health entry services the existing bounded executor before reading the original sensor stamps and rechecks stop requests. All original age, renewal, collision, model, ownership and stop gates remain. Runtime bytes match source revision7 freeze; only the canonical unit fixture locator additionally finds its historical baseline through workspace `analysis_outputs`.
+
 # Mapping acquisition protocol v5 — source revision v6 / ROOT HOLD
 
 Current implementation is selected by `CURRENT_SOURCE.json`. Revision v6 keeps the v5 scope, calibration capability, full-body geometry, source freshness, ownership and stop thresholds. It services the existing callback executor while waiting for the owned relay READY and latches fatal IMU input without throwing from its callback, allowing independent strict GT cleanup. See `READOUT.txt` and `test_startup_v6.py`.

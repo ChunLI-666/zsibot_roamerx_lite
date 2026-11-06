@@ -318,6 +318,8 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
         auditor=threading.Thread(target=audit_loop,name='mapping-owner-inventory',daemon=True);auditor.start()
         def health():
             nonlocal cloud_cache,clock_pair
+            callbacks.spin()
+            if stopped:raise InterruptedError('mapping stop requested')
             now_ns,steady=time.time_ns(),time.monotonic()
             clock_pair=contract.check_clock(clock_pair,now_ns,steady)
             if steady-started>route['max_runtime_sec']-contract.CLEANUP_RESERVE:raise contract.Hold('fixed acquisition runtime budget expired; cleanup reserve begins')
@@ -447,7 +449,7 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
         truth,yaw=stable(contract.START_STABLE,max(0.,deadline-time.monotonic()))
         anchor=route['start_anchor_truth']
         if math.hypot(truth['xyz'][0]-anchor[0],truth['xyz'][1]-anchor[1])>.1 or abs(contract.wrap(yaw-anchor[2]))>.08:raise contract.Hold('fresh truth start differs from frozen root anchor')
-        atomic_json(output/'runtime_ready.json',dict(scope=contract.SCOPE,mode=contract.MODE,run_id=release['release_id'],
+        emit('runtime_ready',receipt=dict(scope=contract.SCOPE,mode=contract.MODE,run_id=release['release_id'],
           owner_process_identity=own,relay_identity=relay.identity,relay_source_sha256=relay.source_sha256,
           root_release_sha256=release_sha256,route_sha256=release['route_sha256'],oracle_sha256=release['oracle_sha256'],
           sources_sha256=release['sources_sha256'],lateral_admission=lateral_admission,output_directory=str(output),truth=truth,start_stable_seconds=contract.START_STABLE,

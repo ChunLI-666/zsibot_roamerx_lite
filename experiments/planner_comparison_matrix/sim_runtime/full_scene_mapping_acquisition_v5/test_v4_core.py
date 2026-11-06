@@ -11,7 +11,10 @@ import mapping_lateral_relay as relay
 import lateral_capability as proof
 
 HERE=Path(__file__).resolve().parent
-BASE=next(p for p in HERE.parents if p.name=='planner_comparison_20261105')
+_fixture_roots=[parent for parent in HERE.parents if parent.name=='planner_comparison_20261105']
+_fixture_roots.extend(parent/'analysis_outputs/planner_comparison_20261105' for parent in HERE.parents)
+BASE=next((candidate for candidate in _fixture_roots if candidate.is_dir()),None)
+if BASE is None:raise RuntimeError('Frozen workspace analysis_outputs/planner_comparison_20261105 fixtures required')
 
 class Clock:
     def __init__(self):self.ns=10_000_000_000;self.sleeps=[]
