@@ -1,0 +1,548 @@
+{
+  "no_actual_ROS_Node_Popen_socket_SSH": true,
+  "scenarios": [
+    {
+      "scenario": "none",
+      "acceptance_write_failed": false,
+      "tool_indices": [
+        0
+      ],
+      "planned_files": [
+        "probe_0.planned.json"
+      ],
+      "close_events": [
+        "observer_closed",
+        "shutdown",
+        "closed"
+      ],
+      "result": {
+        "scope": "MAPPING_SEMANTIC_LATERAL_CANARY_ONLY",
+        "state": "HOLD_DIAGNOSTIC_FAILED",
+        "source_signals_sent": 0,
+        "host_signals_sent": 0,
+        "probes": [
+          {
+            "index": 0,
+            "state": "FAILED_NO_MEASURABLE_LATERAL_OR_STOP",
+            "gt_original_stamp_samples": 20,
+            "policy_lateral": 0.2,
+            "body_displacement_xy_m": [
+              0.0,
+              0.0
+            ],
+            "body_vy_median_mps": 0.0,
+            "body_vy_p10_mps": 0.0,
+            "body_vy_p90_mps": 0.0,
+            "first_motion_send_interval_ns": [
+              101000000000,
+              101000000001
+            ],
+            "first_neutral_send_interval_ns": [
+              102000000000,
+              102000000001
+            ],
+            "gt_first_stopped_header_ns": 102010000000,
+            "gt_stop_continuity_error": null,
+            "gt_stopped_after_neutral_send_sec_interval": null,
+            "timing_basis": "Original GT header deltas and midpoint original body yaw. Send syscall interval is not simulator actuation time.",
+            "stop_definition": "linear3Dnorm<=.03m/s, angular3Dnorm<=.05rad/s, stable position/yaw and advancing original GT >=.3s",
+            "hard_plant_guarantee": false,
+            "scope": "Only these two one-second probes; no general motion model inferred."
+          }
+        ],
+        "raw_cdr_reencoded": false,
+        "original_truth_anchor": [
+          0.073,
+          0.0,
+          0.0
+        ],
+        "error_type": "Hold",
+        "error": "semantic probe lacks correct-direction measurable GT response and strict stop",
+        "failure_stop_and_tail_verified": true,
+        "observed_topic_counts": {
+          "/odom": 1,
+          "/front_lidar": 1,
+          "/front_lidar/imu": 1,
+          "/front_camera/image/compressed": 1,
+          "/camera/front/image/compressed": 1,
+          "/camera/front/camera_info": 1
+        },
+        "recorder_exited": true,
+        "recorder_sigint_sent": true,
+        "bag_audit": {
+          "complete": true
+        },
+        "diagnostic_passed": false,
+        "finished_unix_ns": 105400000000,
+        "scene_identity_basis": "root external host-preflight, not continuous host monitoring",
+        "source_package_sha256": {
+          "lateral_once.py": "a0f287cbc3f7ea92962b842e06129bcf90422e33c546d6ab3ad5967370ceeb38",
+          "lateral_contract.py": "00476be915160339c2e2dac77582638559746e2dd1db1acf2ad2decb845cb8b6",
+          "semantic_tool_timed.py": "4a1fa7cb59edc91d230a53d76fe35de2ff467ecf5c59a475ea52dddd975bf968",
+          "host_preflight.py": "749da4569db74798f69a47b8cbe31af1d656f99013dea23be8911cdd1ac3dfb7",
+          "calibration_observer.py": "cb0f772e11472cdc6b8fcca3f250bd18731852b8d7be6fc306f7e195204ba7a1",
+          "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+          "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+          "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792"
+        },
+        "no_motion_model_generalization": true
+      }
+    },
+    {
+      "scenario": "wrong",
+      "acceptance_write_failed": false,
+      "tool_indices": [
+        0
+      ],
+      "planned_files": [
+        "probe_0.planned.json"
+      ],
+      "close_events": [
+        "observer_closed",
+        "shutdown",
+        "closed"
+      ],
+      "result": {
+        "scope": "MAPPING_SEMANTIC_LATERAL_CANARY_ONLY",
+        "state": "HOLD_DIAGNOSTIC_FAILED",
+        "source_signals_sent": 0,
+        "host_signals_sent": 0,
+        "probes": [
+          {
+            "index": 0,
+            "state": "FAILED_NO_MEASURABLE_LATERAL_OR_STOP",
+            "gt_original_stamp_samples": 20,
+            "policy_lateral": 0.2,
+            "body_displacement_xy_m": [
+              0.0,
+              -0.19
+            ],
+            "body_vy_median_mps": -0.19999999999999998,
+            "body_vy_p10_mps": -0.20000000000000018,
+            "body_vy_p90_mps": -0.1999999999999999,
+            "first_motion_send_interval_ns": [
+              101000000000,
+              101000000001
+            ],
+            "first_neutral_send_interval_ns": [
+              102000000000,
+              102000000001
+            ],
+            "gt_first_stopped_header_ns": 102010000000,
+            "gt_stop_continuity_error": null,
+            "gt_stopped_after_neutral_send_sec_interval": null,
+            "timing_basis": "Original GT header deltas and midpoint original body yaw. Send syscall interval is not simulator actuation time.",
+            "stop_definition": "linear3Dnorm<=.03m/s, angular3Dnorm<=.05rad/s, stable position/yaw and advancing original GT >=.3s",
+            "hard_plant_guarantee": false,
+            "scope": "Only these two one-second probes; no general motion model inferred."
+          }
+        ],
+        "raw_cdr_reencoded": false,
+        "original_truth_anchor": [
+          0.073,
+          0.0,
+          0.0
+        ],
+        "error_type": "Hold",
+        "error": "semantic probe lacks correct-direction measurable GT response and strict stop",
+        "failure_stop_and_tail_verified": true,
+        "observed_topic_counts": {
+          "/odom": 1,
+          "/front_lidar": 1,
+          "/front_lidar/imu": 1,
+          "/front_camera/image/compressed": 1,
+          "/camera/front/image/compressed": 1,
+          "/camera/front/camera_info": 1
+        },
+        "recorder_exited": true,
+        "recorder_sigint_sent": true,
+        "bag_audit": {
+          "complete": true
+        },
+        "diagnostic_passed": false,
+        "finished_unix_ns": 105400000000,
+        "scene_identity_basis": "root external host-preflight, not continuous host monitoring",
+        "source_package_sha256": {
+          "lateral_once.py": "a0f287cbc3f7ea92962b842e06129bcf90422e33c546d6ab3ad5967370ceeb38",
+          "lateral_contract.py": "00476be915160339c2e2dac77582638559746e2dd1db1acf2ad2decb845cb8b6",
+          "semantic_tool_timed.py": "4a1fa7cb59edc91d230a53d76fe35de2ff467ecf5c59a475ea52dddd975bf968",
+          "host_preflight.py": "749da4569db74798f69a47b8cbe31af1d656f99013dea23be8911cdd1ac3dfb7",
+          "calibration_observer.py": "cb0f772e11472cdc6b8fcca3f250bd18731852b8d7be6fc306f7e195204ba7a1",
+          "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+          "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+          "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792"
+        },
+        "no_motion_model_generalization": true
+      }
+    },
+    {
+      "scenario": "no_stop",
+      "acceptance_write_failed": false,
+      "tool_indices": [
+        0
+      ],
+      "planned_files": [
+        "probe_0.planned.json"
+      ],
+      "close_events": [
+        "observer_closed",
+        "shutdown",
+        "closed"
+      ],
+      "result": {
+        "scope": "MAPPING_SEMANTIC_LATERAL_CANARY_ONLY",
+        "state": "HOLD_DIAGNOSTIC_FAILED",
+        "source_signals_sent": 0,
+        "host_signals_sent": 0,
+        "probes": [
+          {
+            "index": 0,
+            "state": "FAILED_NO_MEASURABLE_LATERAL_OR_STOP",
+            "gt_original_stamp_samples": 20,
+            "policy_lateral": 0.2,
+            "body_displacement_xy_m": [
+              0.0,
+              0.19
+            ],
+            "body_vy_median_mps": 0.19999999999999998,
+            "body_vy_p10_mps": 0.19999999999999962,
+            "body_vy_p90_mps": 0.20000000000000018,
+            "first_motion_send_interval_ns": [
+              101000000000,
+              101000000001
+            ],
+            "first_neutral_send_interval_ns": [
+              102000000000,
+              102000000001
+            ],
+            "gt_first_stopped_header_ns": null,
+            "gt_stop_continuity_error": null,
+            "gt_stopped_after_neutral_send_sec_interval": null,
+            "timing_basis": "Original GT header deltas and midpoint original body yaw. Send syscall interval is not simulator actuation time.",
+            "stop_definition": "linear3Dnorm<=.03m/s, angular3Dnorm<=.05rad/s, stable position/yaw and advancing original GT >=.3s",
+            "hard_plant_guarantee": false,
+            "scope": "Only these two one-second probes; no general motion model inferred."
+          }
+        ],
+        "raw_cdr_reencoded": false,
+        "original_truth_anchor": [
+          0.073,
+          0.0,
+          0.0
+        ],
+        "error_type": "Hold",
+        "error": "semantic probe lacks correct-direction measurable GT response and strict stop",
+        "failure_stop_and_tail_verified": true,
+        "observed_topic_counts": {
+          "/odom": 1,
+          "/front_lidar": 1,
+          "/front_lidar/imu": 1,
+          "/front_camera/image/compressed": 1,
+          "/camera/front/image/compressed": 1,
+          "/camera/front/camera_info": 1
+        },
+        "recorder_exited": true,
+        "recorder_sigint_sent": true,
+        "bag_audit": {
+          "complete": true
+        },
+        "diagnostic_passed": false,
+        "finished_unix_ns": 105400000000,
+        "scene_identity_basis": "root external host-preflight, not continuous host monitoring",
+        "source_package_sha256": {
+          "lateral_once.py": "a0f287cbc3f7ea92962b842e06129bcf90422e33c546d6ab3ad5967370ceeb38",
+          "lateral_contract.py": "00476be915160339c2e2dac77582638559746e2dd1db1acf2ad2decb845cb8b6",
+          "semantic_tool_timed.py": "4a1fa7cb59edc91d230a53d76fe35de2ff467ecf5c59a475ea52dddd975bf968",
+          "host_preflight.py": "749da4569db74798f69a47b8cbe31af1d656f99013dea23be8911cdd1ac3dfb7",
+          "calibration_observer.py": "cb0f772e11472cdc6b8fcca3f250bd18731852b8d7be6fc306f7e195204ba7a1",
+          "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+          "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+          "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792"
+        },
+        "no_motion_model_generalization": true
+      }
+    },
+    {
+      "scenario": "illegal",
+      "acceptance_write_failed": false,
+      "tool_indices": [
+        0
+      ],
+      "planned_files": [
+        "probe_0.planned.json"
+      ],
+      "close_events": [
+        "observer_closed",
+        "shutdown",
+        "closed"
+      ],
+      "result": {
+        "scope": "MAPPING_SEMANTIC_LATERAL_CANARY_ONLY",
+        "state": "HOLD_DIAGNOSTIC_FAILED",
+        "source_signals_sent": 0,
+        "host_signals_sent": 0,
+        "probes": [
+          {
+            "index": 0,
+            "state": "FAILED_METRICS",
+            "error": "only exact semantic version1/walk forward0/yaw0 and selected lateral sign or zero"
+          }
+        ],
+        "raw_cdr_reencoded": false,
+        "original_truth_anchor": [
+          0.073,
+          0.0,
+          0.0
+        ],
+        "error_type": "Hold",
+        "error": "semantic probe lacks correct-direction measurable GT response and strict stop",
+        "failure_stop_and_tail_verified": true,
+        "observed_topic_counts": {
+          "/odom": 1,
+          "/front_lidar": 1,
+          "/front_lidar/imu": 1,
+          "/front_camera/image/compressed": 1,
+          "/camera/front/image/compressed": 1,
+          "/camera/front/camera_info": 1
+        },
+        "recorder_exited": true,
+        "recorder_sigint_sent": true,
+        "bag_audit": {
+          "complete": true
+        },
+        "diagnostic_passed": false,
+        "finished_unix_ns": 105400000000,
+        "scene_identity_basis": "root external host-preflight, not continuous host monitoring",
+        "source_package_sha256": {
+          "lateral_once.py": "a0f287cbc3f7ea92962b842e06129bcf90422e33c546d6ab3ad5967370ceeb38",
+          "lateral_contract.py": "00476be915160339c2e2dac77582638559746e2dd1db1acf2ad2decb845cb8b6",
+          "semantic_tool_timed.py": "4a1fa7cb59edc91d230a53d76fe35de2ff467ecf5c59a475ea52dddd975bf968",
+          "host_preflight.py": "749da4569db74798f69a47b8cbe31af1d656f99013dea23be8911cdd1ac3dfb7",
+          "calibration_observer.py": "cb0f772e11472cdc6b8fcca3f250bd18731852b8d7be6fc306f7e195204ba7a1",
+          "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+          "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+          "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792"
+        },
+        "no_motion_model_generalization": true
+      }
+    },
+    {
+      "scenario": "correct",
+      "acceptance_write_failed": true,
+      "tool_indices": [
+        0
+      ],
+      "planned_files": [
+        "probe_0.planned.json"
+      ],
+      "close_events": [
+        "observer_closed",
+        "shutdown",
+        "closed"
+      ],
+      "result": {
+        "scope": "MAPPING_SEMANTIC_LATERAL_CANARY_ONLY",
+        "state": "HOLD_DIAGNOSTIC_FAILED",
+        "source_signals_sent": 0,
+        "host_signals_sent": 0,
+        "probes": [
+          {
+            "index": 0,
+            "state": "FAILED_METRICS",
+            "error": "acceptance evidence write failed: fixture acceptance disk failure",
+            "measurement": {
+              "index": 0,
+              "state": "MEASURED_SHORT_PROBE",
+              "gt_original_stamp_samples": 20,
+              "policy_lateral": 0.2,
+              "body_displacement_xy_m": [
+                0.0,
+                0.19
+              ],
+              "body_vy_median_mps": 0.19999999999999998,
+              "body_vy_p10_mps": 0.19999999999999962,
+              "body_vy_p90_mps": 0.20000000000000018,
+              "first_motion_send_interval_ns": [
+                101000000000,
+                101000000001
+              ],
+              "first_neutral_send_interval_ns": [
+                102000000000,
+                102000000001
+              ],
+              "gt_first_stopped_header_ns": 102010000000,
+              "gt_stop_continuity_error": null,
+              "gt_stopped_after_neutral_send_sec_interval": [
+                0.009999999,
+                0.01
+              ],
+              "timing_basis": "Original GT header deltas and midpoint original body yaw. Send syscall interval is not simulator actuation time.",
+              "stop_definition": "linear3Dnorm<=.03m/s, angular3Dnorm<=.05rad/s, stable position/yaw and advancing original GT >=.3s",
+              "hard_plant_guarantee": false,
+              "scope": "Only these two one-second probes; no general motion model inferred."
+            }
+          }
+        ],
+        "raw_cdr_reencoded": false,
+        "original_truth_anchor": [
+          0.073,
+          0.0,
+          0.0
+        ],
+        "error_type": "Hold",
+        "error": "semantic probe lacks correct-direction measurable GT response and strict stop",
+        "failure_stop_and_tail_verified": true,
+        "observed_topic_counts": {
+          "/odom": 1,
+          "/front_lidar": 1,
+          "/front_lidar/imu": 1,
+          "/front_camera/image/compressed": 1,
+          "/camera/front/image/compressed": 1,
+          "/camera/front/camera_info": 1
+        },
+        "recorder_exited": true,
+        "recorder_sigint_sent": true,
+        "bag_audit": {
+          "complete": true
+        },
+        "diagnostic_passed": false,
+        "finished_unix_ns": 105400000000,
+        "scene_identity_basis": "root external host-preflight, not continuous host monitoring",
+        "source_package_sha256": {
+          "lateral_once.py": "a0f287cbc3f7ea92962b842e06129bcf90422e33c546d6ab3ad5967370ceeb38",
+          "lateral_contract.py": "00476be915160339c2e2dac77582638559746e2dd1db1acf2ad2decb845cb8b6",
+          "semantic_tool_timed.py": "4a1fa7cb59edc91d230a53d76fe35de2ff467ecf5c59a475ea52dddd975bf968",
+          "host_preflight.py": "749da4569db74798f69a47b8cbe31af1d656f99013dea23be8911cdd1ac3dfb7",
+          "calibration_observer.py": "cb0f772e11472cdc6b8fcca3f250bd18731852b8d7be6fc306f7e195204ba7a1",
+          "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+          "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+          "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792"
+        },
+        "no_motion_model_generalization": true
+      }
+    },
+    {
+      "scenario": "correct",
+      "acceptance_write_failed": false,
+      "tool_indices": [
+        0,
+        1
+      ],
+      "planned_files": [
+        "probe_0.planned.json",
+        "probe_1.planned.json"
+      ],
+      "close_events": [
+        "observer_closed",
+        "shutdown",
+        "closed"
+      ],
+      "result": {
+        "scope": "MAPPING_SEMANTIC_LATERAL_CANARY_ONLY",
+        "state": "COMPLETE_PROBES_STOPPED_PLUS5S_RAW_TAIL",
+        "source_signals_sent": 0,
+        "host_signals_sent": 0,
+        "probes": [
+          {
+            "index": 0,
+            "state": "MEASURED_SHORT_PROBE",
+            "gt_original_stamp_samples": 20,
+            "policy_lateral": 0.2,
+            "body_displacement_xy_m": [
+              0.0,
+              0.19
+            ],
+            "body_vy_median_mps": 0.19999999999999998,
+            "body_vy_p10_mps": 0.19999999999999962,
+            "body_vy_p90_mps": 0.20000000000000018,
+            "first_motion_send_interval_ns": [
+              101000000000,
+              101000000001
+            ],
+            "first_neutral_send_interval_ns": [
+              102000000000,
+              102000000001
+            ],
+            "gt_first_stopped_header_ns": 102010000000,
+            "gt_stop_continuity_error": null,
+            "gt_stopped_after_neutral_send_sec_interval": [
+              0.009999999,
+              0.01
+            ],
+            "timing_basis": "Original GT header deltas and midpoint original body yaw. Send syscall interval is not simulator actuation time.",
+            "stop_definition": "linear3Dnorm<=.03m/s, angular3Dnorm<=.05rad/s, stable position/yaw and advancing original GT >=.3s",
+            "hard_plant_guarantee": false,
+            "scope": "Only these two one-second probes; no general motion model inferred."
+          },
+          {
+            "index": 1,
+            "state": "MEASURED_SHORT_PROBE",
+            "gt_original_stamp_samples": 20,
+            "policy_lateral": -0.2,
+            "body_displacement_xy_m": [
+              0.0,
+              -0.19
+            ],
+            "body_vy_median_mps": -0.20000000000000018,
+            "body_vy_p10_mps": -0.20000000000000018,
+            "body_vy_p90_mps": -0.19999999999999962,
+            "first_motion_send_interval_ns": [
+              106000000000,
+              106000000001
+            ],
+            "first_neutral_send_interval_ns": [
+              107000000000,
+              107000000001
+            ],
+            "gt_first_stopped_header_ns": 107010000000,
+            "gt_stop_continuity_error": null,
+            "gt_stopped_after_neutral_send_sec_interval": [
+              0.009999999,
+              0.01
+            ],
+            "timing_basis": "Original GT header deltas and midpoint original body yaw. Send syscall interval is not simulator actuation time.",
+            "stop_definition": "linear3Dnorm<=.03m/s, angular3Dnorm<=.05rad/s, stable position/yaw and advancing original GT >=.3s",
+            "hard_plant_guarantee": false,
+            "scope": "Only these two one-second probes; no general motion model inferred."
+          }
+        ],
+        "raw_cdr_reencoded": false,
+        "original_truth_anchor": [
+          0.073,
+          0.0,
+          0.0
+        ],
+        "observed_topic_counts": {
+          "/odom": 1,
+          "/front_lidar": 1,
+          "/front_lidar/imu": 1,
+          "/front_camera/image/compressed": 1,
+          "/camera/front/image/compressed": 1,
+          "/camera/front/camera_info": 1
+        },
+        "recorder_exited": true,
+        "recorder_sigint_sent": true,
+        "bag_audit": {
+          "complete": true
+        },
+        "diagnostic_passed": true,
+        "finished_unix_ns": 108660000000,
+        "scene_identity_basis": "root external host-preflight, not continuous host monitoring",
+        "source_package_sha256": {
+          "lateral_once.py": "a0f287cbc3f7ea92962b842e06129bcf90422e33c546d6ab3ad5967370ceeb38",
+          "lateral_contract.py": "00476be915160339c2e2dac77582638559746e2dd1db1acf2ad2decb845cb8b6",
+          "semantic_tool_timed.py": "4a1fa7cb59edc91d230a53d76fe35de2ff467ecf5c59a475ea52dddd975bf968",
+          "host_preflight.py": "749da4569db74798f69a47b8cbe31af1d656f99013dea23be8911cdd1ac3dfb7",
+          "calibration_observer.py": "cb0f772e11472cdc6b8fcca3f250bd18731852b8d7be6fc306f7e195204ba7a1",
+          "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+          "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+          "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792"
+        },
+        "no_motion_model_generalization": true
+      }
+    }
+  ],
+  "inherited_resource_warnings": [
+    "unclosed file <_io.BufferedReader "
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "scope": "SIM_IMU_ADAPTER60_REPLACEMENT_ONLY",
+  "state": "FROZEN_ROOT_HOLD_PREPARATION",
+  "driver_sha256": "065b9bb3a565cdaa4b8af859cf482108d3e5e2934d38f55b29c98244e9810027",
+  "files": {
+    "README.md": {
+      "sha256": "b9756f32bcc08d2ceead7000f0f7dca1add30e87213de4288d95d473b7c0366a",
+      "bytes": 3013
+    },
+    "adapter_release.HOLD.json": {
+      "sha256": "94bb534033dc528263f5d6f3658718262862e7dd0c03933e8fe06242487b9d13",
+      "bytes": 3375
+    },
+    "pure_mock_checks_v1.log": {
+      "sha256": "7682d9a12887abfad62528f746559681e16a74a6d1a7144cd07d3ed39e9f9e39",
+      "bytes": 524
+    },
+    "readiness_requirements.json": {
+      "sha256": "08827dc7f34262571f1a9a3e0bc29558bef97458452a27219c1c7944401387d9",
+      "bytes": 3037
+    },
+    "replace_adapter60.py": {
+      "sha256": "065b9bb3a565cdaa4b8af859cf482108d3e5e2934d38f55b29c98244e9810027",
+      "bytes": 11888
+    },
+    "replacement_plan.HOLD.json": {
+      "sha256": "d4acc92dc9e81e69d91938f83712a21a1efa4964bf06fb9da914b61195aaefa8",
+      "bytes": 12446
+    },
+    "root_replacement_release.HOLD.json": {
+      "sha256": "22efc2324694fd8d12a36b69aea1cb86a45d4cbd155aaea7bbe9a0080b6e32c0",
+      "bytes": 878
+    },
+    "test_replace_plan.py": {
+      "sha256": "897e861db9cff9886853d7d2dab81ca50b665ea7fd02d795aaa29a39205e2bf8",
+      "bytes": 5720
+    }
+  },
+  "tests": {
+    "unittest_methods": 4,
+    "mock_lifecycle_modes": 7,
+    "no_real_signal_Popen_Node_ROS_or_standin": true,
+    "all_pass": true
+  },
+  "runtime_execution_location": "existing Jazzy container PID namespace4026532746, UID1000, ROS_DOMAIN185; signal target container60, never host31984",
+  "old_signal": "one retained pidfd SIGINT only exact original60",
+  "new_start": "one Popen after old pidfd exit and Z/absent, no retry/rollback",
+  "ready_after_start": false,
+  "root_post_start_actual_graph_and_raw_data_readiness_required": true,
+  "hash_compatibility": "standard sha256 streaming, no hashlib.file_digest dependency",
+  "canonical_or_source_changed": false,
+  "codacy": "MCP unavailable; no install/pass claimed"
+}

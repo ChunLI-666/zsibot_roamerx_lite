@@ -1,0 +1,22 @@
+{
+  "cal_v2": {
+    "lateral_once.py": "d9544d7ea8a11a10c5641c4473ab73b1bed759009f3aaa791117d34df223b1e2",
+    "lateral_contract.py": "851bf34337151048a581d625553a210c1331430ba0abe0211f1d906b2baf124d",
+    "host_preflight.py": "40bbe7b032c0eb3c7a11b618732645bdeccde5c3c9072d8f020b45e5c3f4b447",
+    "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+    "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792"
+  },
+  "backend": {
+    "semantic_tool_timed.py": "4a1fa7cb59edc91d230a53d76fe35de2ff467ecf5c59a475ea52dddd975bf968",
+    "source_manifest.json": "8597f5226bacde2863f39e2b2e00c2606aa9d8c10a908ac1f978d85fe750bd75",
+    "verification.json": "e77eb8dc309c92ae9de5ccaac947b2edfccb69064a99c2b426eb16ce9eb0c7f4"
+  },
+  "imu": {
+    "source_manifest_v1.json": "f16cd6dadef780768b5df0a8a6ef49aa234011423858ede32aaeec8a9b90edba",
+    "calibration_observer.py": "c1713ef3e8190b8d903087085365efad76bd12c8615e47336c5d2db9c1db86b9",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "calibration_contract_frozen.py": "851bf34337151048a581d625553a210c1331430ba0abe0211f1d906b2baf124d",
+    "fixtures_v1.log": "274d00c3d0ccae9d9198251e3caffada359b9d34a4e22c7c881b13c607594839"
+  },
+  "no_runtime_actions": true
+}

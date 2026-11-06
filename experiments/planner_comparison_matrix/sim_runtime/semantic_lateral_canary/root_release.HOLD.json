@@ -1,0 +1,30 @@
+{
+  "scope": "MAPPING_SEMANTIC_LATERAL_CANARY_ONLY",
+  "allow_execute": false,
+  "release_id": null,
+  "case_sha256": null,
+  "output_directory": null,
+  "package_sha256": {
+    "lateral_once.py": "a0f287cbc3f7ea92962b842e06129bcf90422e33c546d6ab3ad5967370ceeb38",
+    "lateral_contract.py": "00476be915160339c2e2dac77582638559746e2dd1db1acf2ad2decb845cb8b6",
+    "semantic_tool_timed.py": "4a1fa7cb59edc91d230a53d76fe35de2ff467ecf5c59a475ea52dddd975bf968",
+    "host_preflight.py": "749da4569db74798f69a47b8cbe31af1d656f99013dea23be8911cdd1ac3dfb7",
+    "calibration_observer.py": "cb0f772e11472cdc6b8fcca3f250bd18731852b8d7be6fc306f7e195204ba7a1",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+    "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792"
+  },
+  "boot_id": null,
+  "uid": 1000,
+  "network_namespace": null,
+  "controller_pid_namespace": null,
+  "host_preflight": {
+    "mode": "root_external_host_attestation",
+    "path": null,
+    "sha256": null,
+    "max_age_sec": 30.0
+  },
+  "root_unique_velocity_owner_approved": false,
+  "host_unique_velocity_owner_assumption": "Root holds every other command writer stopped; external host proof is not continuous monitoring.",
+  "root_static_patch_and_engineering_stop_reserve_approved": false
+}

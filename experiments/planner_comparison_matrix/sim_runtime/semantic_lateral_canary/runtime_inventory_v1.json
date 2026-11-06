@@ -1,0 +1,38 @@
+{
+  "schema": "locnav.semantic_lateral_combined.runtime_bundle.v1",
+  "scope": "MAPPING_SEMANTIC_LATERAL_CANARY_ONLY",
+  "default_HOLD": true,
+  "source_files": [
+    "lateral_once.py",
+    "lateral_contract.py",
+    "semantic_tool_timed.py",
+    "host_preflight.py",
+    "calibration_observer.py",
+    "imu_gate.py",
+    "recording_deadline.py",
+    "bag_summary.py"
+  ],
+  "files_sha256": {
+    "lateral_once.py": "a0f287cbc3f7ea92962b842e06129bcf90422e33c546d6ab3ad5967370ceeb38",
+    "lateral_contract.py": "00476be915160339c2e2dac77582638559746e2dd1db1acf2ad2decb845cb8b6",
+    "semantic_tool_timed.py": "4a1fa7cb59edc91d230a53d76fe35de2ff467ecf5c59a475ea52dddd975bf968",
+    "host_preflight.py": "749da4569db74798f69a47b8cbe31af1d656f99013dea23be8911cdd1ac3dfb7",
+    "calibration_observer.py": "cb0f772e11472cdc6b8fcca3f250bd18731852b8d7be6fc306f7e195204ba7a1",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+    "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792",
+    "case.HOLD.json": "80eecf6e1a6c3268470ed688ef104b3c8733c6c23baa7dfbd07532d247d9e286",
+    "root_release.HOLD.json": "1e4849a1cceff4a27b104f656c9b4c7d328611704b56bd7ebc70744213e36c36",
+    "host_input.HOLD.json": "652e59fbf4f75546240e3e8ec35da6946f95566ccf11eebfa2e210205f1f62a0",
+    "acquisition_oracle.npz": "eeb89b1687bb81988dab09e773428c2ccf6071dc2fa25b1b236049282655e9f6",
+    "sensor_config.json": "38aab54b3a6ca49570feaaa8e983f4f9bc9ee197060066b186478a70f92ea023",
+    "READOUT.txt": "3f7ae6e198a497aeaef5a213f923682a64ad676db164c9e40d0902ab236a20d8",
+    "immutable_inputs.json": "ec4d2555015b4424205adb132f593a33e4b6f07ac06035245eebe28399ea6bc1",
+    "helper_evidence_reuse.json": "cfb98f07628f1b76db2a4963228b73abed41159b0f8dd4b94cffc252c5ef6e8f",
+    "prior_evidence_reuse.json": "865041599a62cccadea64763174b72629c2af1f1690f5939453afac4dc8fc4bc"
+  },
+  "sensor_adapter_bundled": false,
+  "official_MC_tool_bundled": false,
+  "actual_current_source_proof_included": false,
+  "not_a_runtime_release": true
+}

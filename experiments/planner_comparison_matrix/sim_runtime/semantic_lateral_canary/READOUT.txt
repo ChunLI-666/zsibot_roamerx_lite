@@ -1,0 +1,78 @@
+SOURCE PREPARATION ONLY — DEFAULT ROOT_HOLD
+
+Scope: MAPPING_SEMANTIC_LATERAL_CANARY_ONLY. One release may contain the fixed
+pair [+0.2,-0.2], one second each, in one all-topic/hidden-topic raw MCAP capped
+at 60s. This package neither starts nor replaces a sensor source by default.
+No sensor source was started or replaced. No ROS Node, UDP packet, remote action,
+deployment or canonical write occurred; tests use fake process/socket/time/Observer.
+
+Integration delta
+- lateral_once imports the gate-aware Observer. The Observer class is unchanged
+  from IMU source freeze; its sole file edit imports active lateral_contract.
+- PACKAGE hashes exactly eight actual runtime sources. The unused official raw
+  MC tool and its SHA clause are removed. Helper e850bc78... and every other
+  validate/host/age/filled-body/stop/once/owned-pidfd gate remain.
+- semantic_tool_timed.py 4a1fa7cb... and imu_gate.py 0b451821... are unchanged.
+  The owned tool uses one UDP socket, nominal 20Hz, <=20 nonzero packets over
+  <=1s, fresh <=150ms parent/recorder proof before each nonzero, then five
+  finally zeros and close. It is a direct bounded backend. There is no 0.25s
+  relay watchdog or hard plant-stop guarantee in this path.
+- Trace admission requires exact version1/action=walk/forward=0/yaw=0 and only
+  the selected lateral sign or cleanup zero, successful sendto evidence,
+  target/byte count/payload SHA and increasing steady syscall intervals.
+  GT displacement/velocity/stop use original header stamps, not send cadence.
+- Immediately after positive tool exit, the parent verifies fresh strict stop
+  and writes probe_0.acceptance.json from actual semantic trace + original GT.
+  Only correct-direction body-Y displacement >0.01m and continuous stop pass.
+  After another 3s stopped, only then may probe_1.planned.json be created,
+  binding the positive acceptance SHA. No response, wrong direction, invalid
+  data/send or stop failure => HOLD with no negative plan/tool.
+- Final metrics replace per-index entries, so success/failure output contains
+  each launched probe once. The original five-second raw tail and owned
+  recorder/helper shutdown ordering are retained.
+- Host forbidden command basenames add semantic_tool_timed.py. The separately
+  approved monotonic sensor adapter is not classified as a command writer.
+
+Verification
+- 11 new pure combination tests PASS; 17 unchanged backend fake tests PASS.
+- parent_scenarios_v1.json retains six mocked-parent outcomes: no response,
+  wrong direction, missing stop, illegal packet, acceptance-write failure,
+  and successful positive-then-negative. No first-probe failure creates plan1.
+- source_audit_v1.json: 36 static checks PASS. Original owned-child functions,
+  watch/wait_stop, contract helpers/guards and GT/stop/gap metric body retained;
+  Observer class and backend/gate/helper/bag bytes match immutable inputs.
+- Reuse the frozen cal-v2 15, gate 11 and helper 18 prior checks by byte/hash
+  evidence; no process/deadline suite or actual-data replay was rerun here.
+- fixtures_combined_first.log retains an inherited ResourceWarning in cal-v2's
+  MCAP magic read. Tests pass; that original code is outside this delta.
+- Codacy analyzer is unavailable in the active tool inventory. Not run and no
+  dependencies installed. Runtime behavior has not been tested by this task.
+
+Root release prerequisites remain pending
+case.HOLD.json executable=false; root_release.HOLD.json allow_execute=false;
+host_input.HOLD.json root_inputs_reviewed=false. Old scene identities/material
+and coordinate references are preparation inputs, not a fresh attestation.
+Root must independently review and release the source-only adapter replacement,
+retire the old source, verify actual source identities and all actual artifact
+bytes, refresh namespace/scene/config/coordinate/material proof, complete actual
+graph/header/clock/TF readiness, relocate/bind paths and generate a new unique
+release. The adapter is not bundled or started by this canary package.
+The expected readiness baseline has two tf_static publishers/three edges:
+61 base_link->livox_frame; sensor adapter base_link->imu_link and
+base_link->front_camera_optical. One accepted-IMU-derived clock and no new
+Nav dynamic TF remain the separately reviewed sensor/readiness contract.
+
+Evidence limits
+This integration has no actual semantic-lateral motion result and accepts no
+whole-scene route, reverse ability, lateral model, or stop-distance bound.
+The binary/config semantic lateral contract is still to be measured.
+Prior 0.5s engine timeout is an earlier log observation, not this canary's stop
+latency: full_scene_motion_input_diagnosis_v1/host_readonly_window.json line
+11643 (05:45:51.359 log), with hash in prior_evidence_reuse.json. It is not a
+hard watchdog proof. Actual send syscall intervals do not prove actuation.
+
+Offline reproduction only
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s <this-directory> -p 'test_*.py' -v
+PYTHONDONTWRITEBYTECODE=1 python3 <this-directory>/verify_source.py
+No --execute invocation is authorized by this package or these instructions.
+No canonical branch, Git worktree, commit, or existing frozen package changed.

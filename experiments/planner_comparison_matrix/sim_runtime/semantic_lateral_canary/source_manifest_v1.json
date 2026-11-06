@@ -1,0 +1,73 @@
+{
+  "schema": "locnav.semantic_lateral_combined.source_freeze.v1",
+  "scope": "MAPPING_SEMANTIC_LATERAL_CANARY_ONLY",
+  "state": "SOURCE_ONLY_DEFAULT_HOLD_REVIEW_PENDING",
+  "immutable_inputs": {
+    "cal_v2": {
+      "lateral_once.py": "d9544d7ea8a11a10c5641c4473ab73b1bed759009f3aaa791117d34df223b1e2",
+      "lateral_contract.py": "851bf34337151048a581d625553a210c1331430ba0abe0211f1d906b2baf124d",
+      "host_preflight.py": "40bbe7b032c0eb3c7a11b618732645bdeccde5c3c9072d8f020b45e5c3f4b447",
+      "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+      "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792"
+    },
+    "backend": {
+      "semantic_tool_timed.py": "4a1fa7cb59edc91d230a53d76fe35de2ff467ecf5c59a475ea52dddd975bf968",
+      "source_manifest.json": "8597f5226bacde2863f39e2b2e00c2606aa9d8c10a908ac1f978d85fe750bd75",
+      "verification.json": "e77eb8dc309c92ae9de5ccaac947b2edfccb69064a99c2b426eb16ce9eb0c7f4"
+    },
+    "imu": {
+      "source_manifest_v1.json": "f16cd6dadef780768b5df0a8a6ef49aa234011423858ede32aaeec8a9b90edba",
+      "calibration_observer.py": "c1713ef3e8190b8d903087085365efad76bd12c8615e47336c5d2db9c1db86b9",
+      "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+      "calibration_contract_frozen.py": "851bf34337151048a581d625553a210c1331430ba0abe0211f1d906b2baf124d",
+      "fixtures_v1.log": "274d00c3d0ccae9d9198251e3caffada359b9d34a4e22c7c881b13c607594839"
+    },
+    "no_runtime_actions": true
+  },
+  "runtime_package_sha256": {
+    "lateral_once.py": "a0f287cbc3f7ea92962b842e06129bcf90422e33c546d6ab3ad5967370ceeb38",
+    "lateral_contract.py": "00476be915160339c2e2dac77582638559746e2dd1db1acf2ad2decb845cb8b6",
+    "semantic_tool_timed.py": "4a1fa7cb59edc91d230a53d76fe35de2ff467ecf5c59a475ea52dddd975bf968",
+    "host_preflight.py": "749da4569db74798f69a47b8cbe31af1d656f99013dea23be8911cdd1ac3dfb7",
+    "calibration_observer.py": "cb0f772e11472cdc6b8fcca3f250bd18731852b8d7be6fc306f7e195204ba7a1",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+    "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792"
+  },
+  "runtime_bundle_sha256": "75df9829d028b4b5b84ac2e42c3c16ece8502eac7068b4356ea71a736e14ae46",
+  "files_sha256": {
+    "READOUT.txt": "3f7ae6e198a497aeaef5a213f923682a64ad676db164c9e40d0902ab236a20d8",
+    "acquisition_oracle.npz": "eeb89b1687bb81988dab09e773428c2ccf6071dc2fa25b1b236049282655e9f6",
+    "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792",
+    "calibration_observer.py": "cb0f772e11472cdc6b8fcca3f250bd18731852b8d7be6fc306f7e195204ba7a1",
+    "case.HOLD.json": "80eecf6e1a6c3268470ed688ef104b3c8733c6c23baa7dfbd07532d247d9e286",
+    "fixtures_all_v1.log": "a1bdbf57a9c3cf969e2f60f01531667052ce15460c897c7d78555b0fa138979a",
+    "fixtures_backend_v1.log": "25efe398864936dd3c581e0021c9ac98661db2f03100465865294b4b01268a83",
+    "fixtures_combined_first.log": "28b4f06b5580e2df7a97e8c9d27ff444d7a5d2a712616e448aade9dceb48490e",
+    "helper_evidence_reuse.json": "cfb98f07628f1b76db2a4963228b73abed41159b0f8dd4b94cffc252c5ef6e8f",
+    "host_input.HOLD.json": "652e59fbf4f75546240e3e8ec35da6946f95566ccf11eebfa2e210205f1f62a0",
+    "host_preflight.py": "749da4569db74798f69a47b8cbe31af1d656f99013dea23be8911cdd1ac3dfb7",
+    "immutable_inputs.json": "ec4d2555015b4424205adb132f593a33e4b6f07ac06035245eebe28399ea6bc1",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "lateral_contract.py": "00476be915160339c2e2dac77582638559746e2dd1db1acf2ad2decb845cb8b6",
+    "lateral_once.py": "a0f287cbc3f7ea92962b842e06129bcf90422e33c546d6ab3ad5967370ceeb38",
+    "parent_scenarios_v1.json": "a8ad20a134dc870e442397e53f483cb7f15317992d154cd5ceed3d20fb70b359",
+    "prior_evidence_reuse.json": "865041599a62cccadea64763174b72629c2af1f1690f5939453afac4dc8fc4bc",
+    "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+    "root_release.HOLD.json": "1e4849a1cceff4a27b104f656c9b4c7d328611704b56bd7ebc70744213e36c36",
+    "runtime_bundle_v1.tar": "75df9829d028b4b5b84ac2e42c3c16ece8502eac7068b4356ea71a736e14ae46",
+    "runtime_inventory_v1.json": "976e9c9ce0f4509d72e3375217de858c756a1a45e61aae2ff88d9ec78cd867dc",
+    "semantic_tool_timed.py": "4a1fa7cb59edc91d230a53d76fe35de2ff467ecf5c59a475ea52dddd975bf968",
+    "sensor_config.json": "38aab54b3a6ca49570feaaa8e983f4f9bc9ee197060066b186478a70f92ea023",
+    "source_audit_v1.json": "94c2108b864d3d1329451ea39ca742a7c33c81430509b484ce5016614f20bbbd",
+    "source_audit_v1.log": "94c2108b864d3d1329451ea39ca742a7c33c81430509b484ce5016614f20bbbd",
+    "source_delta_v1.diff": "b666dbdbc2ff8ea5e331da8c3ec47a375bf0a6cc81b1b96f9f501969989861f3",
+    "test_combined.py": "4b94d4000087ab41ee7c8b3fb3b07bfb08e9a44dda7839a7bccd8e56bd3cec19",
+    "test_semantic_tool_timed.py": "72633a326d440a4356c1b28ec1bbd029d2378326bc6dc9b239c1c4a6252d4325",
+    "verification_v1.json": "417624fc87bce74ff399bb47f5df40f3b6250e849897d6189a57ac4a54f3f541",
+    "verify_source.py": "76d6d6995dd686ac4fe7aeb24401d35dfc00513bd45d9c439ccf519abaf1ec44"
+  },
+  "canonical_modified": false,
+  "no_git_branch_switch_commit_worktree": true,
+  "no_runtime_actions": true
+}

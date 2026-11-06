@@ -1,0 +1,54 @@
+{
+  "records": {
+    "cal_v2_verification": {
+      "path": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/full_scene_lateral_calibration_v1/verification_v2.json",
+      "sha256": "5fcac57d93701e2511a8b4d46d9b7f80b89ac88f68cf2255bf47b24aa2ad8c0d"
+    },
+    "cal_v2_fixture_log": {
+      "path": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/full_scene_lateral_calibration_v1/review_source_v2/fixtures_v2.log",
+      "sha256": "032429642a58fe06167052f8a0adf6220a91ea106956f52bf20cc3aaa5838817"
+    },
+    "cal_v2_manifest": {
+      "path": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/full_scene_lateral_calibration_v1/source_manifest_v2.json",
+      "sha256": "33e5cdcc2533dd56516138ed357044685aa2a41ff77a50212455992a9c1b85be"
+    },
+    "imu_verification": {
+      "path": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_imu_monotonic_gate_v1/verification_v1.json",
+      "sha256": "33102958e917cfcb665edd92d43fe20ca884bed3a399ed5ee74f45f5c911cf96"
+    },
+    "imu_fixture_log": {
+      "path": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_imu_monotonic_gate_v1/review_source_v1/fixtures_v1.log",
+      "sha256": "274d00c3d0ccae9d9198251e3caffada359b9d34a4e22c7c881b13c607594839"
+    },
+    "imu_manifest": {
+      "path": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_imu_monotonic_gate_v1/source_manifest_v1.json",
+      "sha256": "f16cd6dadef780768b5df0a8a6ef49aa234011423858ede32aaeec8a9b90edba"
+    },
+    "imu_independent_SOURCE_GO": {
+      "path": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_imu_monotonic_gate_independent_review_solmax_v1/review.json",
+      "sha256": "4c074816a78457a1e6f6e6eaa95208c53a599364bb3070fe048298a606af2717"
+    },
+    "backend_verification": {
+      "path": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_canary_v1/verification.json",
+      "sha256": "e77eb8dc309c92ae9de5ccaac947b2edfccb69064a99c2b426eb16ce9eb0c7f4"
+    },
+    "backend_manifest": {
+      "path": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_canary_v1/review_source_v1/source_manifest.json",
+      "sha256": "8597f5226bacde2863f39e2b2e00c2606aa9d8c10a908ac1f978d85fe750bd75"
+    },
+    "prior_engine_timeout_observation": {
+      "path": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/full_scene_motion_input_diagnosis_v1/host_readonly_window.json",
+      "sha256": "618cada25dcfcb75205df4dd687871a28da91b4ee7ac0fa1bb96c7cc8792f8f1"
+    },
+    "prior_motion_findings": {
+      "path": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/full_scene_motion_input_diagnosis_v1/findings.json",
+      "sha256": "9f5aacfb6fe31c4d388494c047965757a283435276f8743c4ba9d7328284f1ea"
+    }
+  },
+  "cal_v2_pure_fixtures_reused": 15,
+  "imu_gate_pure_fixtures_reused": 11,
+  "helper_owned_deadline_process_tests_reused": 18,
+  "backend17_rerun_in_combined": true,
+  "original_process_suite_not_rerun": true,
+  "no_new_runtime_acceptance": true
+}
