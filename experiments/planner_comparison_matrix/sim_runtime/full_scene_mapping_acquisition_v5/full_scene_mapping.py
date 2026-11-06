@@ -561,11 +561,15 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
           checked_unix_ns=time.time_ns(),checked_steady_ns=time.monotonic_ns(),boundary='Preflight evidence only; no additional motion permission.'),
           prearm_qualification=getattr(getattr(relay,'prearm_qualification',None),'arm_receipt',None),sim_command_endpoint=getattr(relay,'sim_command_endpoint',None))
         def rotate_to(target,tolerance=.08,deadline_steady=None,terminal_deadline_steady=None):
+            command_deadline=min((value for value in (deadline_steady,terminal_deadline_steady) if value is not None),default=None)
+            previous_error=None
             while True:
                 if deadline_steady is not None and time.monotonic()>=deadline_steady:raise contract.Hold('bounded heading correction deadline expired')
                 truth,yaw=health()[:2];error=contract.wrap(target-yaw)
-                if abs(error)<=tolerance:break
-                tick(0.,math.copysign(contract.MAX_WZ,error),terminal_deadline_steady=terminal_deadline_steady)
+                if abs(error)<=tolerance/2.:break
+                if previous_error is not None and max(abs(previous_error),abs(error))<math.pi/2. and previous_error*error<0.:break
+                previous_error=error
+                tick(0.,math.copysign(contract.MAX_WZ,error),terminal_deadline_steady=command_deadline)
             settle_deadline=time.monotonic()+8.
             if deadline_steady is not None:settle_deadline=min(settle_deadline,deadline_steady)
             remaining=max(0.,settle_deadline-time.monotonic())
