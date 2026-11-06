@@ -1,0 +1,79 @@
+{
+  "root_inputs_reviewed": false,
+  "private_network_endpoint": true,
+  "command_endpoint": [
+    "192.168.1.219",
+    7447
+  ],
+  "expected_host": {
+    "uid": 1000,
+    "boot_id": null,
+    "hostname": null,
+    "pid_namespace": null
+  },
+  "expected_scene_identity": {
+    "pid": 1172665,
+    "starttime_ticks": 9427026,
+    "cmdline_sha256": "6e67b4b335a63f5f1cb06b34d0d592d6dd235529a1fcc0b81113626766e8661e",
+    "argv": [
+      "/mnt/data/matrix_v1.1.2_migration_20261030/runtime/MATRiX_v1.1.2/UeSim/Binaries/Linux/UeSim",
+      "UeSim",
+      "/Game/Maps/SceneWorld",
+      "-windowed",
+      "-ResX=1280",
+      "-ResY=720",
+      "-nosound",
+      "-unattended",
+      "-log",
+      "-Abslog=/mnt/data/planner_comparison_20261105/whole_scene_geometry_recovery_20261106/attempt_v1/SceneWorld_attempt_v1.log"
+    ],
+    "boot_id": "c3697337-f336-48f4-8127-4af9e461035d",
+    "uid": [
+      1000,
+      1000,
+      1000,
+      1000
+    ],
+    "gid": [
+      1000,
+      1000,
+      1000,
+      1000
+    ],
+    "namespace_pids": [
+      1172665
+    ],
+    "pid_namespace": "pid:[4026531836]",
+    "mount_namespace": "mnt:[4026531841]",
+    "executable": "/mnt/data/matrix_v1.1.2_migration_20261030/runtime/MATRiX_v1.1.2/UeSim/Binaries/Linux/UeSim",
+    "cwd": "/mnt/data/matrix_v1.1.2_migration_20261030/runtime/MATRiX_v1.1.2/UeSim/Binaries/Linux",
+    "cgroup_sha256": "fbf84cf7338e342871c7319fa00b4b1a92043a129ce4d355dfd41f0300b5f6c5"
+  },
+  "expected_container_id": null,
+  "expected_container_init": null,
+  "container_attestation_artifact": {
+    "path": null,
+    "sha256": null
+  },
+  "expected_container_sources": {
+    "new_adapter": null,
+    "bridge": null,
+    "projector": null
+  },
+  "retired_workers": [
+    {
+      "role": "63",
+      "identity": null
+    },
+    {
+      "role": "123",
+      "identity": null
+    },
+    {
+      "role": "2689",
+      "identity": null
+    }
+  ],
+  "artifacts": [],
+  "boundary": "Host collector only after external Root fills exact current private container/init/source identities. Host/proc/Docker checks are read-only; no sender or proxy is added."
+}

@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "scope": "MAPPING_SEMANTIC_LATERAL_BOUNDED_AMPLITUDE_SUSTAINED_CALIBRATION_ONLY",
+  "executable": false,
+  "max_runtime_sec": 60.0,
+  "probes": [
+    0.4,
+    -0.4
+  ],
+  "duration_sec": 1.5,
+  "between_sec": 3.0,
+  "tail_sec": 5.0,
+  "oracle_path": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_combined_v1/acquisition_oracle.npz",
+  "oracle_sha256": "eeb89b1687bb81988dab09e773428c2ccf6071dc2fa25b1b236049282655e9f6",
+  "patch_xyxy": null,
+  "root_patch_approved": false,
+  "coordinate_verified_by_root": false,
+  "initial_truth_reference": null,
+  "initial_xy_tolerance_m": 0.05,
+  "body_half_m": 0.74,
+  "padding_m": 0.15,
+  "cell_guard_m": 0.05,
+  "lateral_abort_m": 0.8,
+  "forward_drift_abort_m": 0.1,
+  "yaw_abort_rad": 0.08,
+  "speed_abort_mps": 1.0,
+  "stop_reserve_m": 1.0,
+  "sensor_config_artifact": {
+    "path": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_combined_v1/sensor_config.json",
+    "sha256": "38aab54b3a6ca49570feaaa8e983f4f9bc9ee197060066b186478a70f92ea023"
+  },
+  "coordinate_evidence_artifact": {
+    "path": null,
+    "sha256": null
+  },
+  "expected_environment": {
+    "ROS_DOMAIN_ID": "185",
+    "RMW_IMPLEMENTATION": "rmw_fastrtps_cpp",
+    "ROS_LOCALHOST_ONLY": "0",
+    "ROS_AUTOMATIC_DISCOVERY_RANGE": "LOCALHOST"
+  },
+  "scene_instance_id": {
+    "pid": 1172665,
+    "starttime_ticks": 9427026,
+    "cmdline_sha256": "6e67b4b335a63f5f1cb06b34d0d592d6dd235529a1fcc0b81113626766e8661e",
+    "argv": [
+      "/mnt/data/matrix_v1.1.2_migration_20261030/runtime/MATRiX_v1.1.2/UeSim/Binaries/Linux/UeSim",
+      "UeSim",
+      "/Game/Maps/SceneWorld",
+      "-windowed",
+      "-ResX=1280",
+      "-ResY=720",
+      "-nosound",
+      "-unattended",
+      "-log",
+      "-Abslog=/mnt/data/planner_comparison_20261105/whole_scene_geometry_recovery_20261106/attempt_v1/SceneWorld_attempt_v1.log"
+    ],
+    "boot_id": "c3697337-f336-48f4-8127-4af9e461035d",
+    "uid": [
+      1000,
+      1000,
+      1000,
+      1000
+    ],
+    "gid": [
+      1000,
+      1000,
+      1000,
+      1000
+    ],
+    "namespace_pids": [
+      1172665
+    ],
+    "pid_namespace": "pid:[4026531836]",
+    "mount_namespace": "mnt:[4026531841]",
+    "executable": "/mnt/data/matrix_v1.1.2_migration_20261030/runtime/MATRiX_v1.1.2/UeSim/Binaries/Linux/UeSim",
+    "cwd": "/mnt/data/matrix_v1.1.2_migration_20261030/runtime/MATRiX_v1.1.2/UeSim/Binaries/Linux",
+    "cgroup_sha256": "fbf84cf7338e342871c7319fa00b4b1a92043a129ce4d355dfd41f0300b5f6c5"
+  },
+  "container_id": null,
+  "root_preparation_notes": [
+    "SOURCE ONLY bounded-amplitude sustained calibration v4;no root release supplied.",
+    "Allowed magnitude enum0.2/0.4/0.6;exact case probes[mag,-mag];finite duration1.5..4s. DefaultHOLD candidate0.4x1.5s.",
+    "Original sensor/source/coordinate/patch/stop-reserve proof requires root refresh. Metrics/negative dependency unchanged;no mapping capability or speed assumption."
+  ],
+  "sensor_adapter_transition_actual_verified": false,
+  "magnitude": 0.4,
+  "private_network_endpoint": true,
+  "command_endpoint": [
+    "192.168.1.219",
+    7447
+  ],
+  "container_attestation_artifact": {
+    "path": null,
+    "sha256": null
+  },
+  "source_identities": {
+    "new_adapter": null,
+    "bridge": null,
+    "projector": null
+  },
+  "source_readiness_observed": false,
+  "boundary": "ROOT_HOLD new actual private pair only. Bind current identities/current lease/anchor/patch; no old5237 proof or readiness inherited. Original.4\u00b1/1.5s/60s/3s/5s/body.74+pad.15/stop1m and all sensor gates unchanged.",
+  "allow_camera_stale_lease_retry_v1": false
+}

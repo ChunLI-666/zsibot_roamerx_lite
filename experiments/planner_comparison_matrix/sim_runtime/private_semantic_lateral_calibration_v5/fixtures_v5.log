@@ -1,0 +1,38 @@
+....................../home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_private_snapshot_retry_candidate_v5/review_source_v5/lateral_once.py:312: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/tmpzjphgkex/run/bag/fixture.mcap'>
+  magic=[str(p) for p in (output/'bag').glob('*.mcap') if p.open('rb').read(8)==bag_summary.MAGIC]
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_private_snapshot_retry_candidate_v5/review_source_v5/lateral_once.py:312: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/tmp84x62cu6/run/bag/fixture.mcap'>
+  magic=[str(p) for p in (output/'bag').glob('*.mcap') if p.open('rb').read(8)==bag_summary.MAGIC]
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+................./home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_private_snapshot_retry_candidate_v5/review_source_v5/lateral_once.py:312: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/tmpj3y05461/run/bag/fixture.mcap'>
+  magic=[str(p) for p in (output/'bag').glob('*.mcap') if p.open('rb').read(8)==bag_summary.MAGIC]
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+......./home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_private_snapshot_retry_candidate_v5/review_source_v5/lateral_once.py:312: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/tmpy8kb7t4w/run/bag/fixture.mcap'>
+  magic=[str(p) for p in (output/'bag').glob('*.mcap') if p.open('rb').read(8)==bag_summary.MAGIC]
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_private_snapshot_retry_candidate_v5/review_source_v5/lateral_once.py:312: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/tmp6h__4c3w/run/bag/fixture.mcap'>
+  magic=[str(p) for p in (output/'bag').glob('*.mcap') if p.open('rb').read(8)==bag_summary.MAGIC]
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_private_snapshot_retry_candidate_v5/review_source_v5/lateral_once.py:312: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/tmp_h5fz3yb/run/bag/fixture.mcap'>
+  magic=[str(p) for p in (output/'bag').glob('*.mcap') if p.open('rb').read(8)==bag_summary.MAGIC]
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_private_snapshot_retry_candidate_v5/review_source_v5/lateral_once.py:312: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/tmp6ncgr9ok/run/bag/fixture.mcap'>
+  magic=[str(p) for p in (output/'bag').glob('*.mcap') if p.open('rb').read(8)==bag_summary.MAGIC]
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_private_snapshot_retry_candidate_v5/review_source_v5/lateral_once.py:312: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/tmpo12z81tk/run/bag/fixture.mcap'>
+  magic=[str(p) for p in (output/'bag').glob('*.mcap') if p.open('rb').read(8)==bag_summary.MAGIC]
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_private_snapshot_retry_candidate_v5/review_source_v5/lateral_once.py:312: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/tmp3p_9gyec/run/bag/fixture.mcap'>
+  magic=[str(p) for p in (output/'bag').glob('*.mcap') if p.open('rb').read(8)==bag_summary.MAGIC]
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_private_snapshot_retry_candidate_v5/review_source_v5/lateral_once.py:312: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/tmplsqa7d0l/run/bag/fixture.mcap'>
+  magic=[str(p) for p in (output/'bag').glob('*.mcap') if p.open('rb').read(8)==bag_summary.MAGIC]
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_private_snapshot_retry_candidate_v5/review_source_v5/lateral_once.py:312: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/tmpmwxbdop7/run/bag/fixture.mcap'>
+  magic=[str(p) for p in (output/'bag').glob('*.mcap') if p.open('rb').read(8)==bag_summary.MAGIC]
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+....
+----------------------------------------------------------------------
+Ran 53 tests in 0.679s
+
+OK
