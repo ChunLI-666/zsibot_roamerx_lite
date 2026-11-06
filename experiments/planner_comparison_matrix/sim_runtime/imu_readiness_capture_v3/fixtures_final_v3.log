@@ -1,0 +1,12 @@
+test_actual_capture_with_fake_load_preserves_callbacks_and_guards (test_bounded_spin.BoundedSpinFixtures.test_actual_capture_with_fake_load_preserves_callbacks_and_guards) ... ok
+test_callback_exception_is_not_swallowed (test_bounded_spin.BoundedSpinFixtures.test_callback_exception_is_not_swallowed) ... ok
+test_fault_or_nondataprogress_returns_immediately (test_bounded_spin.BoundedSpinFixtures.test_fault_or_nondataprogress_returns_immediately) ... ok
+test_idle_wait_is_at_most10ms (test_bounded_spin.BoundedSpinFixtures.test_idle_wait_is_at_most10ms) ... ok
+test_ready_queue_stops_at32_without_losing_items (test_bounded_spin.BoundedSpinFixtures.test_ready_queue_stops_at32_without_losing_items) ... ok
+test_slow_single_callback_does_not_start_another (test_bounded_spin.BoundedSpinFixtures.test_slow_single_callback_does_not_start_another) ... ok
+test_time_budget_prevents_next_dispatch_and_bounds_all_timeouts (test_bounded_spin.BoundedSpinFixtures.test_time_budget_prevents_next_dispatch_and_bounds_all_timeouts) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 1.894s
+
+OK

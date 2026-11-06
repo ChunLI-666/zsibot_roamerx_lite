@@ -1,0 +1,22 @@
+{
+  "state": "PASS_SOURCE_PREPARATION_ONLY",
+  "base_v2_manifest_sha256": "b6c4478e65a717c914a1043cda5d0b189ef1d0c83330ad4ca55349d0f02cb4f6",
+  "changed_runtime_files": [
+    "readiness_observer.py"
+  ],
+  "unchanged_runtime_files": 8,
+  "unchanged_observer_methods": [
+    "__init__",
+    "capture",
+    "graph",
+    "close"
+  ],
+  "other_observer_imports_AST_exact": true,
+  "pure_fixtures": 7,
+  "fake_model_new_callbacks": 12476,
+  "fake_model_new_outer_checks": 904,
+  "fake_model_new_complete": true,
+  "actual_new_readiness_pass": false,
+  "no_real_ROS_Node_Popen_pidfd_signal_socket_UDP_SSH_motion": true,
+  "helper18_not_rerun": true
+}

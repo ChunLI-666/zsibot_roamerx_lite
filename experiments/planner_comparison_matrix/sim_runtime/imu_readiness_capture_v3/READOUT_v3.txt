@@ -1,0 +1,11 @@
+SOURCE ONLY / DEFAULT HOLD / NO MOTION
+
+v3 changes only Observer.spin. Batch dispatch uses a10ms monotonic scheduling/wait budget and at most32 observed callbacks. Each wait is bounded by remaining budget; no new dispatch starts after it. Idle/no data progress or a latched validator error returns to the original outer guards. A synchronous callback is not preemptible; a slow one may overrun10ms, then no further callback starts. The unchanged parent100ms watch-gap and original0.3s header/receipt gates still HOLD.
+
+All capture/decode/receipt/validation/logging, QoS/subscriptions, source20ms polling target, graph250ms, artifact checks, full histories,10s core,350ms drain,45+15 recorder lifecycle and8 other runtime source bytes remain unchanged. No thread, persistent executor, history purge, dedup, QoS change or timeout relaxation was added. All queued callbacks remain; each actual capture retains its own original header and real wall/steady receipt.
+
+7 pure fake-executor fixtures pass: idle wait,32cap without loss, decreasing remaining waits, slow single callback/no next dispatch, error/no-progress immediate return, exception propagation, and actual capture+validator under an explicit1160callbacks/s workload. The workload assumes1ms transport,120us callback and750us+50ns/history-entry outer checks; it is a scheduling illustration, not measured ROS timing or a predicted live PASS. Exact old v2 spin holds on stale IMU; new spin completes the modeled10s+drain with12476 callbacks retained/logged and904 core checks.
+
+Closed actual v2 failure bag f4976b... independently confirms observer-side IMU backlog relative to same-header recorder time. Raw recorder after first1s is below3ms while observer reaches296ms. Derived recorder has a genuine startup/discovery300.93ms burst, which is preserved; later seconds are near source. Bag logTime is never substituted for callback receipt. Original failure remains HOLD.
+
+No actual ROS Node, recorder, process, pidfd, signal, socket/UDP, remote operation, motion or canonical modification occurred. Prior v1/v2 freezes and failures are untouched. New independent source review and root immutable read-only release/actual stationary10s capture are still required; ready_for_motion remains false. No helper18 rerun. Codacy MCP unavailable, no install/PASS claimed.

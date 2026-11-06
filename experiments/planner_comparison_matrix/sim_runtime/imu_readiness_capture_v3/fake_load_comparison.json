@@ -1,0 +1,50 @@
+{
+  "old": {
+    "core_reached": false,
+    "complete": false,
+    "error": "current accepted header/receipt stale: /livox/imu",
+    "simulated_sec": 2.8729483,
+    "outer_checks": 2584,
+    "callbacks": 3037,
+    "scheduled": 12476,
+    "all_callbacks_retained": true,
+    "logged_callbacks": 3037,
+    "original_headers_not_rewritten": true,
+    "max_watch_gap_ms": 1.0218,
+    "max_callback_age_ms": {
+      "/front_lidar/imu": 298.8283,
+      "/livox/imu": 298.78475,
+      "/odom": 2.9164,
+      "/front_lidar": 3.8003,
+      "/front_camera/image/compressed": 4.8089,
+      "/camera/front/image/compressed": 5.81755,
+      "/camera/front/camera_info": 6.82625,
+      "/clock": 7.835
+    },
+    "model_assumptions": "1160callbacks/s;1ms transport;120us callback;750us+50ns/history entry outer-watch;round-robin ready topics; no ROS runtime proof"
+  },
+  "new": {
+    "core_reached": true,
+    "complete": true,
+    "error": null,
+    "simulated_sec": 10.76021455,
+    "outer_checks": 904,
+    "callbacks": 12476,
+    "scheduled": 12476,
+    "all_callbacks_retained": true,
+    "logged_callbacks": 12476,
+    "original_headers_not_rewritten": true,
+    "max_watch_gap_ms": 11.45025,
+    "max_callback_age_ms": {
+      "/front_lidar/imu": 2.8125,
+      "/livox/imu": 2.9325,
+      "/odom": 2.56675,
+      "/front_lidar": 2.6669,
+      "/front_camera/image/compressed": 2.7869,
+      "/camera/front/image/compressed": 2.9069,
+      "/camera/front/camera_info": 3.0269,
+      "/clock": 3.1469
+    },
+    "model_assumptions": "1160callbacks/s;1ms transport;120us callback;750us+50ns/history entry outer-watch;round-robin ready topics; no ROS runtime proof"
+  }
+}

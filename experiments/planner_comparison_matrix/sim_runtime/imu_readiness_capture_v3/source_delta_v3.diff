@@ -1,0 +1,26 @@
+--- frozen_v2/readiness_observer.py
++++ v3/readiness_observer.py
+@@ -50,7 +50,22 @@
+             result[topic]=sorted(rows,key=lambda row:row['gid'])
+         self.graph_stream.write(json.dumps(dict(received_unix_ns=time.time_ns(),received_steady_ns=time.monotonic_ns(),publishers=result))+'\n');self.graph_stream.flush()
+         return result
+-    def spin(self):self.rclpy.spin_once(self.node,timeout_sec=.02)
++    def spin(self):
++        # Amortize the outer full-history/source/graph checks over a small batch.
++        # Each callback still executes capture() with its own actual receipt.
++        # The deadline bounds scheduling/waits between callbacks; a callback
++        # itself is not preemptible, and the parent's unchanged100ms gap gate
++        # still rejects an overrun. No queue/history item is discarded.
++        deadline=time.monotonic_ns()+10_000_000
++        callbacks=0
++        while callbacks<32:
++            remaining=deadline-time.monotonic_ns()
++            if remaining<=0:break
++            before=sum(self.validator.received.values())
++            self.rclpy.spin_once(self.node,timeout_sec=remaining/1e9)
++            after=sum(self.validator.received.values())
++            if after<=before or self.validator.errors:break  # Return to guards/fault.
++            callbacks+=after-before
+     def close(self):
+         self.stream.flush();self.stream.close();self.graph_stream.flush();self.graph_stream.close()
+         self.node.destroy_node();self.rclpy.shutdown()
