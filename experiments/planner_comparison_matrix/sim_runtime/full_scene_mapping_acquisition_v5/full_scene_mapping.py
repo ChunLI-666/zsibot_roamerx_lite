@@ -378,20 +378,50 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
                 break
             if cloud_cache is None:raise contract.Hold('no fresh original-stamp raw/derived lidar+GT association')
             contract.fresh(dict(stamp_ns=cloud_cache['stamp_ns'],received_steady=cloud_cache['raw_received_steady']),now_ns,steady)
+            graph=dict(source_publishers=[],guarded_nodes=[],recorder_subscriptions=[])
+            missing=[]
+            def graph_hold(reason,missing_only=False):
+                snapshot=dict(graph,missing=missing,missing_only=missing_only)
+                emit('graph_readiness_not_qualified',reason=reason,graph=snapshot)
+                exc=contract.Hold(reason)
+                exc.graph_readiness=True;exc.graph_missing_only=missing_only;exc.graph_observation=snapshot
+                raise exc
             for topic in ['/cmd_vel_nav','/cmd_vel','/cmd_vel_safe','/simulation/command_adapter/policy_cmd']:
-                if node.get_publishers_info_by_topic(topic):raise contract.Hold('forbidden concurrent Nav/adapter velocity publisher: '+topic)
+                observed=[dict(name=info.node_name,namespace=info.node_namespace,type=info.topic_type) for info in node.get_publishers_info_by_topic(topic)]
+                if observed:
+                    graph['forbidden_publishers']=dict(topic=topic,expected=[],observed=observed)
+                    graph_hold('forbidden concurrent Nav/adapter velocity publisher: '+topic)
             nav_actions={'/navigate_to_pose','/navigate_through_poses','/follow_waypoints','/follow_path','/compute_path_to_pose'}
-            if any(name.split('/_action/')[0] in nav_actions for name,types in node.get_service_names_and_types() if '/_action/' in name):raise contract.Hold('concurrent Nav action service remains present')
+            actions=[dict(name=name,types=types) for name,types in node.get_service_names_and_types() if '/_action/' in name and name.split('/_action/')[0] in nav_actions]
+            if actions:
+                graph['forbidden_actions']=dict(expected=[],observed=actions)
+                graph_hold('concurrent Nav action service remains present')
             for topic,expected in release['expected_sensor_publishers'].items():
                 observed=[dict(name=info.node_name,namespace=info.node_namespace,type=info.topic_type) for info in node.get_publishers_info_by_topic(topic)]
-                if observed!=expected:raise contract.Hold('original/derived publisher ownership changed: '+topic)
+                detail=dict(kind='source_publisher',topic=topic,expected=expected,observed=observed)
+                graph['source_publishers'].append(detail)
+                if observed!=expected:
+                    if not observed:missing.append(detail)
+                    else:graph_hold('original/derived publisher ownership changed: '+topic)
             identities=node.get_node_names_and_namespaces()
             guarded=[(release['recorder_node_name'],release['recorder_node_namespace'])]+[(entry[0]['name'],entry[0]['namespace']) for entry in release['expected_sensor_publishers'].values()]
-            if any(identities.count(identity)!=1 for identity in guarded):raise contract.Hold('missing/duplicate recorder or sensor graph identity')
+            for identity in guarded:
+                count=identities.count(identity);detail=dict(kind='guarded_node',expected=dict(name=identity[0],namespace=identity[1]),observed_count=count,
+                    observed=[dict(name=name,namespace=namespace) for name,namespace in identities])
+                graph['guarded_nodes'].append(detail)
+                if count==0:missing.append(detail)
+                elif count!=1:graph_hold('duplicate recorder or sensor graph identity')
             required=release.get('required_recorded_topics',[])+['/experiment/full_scene_mapping/events']
             if not required:raise contract.Hold('raw recording topic contract absent')
+            recorder_identity=(release['recorder_node_name'],release['recorder_node_namespace'])
             for topic in required:
-                if (release['recorder_node_name'],release['recorder_node_namespace']) not in [(info.node_name,info.node_namespace) for info in node.get_subscriptions_info_by_topic(topic)]:raise contract.Hold('raw recorder subscription absent: '+topic)
+                observed=[dict(name=info.node_name,namespace=info.node_namespace,type=getattr(info,'topic_type',None)) for info in node.get_subscriptions_info_by_topic(topic)]
+                count=sum((item['name'],item['namespace'])==recorder_identity for item in observed)
+                detail=dict(kind='recorder_subscription',topic=topic,expected=dict(name=recorder_identity[0],namespace=recorder_identity[1]),observed=observed,matching_count=count)
+                graph['recorder_subscriptions'].append(detail)
+                if count==0:missing.append(detail)
+                elif count!=1:graph_hold('duplicate raw recorder subscription: '+topic)
+            if missing:graph_hold('startup graph discovery incomplete',missing_only=True)
             return truth,yaw,cloud_cache,(now_ns-truth['stamp_ns'])/1e9
         def tick(vx=0.,wz=0.,bridge=None,lateral_raw=0.,terminal_deadline_steady=None,fine_phase=False):
             nonlocal last_send,last_request,active_lateral
@@ -483,6 +513,12 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
                 evidence=writer.summary()
                 if evidence['dropped'] or evidence['worker_error'] is not None or imu_gate_fault is not None:return False
                 if audit['first_violation'] is not None or (audit['checked_steady'] and (not audit['valid'] or time.monotonic()-audit['checked_steady']>.3)):return False
+                if getattr(exc,'graph_readiness',False):
+                    if getattr(exc,'graph_missing_only',False) is not True or not isinstance(raw_imu_gate,PrearmImuQualification):return False
+                    context=raw_imu_gate.context()
+                    return (not raw_imu_gate.armed and not raw_imu_gate.ever_armed and not raw_imu_gate.ever_nonzero_requested
+                        and raw_imu_gate.fault is None and time.monotonic()<raw_imu_gate.deadline
+                        and raw_imu_gate.zero(context['command']) and raw_imu_gate.zero(context['request']))
                 return str(exc) in {'missing input','stale/future input header or callback receipt','no fresh accepted original IMU progress',
                     'no fresh original-stamp raw/derived lidar+GT association','velocity-owner audit missing/stale/violated: not_checked',
                     'control-loop gap; no stale positive command is renewed','guard computation exceeded command renewal bound','command write/dispatch exceeded renewal bound; issued anchor retained'}
@@ -498,6 +534,7 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
                 try:truth,yaw=tick();break
                 except contract.Hold as exc:
                     if imu_gate_fault is not None:raise
+                    if getattr(exc,'graph_readiness',False):raise
                     relay.send()
                     if 'first_warm_hold' not in locals():
                         first_warm_hold=str(exc);emit('first_warm_hold',reason=first_warm_hold)
