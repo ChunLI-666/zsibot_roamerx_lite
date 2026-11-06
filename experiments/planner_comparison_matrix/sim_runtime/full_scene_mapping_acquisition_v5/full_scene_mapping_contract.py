@@ -820,3 +820,35 @@ def validate_fine_route(release,route):
         if config is not None and 'fine_forward_mps' in config:fine_command_profile(release,(start,target,policy),config['fine_forward_mps'])
         start=target
     return profile
+
+
+SIM_ENDPOINT_SCHEMA='locnav.exact_sim_command_endpoint.v1'
+SIM_UE_ID_KEYS=('pid','starttime_ticks','cmdline_sha256','argv','boot_id')
+
+def sim_endpoint_from_release(release):
+    allow=release.get('allow_sim_host_endpoint',False);value=release.get('sim_command_endpoint')
+    if type(allow) is not bool:raise Hold('SIM endpoint flag must be exact bool')
+    if not allow:
+        if value is not None:raise Hold('nondefault SIM endpoint requires explicit root flag')
+        return dict(schema=SIM_ENDPOINT_SCHEMA,ipv4='127.0.0.1',port=7447,scene_identity_proof_sha256=None,ue_process_identity=None)
+    keys={'schema','ipv4','port','scene_identity_proof_sha256','ue_process_identity'}
+    if (not isinstance(value,dict) or set(value)!=keys or value['schema']!=SIM_ENDPOINT_SCHEMA
+        or value['ipv4']!='192.168.1.219' or type(value['port']) is not int or value['port']!=7447):
+        raise Hold('only exact Root-attested SIM IPv4 192.168.1.219:7447 is supported')
+    scene=release.get('scene_instance_id');proof=release.get('scene_identity_proof',{});identity=value['ue_process_identity'];digest=value['scene_identity_proof_sha256']
+    if (not valid_local_identity(identity) or not isinstance(identity['boot_id'],str) or not identity['boot_id']
+        or not isinstance(scene,dict) or identity!={key:scene.get(key) for key in SIM_UE_ID_KEYS}
+        or not isinstance(digest,str) or len(digest)!=64 or any(ch not in '0123456789abcdef' for ch in digest)
+        or proof.get('mode')!='root_external_host_attestation' or proof.get('evidence_sha256')!=digest
+        or not proof.get('host_pid_namespace') or proof.get('host_pid_namespace')!=scene.get('pid_namespace')):
+        raise Hold('SIM endpoint must bind same Root host-attestation SHA and exact UE5 identity')
+    path=Path(proof.get('evidence_path',''))
+    if not path.is_absolute() or not path.is_file() or sha(path)!=digest or read_json(path)!=scene:
+        raise Hold('SIM endpoint host-attestation file missing/changed or wrong UE scene')
+    return dict(value,ue_process_identity=dict(identity))
+
+
+def sim_endpoint_from_admission(admission,release):
+    expected=sim_endpoint_from_release(release)
+    if admission.get('sim_command_endpoint')!=expected:raise Hold('relay SIM endpoint admission differs from same Root release')
+    return expected

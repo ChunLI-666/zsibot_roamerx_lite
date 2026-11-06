@@ -64,6 +64,7 @@ class BoundedCallbacks:
 
 def validate_release(release,route,route_path,oracle_path,output):
     prearm_requalification_enabled(release)
+    contract.sim_endpoint_from_release(release)
     if release.get('scope')!=contract.SCOPE or release.get('mode')!=contract.MODE or release.get('allow_execute') is not True:
         raise contract.Hold('root release absent or not executable')
     contract.validate_fine_route(release,route)
@@ -135,10 +136,13 @@ class OwnedRelay:
         self.process=None;self.pidfd=None;self.identity=None;self.output=output;self.command=(0.,0.,0.);self.run_id=run_id;self.close_errors=[]
         source=HERE/'mapping_lateral_relay.py';self.frozen=output/'mapping_lateral_relay_frozen.py';shutil.copy2(source,self.frozen)
         shutil.copy2(HERE/'lateral_capability.py',output/'lateral_capability.py')
+        shutil.copy2(HERE/'full_scene_mapping_contract.py',output/'full_scene_mapping_contract.py')
+        self.sim_command_endpoint=contract.sim_endpoint_from_release(contract.read_json(root_release))
+        self.expected_ready='MAPPING_LATERAL_RELAY_RECT_V5_READY '+self.sim_command_endpoint['ipv4']+':'+str(self.sim_command_endpoint['port'])
         self.fine_forward_profile=lateral_capability.fine_profile_from_release(contract.read_json(root_release))
         self.admission_path=output/'relay_admission.json'
         contract.claim_once(self.admission_path,dict(root_release_path=str(root_release.resolve()),root_release_sha256=contract.sha(root_release),
-            owner_identity=owner_identity,motion_model=model,fine_forward_profile=self.fine_forward_profile))
+            owner_identity=owner_identity,motion_model=model,fine_forward_profile=self.fine_forward_profile,sim_command_endpoint=self.sim_command_endpoint))
         self.argv=[sys.executable,'-I',str(self.frozen),'--execute','--admission',str(self.admission_path),'--admission-sha256',contract.sha(self.admission_path)]
         self.source_sha256=contract.sha(self.frozen)
         self.log=(output/'relay.stderr').open('w')
@@ -164,7 +168,7 @@ class OwnedRelay:
                 line+=chunk
                 if len(line)>4096:raise contract.Hold('owned relay readiness line exceeded bound')
                 if b'\n' in line:
-                    if line.split(b'\n',1)[0].strip()!=b'MAPPING_LATERAL_RELAY_RECT_V5_READY 127.0.0.1:7447':raise contract.Hold('owned relay did not acknowledge readiness')
+                    if line.split(b'\n',1)[0].strip()!=getattr(self,'expected_ready','MAPPING_LATERAL_RELAY_RECT_V5_READY 127.0.0.1:7447').encode():raise contract.Hold('owned relay did not acknowledge readiness')
                     break
             # Immediately retained pidfd binds the Popen child. Wait for the
             # immutable child's post-exec READY before sampling argv/identity.
@@ -508,7 +512,7 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
           actual_truth_age_cap_sec=contract.truth_age_limit(model),lateral_magnitude=contract.MAX_LATERAL_RAW,
           scene_identity_basis='root external host attestation; no direct host UE monitoring',controller_pid_namespace=release['controller_pid_namespace'],scene_identity_proof=release['scene_identity_proof'],
           checked_unix_ns=time.time_ns(),checked_steady_ns=time.monotonic_ns(),boundary='Preflight evidence only; no additional motion permission.'),
-          prearm_qualification=getattr(getattr(relay,'prearm_qualification',None),'arm_receipt',None))
+          prearm_qualification=getattr(getattr(relay,'prearm_qualification',None),'arm_receipt',None),sim_command_endpoint=getattr(relay,'sim_command_endpoint',None))
         def rotate_to(target,tolerance=.08,deadline_steady=None,terminal_deadline_steady=None):
             while True:
                 if deadline_steady is not None and time.monotonic()>=deadline_steady:raise contract.Hold('bounded heading correction deadline expired')

@@ -1,0 +1,7 @@
+{
+  "scope": "CANONICAL_FIXTURE_LOCATOR_ONLY_RUNTIME_EXACT_V15",
+  "original_test_sha256": "ba5958222dc61d492e34d2f7dfd4299a0b00039e33d159ff45ff1f09e7bede1b",
+  "canonical_test_sha256": "c45392305de5fa67e4cf120bfc1f2f4de9824d2fa52382e570bb648ad9837b00",
+  "assertions_removed": 0,
+  "reused_previously_reviewed_BASE_locator": true
+}

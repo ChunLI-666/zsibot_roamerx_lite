@@ -1,4 +1,8 @@
-# Current source revision v14 / protocol v5 — ROOT HOLD
+# Current source revision v15 / protocol v5 — ROOT HOLD
+
+An explicit SIM host endpoint option permits only Root-bound 192.168.1.219:7447, with the original scene attestation and UE process identity. The default remains loopback. Parent, frozen child admission, READY, every command and cleanup zero must agree on the endpoint; the child also verifies its frozen contract. Timing, full-body checks, source freshness, ownership audit and control behavior remain. A new private network and new sensor identities require separate Root releases and runtime validation. No full-map or native acceptance.
+
+# Historical source revision v14 / protocol v5 — ROOT HOLD
 
 Pulse events use pulse_index while the actual execution wrapper retains the route point index. The three event payload keys are the only runtime change; all control, stop, input, deadline and geometry behavior remains Source13. The real wrapper and terminal helper are now tested together. The original Source13 runtime failure remains archived; motion and full-map acceptance remain pending.
 
