@@ -27,8 +27,10 @@ def identity(pid):
         argv=[p.decode(errors='backslashreplace') for p in raw.rstrip(b'\0').split(b'\0')],
         boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip())
 
-def validated_axes(msg,now_ns):
-    if not isinstance(msg,dict) or set(msg)!={'scope','capability','issued_unix_ns','forward','lateral','yaw'}:
+def validated_axes(msg,now_ns,fine_forward_profile=None):
+    plain={'scope','capability','issued_unix_ns','forward','lateral','yaw'}
+    fine=isinstance(msg,dict) and set(msg)==plain|{'primitive_phase','fine_forward_subcapability'}
+    if not isinstance(msg,dict) or (set(msg)!=plain and not fine):
         raise ValueError('exact scoped primitive required')
     if msg['scope']!=SCOPE or msg['capability']!=CAPABILITY or type(msg['issued_unix_ns']) is not int:
         raise ValueError('wrong acquisition capability/stamp')
@@ -36,11 +38,15 @@ def validated_axes(msg,now_ns):
     values=[msg[k] for k in ('forward','lateral','yaw')]
     if not all(type(v) in (int,float) and math.isfinite(v) for v in values):raise ValueError('nonfinite/boolean axes')
     f,l,y=values
-    if f not in (0.,.2) or l not in (-.4,0.,.4) or y not in (-.3,0.,.3) or sum(v!=0 for v in values)>1:
+    if fine:
+        import lateral_capability as proof
+        selected=proof.fine_profile(fine_forward_profile)
+        if msg['primitive_phase']!='forward_terminal_fine' or msg['fine_forward_subcapability']!=selected['subcapability'] or f!=selected['selected_fine_forward_mps']/2. or l!=0. or y!=0.:raise ValueError('fine phase/value differs from exact root profile')
+    elif f not in (0.,.2) or l not in (-.4,0.,.4) or y not in (-.3,0.,.3) or sum(v!=0 for v in values)>1:
         raise ValueError('only exclusive forward+.2/lateral±.4/yaw±.3; no reverse/mixed/micro axes')
     return dict(version=1,action='walk',forward=f,lateral=l,yaw=y)
 
-def run_loop(sock,stream,ready,clock=time,selector=select.select,parent_live=lambda:True):
+def run_loop(sock,stream,ready,clock=time,selector=select.select,parent_live=lambda:True,fine_forward_profile=None):
     current=ZERO;issued_ns=None;last_valid=None;accepted=0;rejected=0;expired=0;clock_pair=None
     def clock_check(unix_ns,steady):
         nonlocal clock_pair
@@ -59,7 +65,7 @@ def run_loop(sock,stream,ready,clock=time,selector=select.select,parent_live=lam
                 line=stream.readline()
                 if not line:break
                 try:
-                    msg=json.loads(line);current=validated_axes(msg,clock.time_ns());issued_ns=msg['issued_unix_ns'];last_valid=clock.monotonic();accepted+=1
+                    msg=json.loads(line);current=validated_axes(msg,clock.time_ns(),fine_forward_profile);issued_ns=msg['issued_unix_ns'];last_valid=clock.monotonic();accepted+=1
                 except (ValueError,TypeError,KeyError,json.JSONDecodeError):current=ZERO;issued_ns=None;rejected+=1
             # Acceptance is not a fresh timestamp. Recheck original expiry and
             # watchdog immediately before each positive send, including replay.
@@ -79,6 +85,7 @@ def admit(path,digest):
     import lateral_capability as proof
     if not path.is_absolute() or proof.sha(path)!=digest:raise ValueError('frozen relay admission changed')
     a=proof.read(path);release_path=Path(a['root_release_path']);r=proof.read(release_path)
+    proof.fine_admission_profile(a,r)
     rid=r.get('release_id','')
     if (proof.sha(release_path)!=a['root_release_sha256'] or r.get('allow_execute') is not True or r.get('scope')!=SCOPE
         or r.get('mode')!='controlled_static_sim_scene' or r.get('lateral_capability')!=CAPABILITY
@@ -106,7 +113,7 @@ def main():
     with os.fdopen(descriptor,'w') as stream:
         stream.write(json.dumps(dict(admission_sha256=args.admission_sha256,parent=a['owner_identity']))+'\n');stream.flush();os.fsync(stream.fileno())
     sock=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);sock.settimeout(SOCKET_TIMEOUT_SEC)
-    result=run_loop(sock,sys.stdin,lambda:print(READY,flush=True),parent_live=lambda:identity(os.getppid())==a['owner_identity'])
+    result=run_loop(sock,sys.stdin,lambda:print(READY,flush=True),parent_live=lambda:identity(os.getppid())==a['owner_identity'],fine_forward_profile=a.get('fine_forward_profile'))
     print(json.dumps(result),flush=True);return 0
 
 if __name__=='__main__':raise SystemExit(main())

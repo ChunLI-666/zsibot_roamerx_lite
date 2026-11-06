@@ -544,7 +544,15 @@ def audit_route_geometry(oracle,route,model):
     return dict(checked=True,legs=legs,sweep_samples=samples,semantics='Nominal filled-body translation/rotation and fixed-heading tube; original-age stopping reserve is checked before every live packet.')
 
 
-def primitive_packet(vx,wz,now_ns,lateral_raw=0.):
+def primitive_packet(vx,wz,now_ns,lateral_raw=0.,fine_forward_profile=None,fine_phase=False):
+    if fine_phase is not False:
+        import lateral_capability as proof
+        if fine_phase is not True:raise Hold('fine phase must be exact boolean')
+        try:profile=proof.fine_profile(fine_forward_profile)
+        except ValueError as exc:raise Hold(str(exc)) from exc
+        if not finite([vx,wz,lateral_raw]) or vx!=profile['selected_fine_forward_mps'] or wz!=0. or lateral_raw!=0.:raise Hold('only root-selected exclusive fine forward may use this phase')
+        return dict(scope=SCOPE,capability=CAPABILITY,issued_unix_ns=now_ns,forward=vx/2.,lateral=0.,yaw=0.,
+            primitive_phase='forward_terminal_fine',fine_forward_subcapability=profile['subcapability'])
     if (not finite([vx,wz,lateral_raw]) or vx not in (0.,MAX_VX) or wz not in (-MAX_WZ,0.,MAX_WZ)
         or lateral_raw not in (-MAX_LATERAL_RAW,0.,MAX_LATERAL_RAW) or sum(v!=0 for v in [vx,wz,lateral_raw])>1):
         raise Hold('only forward, inplace turn or pure measured lateral; no reverse/mixed/micro axes')
@@ -608,10 +616,11 @@ def forward_terminal_policy(start,target,policy):
     value=policy['forward_terminal'];length=math.hypot(target[0]-start[0],target[1]-start[1])
     keys={'kind','coarse_stop_remaining_m','max_corrections','max_extra_work_sec'}
     along=policy.get('along_endpoint_tolerance_m');heading=policy.get('travel_yaw_rad')
-    if (policy.get('kind')!='straight_fixed_heading' or not isinstance(value,dict) or set(value)!=keys
+    if (policy.get('kind')!='straight_fixed_heading' or not isinstance(value,dict) or set(value) not in (keys,keys|{'fine_forward_mps'})
         or value.get('kind')!='coarse_stop_then_fine_v1' or not finite([*start,*target,along,heading])
         or not 0<along<=min(.15,length/4) or abs(wrap(target[2]-heading))>.005):
         raise Hold('forward terminal requires explicit valid fixed-heading along tolerance and unchanged target heading')
+    if 'fine_forward_mps' in value and (not finite([value['fine_forward_mps']]) or value['fine_forward_mps'] not in (.2,.3)):raise Hold('fine forward allows only explicit internal.2/.3; absent retainsMAX_VX')
     coarse=value['coarse_stop_remaining_m'];budget=value['max_extra_work_sec'];count=value['max_corrections']
     if (not finite([coarse,budget]) or not .05<=coarse<=min(.15,length/2) or coarse<=along
         or not 0<budget<=20. or type(count) is not int or not 1<=count<=2):
@@ -785,3 +794,26 @@ def verify_udp_inventory(inventory,allowed_processes,allowed_external_sockets,re
         for pid in item['owners']:
             if pid not in known or reader(pid)!=known[pid]:raise Hold('unknown or changed UDP writer identity: '+str(pid))
     return True
+
+
+def fine_command_profile(release,bridge,vx):
+    import lateral_capability as proof
+    try:profile=proof.fine_profile_from_release(release)
+    except ValueError as exc:raise Hold(str(exc)) from exc
+    if bridge is None or profile is None:raise Hold('fine forward requires explicit root release and frozen leg')
+    config=forward_terminal_policy(*bridge)
+    if config is None or config.get('fine_forward_mps')!=profile['selected_fine_forward_mps'] or vx!=profile['selected_fine_forward_mps']:
+        raise Hold('fine forward route/value differs from root-selected subcapability')
+    return profile
+
+
+def validate_fine_route(release,route):
+    import lateral_capability as proof
+    try:profile=proof.fine_profile_from_release(release)
+    except ValueError as exc:raise Hold(str(exc)) from exc
+    start=route['start_anchor_truth']
+    for point in route['waypoints']:
+        target=point['pose_truth'];policy=point.get('leg_policy');config=forward_terminal_policy(start,target,policy)
+        if config is not None and 'fine_forward_mps' in config:fine_command_profile(release,(start,target,policy),config['fine_forward_mps'])
+        start=target
+    return profile

@@ -1,4 +1,8 @@
-# Current source revision v9r2 / protocol v5 — ROOT HOLD
+# Current source revision v10 / protocol v5 — ROOT HOLD
+
+A separate Root-bound fine-forward subcapability may select fixed policy velocity .2 or .3 m/s (semantic raw .1 or .15) only during explicit terminal fine/correction phases. The default, coarse, lateral and yaw profiles retain their earlier whitelist. Release, route, frozen admission and child parser must agree; traces record the actual applied values. The initial cleanup zero attempt retains its successful parent-pipe issue receipt, with no SDK/engine dispatch claim. Existing body, timestamp, collision, stop and deadline gates remain. No new plant model or runtime acceptance is selected by this source.
+
+# Historical source revision v9r2 / protocol v5 — ROOT HOLD
 
 An explicit `forward_terminal` policy enables coarse stop, measured-stop fine approach and at most two same-leg forward corrections within one 20 second budget. Every packet retains the existing ownership, freshness, full-body collision and stop checks; the same deadline also gates any final yaw packet. Original radial and along endpoint limits remain mandatory before a turn and after final stop. Overshoot cannot trigger reverse correction. The actual source-v8 rebound failure remains preserved; this code has no full-map or native navigation acceptance. Omitted policies retain prior behavior. See `READOUT.txt` and `source_manifest_v9r2.json`.
 

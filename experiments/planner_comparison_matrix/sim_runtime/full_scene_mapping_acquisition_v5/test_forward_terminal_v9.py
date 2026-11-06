@@ -129,7 +129,8 @@ class ForwardTerminal(unittest.TestCase):
         from pathlib import Path
         from test_v4_core import BASE as root
         base=root/'full_scene_mapping_lateral_owner_v8/review_source_v8';here=Path(__file__).resolve().parent
-        for n in ['mapping_lateral_relay.py','lateral_capability.py','imu_gate.py','dependencies/waypoint_contract.py','dependencies/map_coverage.py']:
+        # Source10 explicitly changes relay/proof for fine subcapability; three unchanged runtime files remain exact.
+        for n in ['imu_gate.py','dependencies/waypoint_contract.py','dependencies/map_coverage.py']:
             self.assertEqual((here/n).read_bytes(),(base/n).read_bytes())
         self.assertEqual(c.SCOPE,'MAPPING_ACQUISITION_LATERAL_RECT_V5_ONLY')
         self.assertEqual(c.translation_endpoint_tolerance((0,0,0),(.3,0,0)),.075)
