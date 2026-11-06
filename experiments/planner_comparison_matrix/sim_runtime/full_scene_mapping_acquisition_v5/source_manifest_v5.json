@@ -1,0 +1,66 @@
+{
+  "schema": "locnav.mapping_lateral_owner.source_freeze.v5",
+  "scope": "MAPPING_ACQUISITION_LATERAL_RECT_V5_ONLY",
+  "state": "SOURCE_ONLY_MODEL_ROUTE_AND_RUNTIME_ROOT_HOLD",
+  "base_v4_manifest_sha256": "243e96629c3cf366a1e9bed19afe0c77f2de373611fe2fda4f9391ae183bb09c",
+  "runtime_package_sha256": {
+    "full_scene_mapping.py": "863ad3215b7675211af41fccaad4057946ea615c314c4348945080cf3db5b3b8",
+    "full_scene_mapping_contract.py": "6a093710ff4f968fe02f215fb7b7a04ffbdcc8fe958e6a2ec04abce8f96ec790",
+    "mapping_lateral_relay.py": "3e8589d30b73eacd6b2b474701b6856f0066b84f6696ff5ea2dbac37f450f6e1",
+    "lateral_capability.py": "c4e24c6163800ff0badee6cbc912988ccfb71493670164636111fa9e5bdfa874",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "dependencies/waypoint_contract.py": "7258d6c9f5f56bf08930356187505628b446cfd74d02ec41b4c1851faacb4624",
+    "dependencies/map_coverage.py": "bd5f8b855e10d1cb6ad19955fc8b8c5283d31cb543e98dc988c78d9eb1e9f80b"
+  },
+  "runtime_bundle_sha256": "6a782cbd3cf31ae2102b5a29c5be51d2aa7dbc2fe9686fa194f959e25763157b",
+  "files_sha256": {
+    "full_scene_mapping.py": "863ad3215b7675211af41fccaad4057946ea615c314c4348945080cf3db5b3b8",
+    "full_scene_mapping_contract.py": "6a093710ff4f968fe02f215fb7b7a04ffbdcc8fe958e6a2ec04abce8f96ec790",
+    "mapping_lateral_relay.py": "3e8589d30b73eacd6b2b474701b6856f0066b84f6696ff5ea2dbac37f450f6e1",
+    "lateral_capability.py": "c4e24c6163800ff0badee6cbc912988ccfb71493670164636111fa9e5bdfa874",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "dependencies/waypoint_contract.py": "7258d6c9f5f56bf08930356187505628b446cfd74d02ec41b4c1851faacb4624",
+    "dependencies/map_coverage.py": "bd5f8b855e10d1cb6ad19955fc8b8c5283d31cb543e98dc988c78d9eb1e9f80b",
+    "motion_model.ROOT_HOLD.json": "d9dd5691586273a3e450819bc5914ac2ceaaec1dc383a10622adf57756fe857a",
+    "footprint.ROOT_HOLD.json": "600c5fab51ad30f5bc382cc20341f85ffb4ec9e1f30beabc056359beb8e687da",
+    "test_v4_core.py": "8a3741d8c00a5b51d4531bdac3ab6d8318a73c72d91312d96a93f8f1ebfcfcc5",
+    "test_v5_delta.py": "5d8d068449a76300e7bebd3a13e5dd1c64b7e7dfc362b13af494dcb6269ef638",
+    "README.md": "546f0c013f3fcc99b3e56912fca81e97df372dbccd75539235d155cc0c4f8135",
+    "v5_delta.diff": "e6a1f4d91b53c657050e2100575647526a95313eddea406d4953e7b60b9ed39e",
+    "source_preservation_v5.json": "f06834dabe5eab5580acf35920717b9d68edcb5823eba58d314ffc7bbea3ee76",
+    "fixtures_v5.log": "4a91fda92958a5a4d210125437c65180660faa37a44c65fc0cd48331ddf128d8",
+    "actual_pair_validation_v5.json": "d03b6629ce1b02161560ee19c0436bf30f41a5f64c8f12d2fecdfa8a92764d9e",
+    "runtime_bundle_v5.tar": "6a782cbd3cf31ae2102b5a29c5be51d2aa7dbc2fe9686fa194f959e25763157b"
+  },
+  "external_inputs_sha256": {
+    "analysis_outputs/planner_comparison_20261105/full_scene_mapping_lateral_owner_v4/review_source_v4/source_manifest_v4.json": "243e96629c3cf366a1e9bed19afe0c77f2de373611fe2fda4f9391ae183bb09c",
+    "analysis_outputs/planner_comparison_20261105/model_envelope_rectangular_audit_v1/manifest.json": "ebfb6900d7c424b46e9e1e191f774a57427a1c2bcf76d625b31937963a239cc2",
+    "analysis_outputs/planner_comparison_20261105/model_envelope_rectangular_audit_v1/unrestricted_axis_proof.json": "e18db218e4b4183bafe564530a571b1c939690707f709e9dc8efe81cc787b981",
+    "analysis_outputs/planner_comparison_20261105/model_envelope_rectangular_independent_review_solmax_v1/review.json": "669efe13a5f038b6d73adc7b9041e88d1c87c8b3336840ed607108acd0879111",
+    "analysis_outputs/planner_comparison_20261105/full_scene_actual_engineering_model_v1/lateral_actual_pair_admission.root_reviewed.json": "018afedce944cda6db707f1fffc6b475640159ac34fc4877c1644a79e801b156",
+    "analysis_outputs/planner_comparison_20261105/full_scene_actual_engineering_model_v1/motion_model.v5.CANDIDATE_HOLD.json": "3dcccde9e2e68e5f639378e12bd413e24bc8f12285b3b96f8146598e51c103d2",
+    "analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_case3_motion_audit_v1/model_measurements.json": "06421f1509f90c3514964206db29065c4fce9e598183add0030ca846b802790f",
+    "analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_case3_motion_audit_v1/coverage_correction_v2.json": "b82c26310fc896df15625fcd4648f527d9168eb74b1e38dff49d3bc8f1a31fc7",
+    "analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_case3_motion_audit_v1/manifest_v2.json": "f6fac9bcd246450b37645a0991c8d795990cf971e9e438b48b03c4cfa1371736",
+    "analysis_outputs/planner_comparison_20261105/full_scene_mapping_v4_timing_review_solmax_v1/review.json": "301e9d341c00eb216fd13d11115c22bee97f927f3fb18872c828fb0eff324b10"
+  },
+  "pure_tests": 32,
+  "preservation_checks": 50,
+  "default_footprint_mode": "legacy_square",
+  "rectangle_selection_requires_full_geometry_math_receipt": true,
+  "certified_minimum_body_half_xy_m": [
+    0.647,
+    0.53
+  ],
+  "padding_m": 0.15,
+  "model_values_selected": false,
+  "route_selected": false,
+  "root_release_supplied": false,
+  "real_runtime_operations": 0,
+  "canonical_modified": false,
+  "codacy": {
+    "state": "UNAVAILABLE",
+    "tools_found": 0,
+    "dependencies_installed": false
+  }
+}

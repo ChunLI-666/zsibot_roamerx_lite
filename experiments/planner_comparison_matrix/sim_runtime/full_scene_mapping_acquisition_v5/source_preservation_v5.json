@@ -1,0 +1,209 @@
+{
+  "schema": "locnav.mapping_lateral_owner.preservation.v5",
+  "base_manifest_sha256": "243e96629c3cf366a1e9bed19afe0c77f2de373611fe2fda4f9391ae183bb09c",
+  "checks": [
+    {
+      "check": "imu_gate.py exact v4 bytes",
+      "passed": true
+    },
+    {
+      "check": "dependencies/waypoint_contract.py exact v4 bytes",
+      "passed": true
+    },
+    {
+      "check": "dependencies/map_coverage.py exact v4 bytes",
+      "passed": true
+    },
+    {
+      "check": "owner function AST source_files",
+      "passed": true
+    },
+    {
+      "check": "owner function AST BoundedCallbacks",
+      "passed": true
+    },
+    {
+      "check": "owner function AST __init__",
+      "passed": true
+    },
+    {
+      "check": "owner function AST wrap",
+      "passed": true
+    },
+    {
+      "check": "owner function AST spin",
+      "passed": true
+    },
+    {
+      "check": "owner function AST validate_release",
+      "passed": true
+    },
+    {
+      "check": "owner function AST template",
+      "passed": true
+    },
+    {
+      "check": "owner function AST finalize_owned_relay",
+      "passed": true
+    },
+    {
+      "check": "owner function AST main",
+      "passed": true
+    },
+    {
+      "check": "owner function AST send",
+      "passed": true
+    },
+    {
+      "check": "owner function AST close",
+      "passed": true
+    },
+    {
+      "check": "owner function AST health",
+      "passed": true
+    },
+    {
+      "check": "owner function AST stable",
+      "passed": true
+    },
+    {
+      "check": "owner function AST remember",
+      "passed": true
+    },
+    {
+      "check": "owner function AST cloud",
+      "passed": true
+    },
+    {
+      "check": "owner function AST scan",
+      "passed": true
+    },
+    {
+      "check": "owner function AST imu",
+      "passed": true
+    },
+    {
+      "check": "owner function AST raw_imu",
+      "passed": true
+    },
+    {
+      "check": "owner function AST final_guard",
+      "passed": true
+    },
+    {
+      "check": "contract function AST validate_route",
+      "passed": true
+    },
+    {
+      "check": "contract function AST validate_model",
+      "passed": true
+    },
+    {
+      "check": "contract function AST truth_age_limit",
+      "passed": true
+    },
+    {
+      "check": "contract function AST command_age_upper",
+      "passed": true
+    },
+    {
+      "check": "contract function AST command_time_pose_guard",
+      "passed": true
+    },
+    {
+      "check": "contract function AST fresh",
+      "passed": true
+    },
+    {
+      "check": "contract function AST check_clock",
+      "passed": true
+    },
+    {
+      "check": "contract function AST primitive_packet",
+      "passed": true
+    },
+    {
+      "check": "contract function AST standing_before_relay",
+      "passed": true
+    },
+    {
+      "check": "contract function AST measured_stop",
+      "passed": true
+    },
+    {
+      "check": "contract function AST StableStop",
+      "passed": true
+    },
+    {
+      "check": "contract function AST straight_leg_state",
+      "passed": true
+    },
+    {
+      "check": "contract function AST checked_cloud",
+      "passed": true
+    },
+    {
+      "check": "contract function AST pose_at",
+      "passed": true
+    },
+    {
+      "check": "contract function AST hits_in_truth",
+      "passed": true
+    },
+    {
+      "check": "contract function AST checked_quaternion",
+      "passed": true
+    },
+    {
+      "check": "contract function AST mount_quaternion",
+      "passed": true
+    },
+    {
+      "check": "contract function AST verify_udp_inventory",
+      "passed": true
+    },
+    {
+      "check": "contract function AST udp_inventory",
+      "passed": true
+    },
+    {
+      "check": "contract function AST process_identity",
+      "passed": true
+    },
+    {
+      "check": "contract function AST verify_retired",
+      "passed": true
+    },
+    {
+      "check": "contract function AST claim_once",
+      "passed": true
+    },
+    {
+      "check": "relay all function ASTs exact v4",
+      "passed": true
+    },
+    {
+      "check": "relay module AST only scope/capability/READY labels",
+      "passed": true
+    },
+    {
+      "check": "model remains unreviewed/null",
+      "passed": true
+    },
+    {
+      "check": "new directional fields null 0.4",
+      "passed": true
+    },
+    {
+      "check": "new directional fields null -0.4",
+      "passed": true
+    },
+    {
+      "check": "default legacy footprint",
+      "passed": true
+    }
+  ],
+  "passed": 50,
+  "runtime_operations": 0,
+  "canonical_modified": false
+}

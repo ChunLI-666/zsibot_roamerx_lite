@@ -1,0 +1,30 @@
+{
+  "read_only_validation": true,
+  "actual_proof_sha256": "018afedce944cda6db707f1fffc6b475640159ac34fc4877c1644a79e801b156",
+  "adapter_pid": 5237,
+  "calibration_diagnostic_passed": false,
+  "admission_kind": "root_reviewed_auxiliary_camera_interrupted_pair",
+  "actual_semantic_two_sign_admitted": true,
+  "audit": {
+    "probes": [
+      {
+        "sign": 1,
+        "max_norm_speed_mps": 0.36687115261652825,
+        "max_yaw_rate_rps": 0.12214189175897422,
+        "stop_distance_m": 0.04830854538731533,
+        "cross_drift_m": 0.007456929671704601,
+        "yaw_drift_rad": 0.009476896495737058
+      },
+      {
+        "sign": -1,
+        "max_norm_speed_mps": 0.3712772580814003,
+        "max_yaw_rate_rps": 0.13636634078732623,
+        "stop_distance_m": 0.03640987228638097,
+        "cross_drift_m": 0.0035227662254618064,
+        "yaw_drift_rad": 0.02092609444261085
+      }
+    ]
+  },
+  "runtime_release": false,
+  "model_selected": false
+}

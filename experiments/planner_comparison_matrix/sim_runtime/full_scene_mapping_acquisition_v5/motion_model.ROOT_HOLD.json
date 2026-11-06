@@ -1,0 +1,56 @@
+{
+  "max_truth_speed_mps": null,
+  "max_truth_yaw_rate_rps": null,
+  "stop_distance_reserve_m": null,
+  "stop_angle_reserve_rad": null,
+  "forward_drift_reserve_m": null,
+  "turn_drift_reserve_m": null,
+  "forward_yaw_reserve_rad": null,
+  "max_roll_pitch_rad": null,
+  "body_z_min_m": null,
+  "body_z_max_m": null,
+  "floor_z_m": null,
+  "floor_hit_tolerance_m": null,
+  "obstacle_top_m": null,
+  "basis": "root_reviewed_engineering_bound_sim_only",
+  "lateral_capability": "semantic_lateral_mag04_rect_v5",
+  "lateral_model_reviewed": false,
+  "lateral_calibration_proof_sha256": null,
+  "lateral_models": {
+    "positive": {
+      "raw_lateral": 0.4,
+      "max_truth_speed_mps": null,
+      "max_yaw_rate_rps": null,
+      "stop_distance_reserve_m": null,
+      "drift_reserve_m": null,
+      "yaw_reserve_rad": null,
+      "min_controllable_leg_m": null,
+      "endpoint_accuracy_bound_m": null,
+      "bias_vx_mps": null,
+      "nominal_vy_mps": null,
+      "k_cross_per_sec": null
+    },
+    "negative": {
+      "raw_lateral": -0.4,
+      "max_truth_speed_mps": null,
+      "max_yaw_rate_rps": null,
+      "stop_distance_reserve_m": null,
+      "drift_reserve_m": null,
+      "yaw_reserve_rad": null,
+      "min_controllable_leg_m": null,
+      "endpoint_accuracy_bound_m": null,
+      "bias_vx_mps": null,
+      "nominal_vy_mps": null,
+      "k_cross_per_sec": null
+    }
+  },
+  "future_error_reference": "original_GT_actual_pose_future_errors_v1",
+  "independent_future_errors_reviewed": false,
+  "max_truth_age_sec": null,
+  "footprint_mode": "legacy_square",
+  "body_half_xy_m": [
+    0.74,
+    0.74
+  ],
+  "padding_m": 0.15
+}

@@ -1,0 +1,560 @@
+--- v4/full_scene_mapping.py
++++ v5/full_scene_mapping.py
+@@ -144,7 +144,7 @@
+               stderr=self.log,text=True,bufsize=1,env=env,start_new_session=True)
+             self.pidfd=os.pidfd_open(self.process.pid)
+             os.set_blocking(self.process.stdin.fileno(),False)
+-            if not select.select([self.process.stdout],[],[],3.)[0] or self.process.stdout.readline().strip()!='MAPPING_LATERAL_RELAY_V4_READY 127.0.0.1:7447':raise contract.Hold('owned relay did not acknowledge readiness')
++            if not select.select([self.process.stdout],[],[],3.)[0] or self.process.stdout.readline().strip()!='MAPPING_LATERAL_RELAY_RECT_V5_READY 127.0.0.1:7447':raise contract.Hold('owned relay did not acknowledge readiness')
+             # Immediately retained pidfd binds the Popen child. Wait for the
+             # immutable child's post-exec READY before sampling argv/identity.
+             self.identity=contract.process_identity(self.process.pid)
+@@ -253,6 +253,10 @@
+             p,q=message.pose.pose.position,message.pose.pose.orientation;t=message.twist.twist
+             item=remember('truth',message,dict(xyz=[p.x,p.y,p.z],q=[q.x,q.y,q.z,q.w],child_frame_id=message.child_frame_id,
+                 twist=[t.linear.x,t.linear.y,t.linear.z,t.angular.x,t.angular.y,t.angular.z]))
++            item['original_header_yaw_rate_rps']=None
++            if history:
++                previous=history[-1];dt=(item['stamp_ns']-previous['stamp_ns'])/1e9
++                if dt>0:item['original_header_yaw_rate_rps']=contract.wrap(contract.rpy(item['q'])[2]-contract.rpy(previous['q'])[2])/dt
+             history.append(item)
+         def cloud(message):clouds.append(remember('raw_lidar',message,dict(message=message,width=message.width)))
+         def scan(message):scans.append(remember('scan',message,dict(ranges=len(message.ranges))))
+@@ -393,8 +397,8 @@
+                 if last_send is not None and steady-last_send>contract.CONTROL_RENEWAL_LIMIT:raise contract.Hold('guard computation exceeded command renewal bound')
+                 if not audit['valid'] or audit['first_violation'] is not None or steady-audit['checked_steady']>.3:raise contract.Hold('owner audit expired during guard computation')
+             packet=relay.send(vx,wz,preflight=final_guard,lateral_raw=lateral_raw);last_send=final_facts['issued_steady_sec']
++            if lateral_raw:active_lateral=lateral_context
+             if time.monotonic()-last_send>contract.CONTROL_RENEWAL_LIMIT:raise contract.Hold('command write/dispatch exceeded renewal bound; issued anchor retained')
+-            if lateral_raw:active_lateral=lateral_context
+             accepted=writer.submit('state_trace',dict(unix_ns=time.time_ns(),scope=contract.SCOPE,truth=truth,lidar_stamp_ns=cloud['stamp_ns'],
+               lidar_gt_association=cloud['pose'],command=packet,policy_vx=vx,policy_wz=wz,policy_lateral_raw=lateral_raw,primitive=kind,
+               lateral_stop_envelope_retained=bool(lateral_context),
+@@ -432,12 +436,15 @@
+           actual_truth_age_cap_sec=contract.truth_age_limit(model),lateral_magnitude=contract.MAX_LATERAL_RAW,
+           scene_identity_basis='root external host attestation; no direct host UE monitoring',controller_pid_namespace=release['controller_pid_namespace'],scene_identity_proof=release['scene_identity_proof'],
+           checked_unix_ns=time.time_ns(),checked_steady_ns=time.monotonic_ns(),boundary='Preflight evidence only; no additional motion permission.'))
+-        def rotate_to(target,tolerance=.08):
++        def rotate_to(target,tolerance=.08,deadline_steady=None):
+             while True:
++                if deadline_steady is not None and time.monotonic()>=deadline_steady:raise contract.Hold('bounded heading correction deadline expired')
+                 truth,yaw=health()[:2];error=contract.wrap(target-yaw)
+                 if abs(error)<=tolerance:break
+                 tick(0.,math.copysign(contract.MAX_WZ,error))
+-            truth,yaw=stable(contract.STOP_STABLE,8.)
++            remaining=8. if deadline_steady is None else min(8.,max(0.,deadline_steady-time.monotonic()))
++            truth,yaw=stable(contract.STOP_STABLE,remaining)
++            if deadline_steady is not None and time.monotonic()>deadline_steady:raise contract.Hold('heading settle exceeded correction deadline')
+             if abs(contract.wrap(target-yaw))>tolerance:raise contract.Hold('settled heading outside acquisition tolerance')
+             return truth,yaw
+         for index,point in enumerate(route['waypoints']):
+@@ -448,29 +455,37 @@
+             if policy is not None:
+                 stable(contract.STOP_STABLE,8.)
+                 rotate_to(policy['body_yaw_rad'] if lateral else policy['travel_yaw_rad'],policy['max_yaw_error_rad'])
+-            entry_truth,entry_yaw=health()[:2];leg_entry=(*entry_truth['xyz'][:2],entry_yaw);corrections=0
++            entry_truth,entry_yaw=health()[:2];leg_entry=(*entry_truth['xyz'][:2],entry_yaw);corrections=0;correction_used=0.;feedback=None
+             while True:
+                 truth,yaw=health()[:2];dx,dy=x-truth['xyz'][0],y-truth['xyz'][1]
+                 if lateral:
+                     state=contract.lateral_leg_state(leg_start,(x,y,heading),(*truth['xyz'][:2],yaw),policy)
+                     if state['reached']:
+                         contract.require_translation_progress(leg_start,(x,y,heading),leg_entry,(*truth['xyz'][:2],yaw),tolerance);break
+-                    decision=contract.lateral_correction_state(state,(*truth['xyz'][:2],yaw),policy,corrections)
++                    feedback=contract.feedback_window(feedback,state,time.monotonic(),state['along_m'])
++                    decision=contract.lateral_correction_state(state,(*truth['xyz'][:2],yaw),policy,corrections,model)
++                    if decision['observe_cross'] and feedback is None:
++                        feedback=dict(started_steady=time.monotonic(),start_along_m=state['along_m'],start_abs_cross_m=abs(state['cross_track_m']))
+                     if decision['stop_then_recheck']:
+                         # Zero through the signed actual-GT stop envelope first.
+                         # stable() alone clears active_lateral after measured stop.
+-                        truth,yaw=stable(contract.STOP_STABLE,8.)
++                        remaining=contract.LATERAL_CORRECTION_BUDGET_SEC-correction_used
++                        if remaining<=0:raise contract.Hold('total per-leg correction budget exhausted')
++                        correction_started=time.monotonic();correction_deadline=correction_started+remaining
++                        truth,yaw=stable(contract.STOP_STABLE,min(8.,remaining))
+                         state=contract.lateral_leg_state(leg_start,(x,y,heading),(*truth['xyz'][:2],yaw),policy)
+-                        fine=decision['settled_yaw_tolerance_rad']
+-                        if abs(state['cross_track_m'])>=decision['cross_trigger_m'] and abs(contract.wrap(yaw-policy['body_yaw_rad']))<=fine:
+-                            raise contract.Hold('persistent cross drift cannot be corrected by reviewed single-axis cardinal yaw return')
+-                        # rotate_to uses the unchanged live filled-SAT turn guard;
+-                        # a narrow corridor may therefore HOLD instead of turn.
+-                        truth,yaw=rotate_to(policy['body_yaw_rad'],fine)
++                        desired=contract.lateral_heading_target(state,(*truth['xyz'][:2],yaw),policy,model)
++                        fine=desired['settled_yaw_tolerance_rad'];turned=desired['yaw_error_to_target_rad']>fine
++                        if turned:
++                            truth,yaw=rotate_to(desired['target_body_yaw_rad'],fine,correction_deadline)
++                            corrections+=1
++                        correction_used+=time.monotonic()-correction_started
++                        if correction_used>contract.LATERAL_CORRECTION_BUDGET_SEC:raise contract.Hold('total heading correction work exceeded20s')
+                         state=contract.lateral_leg_state(leg_start,(x,y,heading),(*truth['xyz'][:2],yaw),policy)
+-                        if abs(state['cross_track_m'])>=decision['cross_trigger_m']:
+-                            raise contract.Hold('cross tube still lacks correction margin after stopped yaw return')
+-                        corrections+=1;emit('same_leg_stopped_yaw_return',index=index,correction=corrections,truth=truth,decision=decision)
++                        aligned=contract.lateral_heading_target(state,(*truth['xyz'][:2],yaw),policy,model)
++                        if aligned['yaw_error_to_target_rad']>aligned['settled_yaw_tolerance_rad']:raise contract.Hold('settled compensation target changed beyond attained tolerance')
++                        feedback=dict(started_steady=time.monotonic(),start_along_m=state['along_m'],start_abs_cross_m=abs(state['cross_track_m'])) if abs(state['cross_track_m'])>=decision['cross_trigger_m'] else None
++                        emit('same_leg_stopped_heading_compensation',index=index,correction=corrections,correction_work_sec=correction_used,turned=turned,truth=truth,decision=aligned)
+                         continue  # Same start/target/entry/sign, no new route or axis.
+                     tick(bridge=(leg_start,(x,y,heading),policy),lateral_raw=policy['lateral_sign']*contract.MAX_LATERAL_RAW)
+                     continue
+@@ -502,10 +517,12 @@
+                     callbacks.spin()
+                     try:
+                         relay.send();sample=latest.get('truth')
++                        if active_lateral is not None:contract.directional_yaw_guard(sample,model,active_lateral[0])
++                        contract.standing_before_relay(sample,model,time.time_ns(),time.monotonic())
+                         if checker.update(sample,relay.command,time.time_ns(),time.monotonic(),contract.STOP_STABLE):
+                             stop_observation.update(truth=sample,command=list(relay.command),checked_unix_ns=time.time_ns(),checked_steady_ns=time.monotonic_ns(),continuous_seconds=contract.STOP_STABLE)
+                             return True
+-                    except BaseException:checker=contract.StableStop()
++                    except BaseException:checker=contract.StableStop(contract.truth_age_limit(model))
+                 return False
+             closed=finalize_owned_relay(relay,observe_stop);result.update(closed);stop_verified=closed['stop_verified']
+             result.update(relay_identity=relay.identity,relay_source_sha256=relay.source_sha256,relay_returncode=relay.process.poll() if relay.process is not None else None)
+--- v4/full_scene_mapping_contract.py
++++ v5/full_scene_mapping_contract.py
+@@ -14,7 +14,7 @@
+ import sys
+ 
+ MODE='controlled_static_sim_scene'
+-SCOPE='MAPPING_ACQUISITION_LATERAL_V4_ONLY'
++SCOPE='MAPPING_ACQUISITION_LATERAL_RECT_V5_ONLY'
+ HALF_BODY=.74
+ PADDING=.15
+ MAX_VX=.4
+@@ -34,9 +34,19 @@
+ CLEANUP_RESERVE=25.
+ TRUTH_FRAME='map'
+ TRUTH_CHILD='BASE_LINK'  # Original wire label; never normalized into Nav base_link.
+-CAPABILITY='semantic_lateral_mag04_v4'
++CAPABILITY='semantic_lateral_mag04_rect_v5'
+ MAX_LATERAL_RAW=.4
+ ACTUAL_GT_STOP_REFERENCE='original_GT_actual_pose_future_errors_v1'
++RECTANGLE_PROOF_MANIFEST_SHA='ebfb6900d7c424b46e9e1e191f774a57427a1c2bcf76d625b31937963a239cc2'
++RECTANGLE_PROOF_REPORT_SHA='e18db218e4b4183bafe564530a571b1c939690707f709e9dc8efe81cc787b981'
++RECTANGLE_REVIEW_SHA='669efe13a5f038b6d73adc7b9041e88d1c87c8b3336840ed607108acd0879111'
++MAX_LATERAL_YAW_BAND=.12
++MAX_LATERAL_CORRECTIONS=4
++LATERAL_CORRECTION_BUDGET_SEC=20.
++FEEDBACK_WINDOW_SEC=1.
++FEEDBACK_WINDOW_PROGRESS_M=.20
++MIN_CROSS_IMPROVEMENT_M=.001
++LENGTH_COMPARISON_EPS_M=1e-9
+ 
+ POINT_FIELDS=[('x',0,7),('y',4,7),('z',8,7),('intensity',12,7),('tag',16,2),('line',17,2),('timestamp',18,8)]
+ 
+@@ -210,6 +220,52 @@
+     return value
+ 
+ 
++def footprint_spec(value,path):
++    """Runtime shape selection is stricter than generic geometry construction."""
++    mode=value.get('footprint_mode','legacy_square');half=value.get('body_half',value.get('body_half_xy_m'))
++    if value.get('padding',value.get('padding_m'))!=PADDING or value.get('footprint_inflation_in_grid_m')!=0.:
++        raise Hold('independent .15 padding and un-eroded oracle required')
++    model=value.get('motion_model',{})
++    if ('footprint_mode' in model and model['footprint_mode']!=mode
++        or 'body_half_xy_m' in model and model['body_half_xy_m']!=half
++        or 'padding_m' in model and model['padding_m']!=PADDING):raise Hold('motion model and physical oracle footprint disagree')
++    if mode=='legacy_square':
++        if half!=[HALF_BODY,HALF_BODY]:raise Hold('legacy mode cannot shrink the .74square')
++        return dict(mode=mode,body_half_xy_m=half,padding_m=PADDING,proof_sha256=None,certified_roll_pitch_cap_rad=None)
++    if mode!='certified_full_body_rectangle' or not isinstance(half,list) or len(half)!=2 or not finite(half):raise Hold('new rectangle half widths/proof remain ROOT HOLD')
++    evidence=value.get('body_envelope_proof',{});artifacts=value.get('artifacts_sha256',{});root=Path(path).parent
++    def bound_file(key,expected=None):
++        ref=evidence.get(key,{})
++        file=Path(ref.get('path',''));file=file if file.is_absolute() else root/file
++        digest=ref.get('sha256')
++        if not file.is_file() or sha(file)!=digest or expected is not None and digest!=expected:raise Hold('full-body proof artifact absent/changed: '+key)
++        if not any((Path(k) if Path(k).is_absolute() else root/k).resolve()==file.resolve() and v==digest for k,v in artifacts.items()):raise Hold('full-body proof artifact missing from complete oracle inventory: '+key)
++        return read_json(file),digest,file
++    manifest,manifest_sha,manifest_path=bound_file('manifest',RECTANGLE_PROOF_MANIFEST_SHA)
++    report,report_sha,report_path=bound_file('report',RECTANGLE_PROOF_REPORT_SHA)
++    review,review_sha,review_path=bound_file('independent_review',RECTANGLE_REVIEW_SHA)
++    if (review.get('schema')!='locnav.full_body_rectangle.independent_review.v1'
++        or review.get('decision')!='MATH_SOURCE_GO_CONDITIONAL_FULL_BODY_RECTANGLE_BOUND' or review.get('blocking_findings')!=[]
++        or review.get('reviewed_manifest_sha256')!=manifest_sha or review.get('proof_sha256')!=report_sha
++        or review.get('runtime_release_authorized') is not False):raise Hold('independent full-geometry SOURCE_GO receipt is missing or unbound')
++    if manifest.get('authoritative_files',{}).get('unrestricted_axis_proof.json',{}).get('sha256')!=report_sha:raise Hold('full geometry manifest/report mismatch')
++    if (report.get('schema')!='locnav.full_xml_arbitrary_hinge_axis_enclosure.v1'
++        or report.get('includes_all_17_meshes_all_30_geoms') is not True
++        or report.get('all_hinge_angles_unrestricted') is not True or report.get('joint_limits_or_margin_used_as_hard_bounds') is not False
++        or report.get('body_roll_pitch_condition_rad')!=[.25,.25] or report.get('padding_consumed_by_bound') is not False):
++        raise Hold('only the independently reviewed whole-geometry arbitrary-hinge/RP proof may shrink the body')
++    for dep in report.get('dependencies_sha256',{}).values():
++        asset=Path(dep['path'])
++        if not asset.is_file() or sha(asset)!=dep['sha256']:raise Hold('certified full-body model asset missing/changed')
++    certified=review['accepted_half_extents_m']
++    if certified!=report['strict_upward_millimetre_ceil_half_xy_m'] or review.get('padding_separate') is not True:raise Hold('reviewed rectangle/padding mismatch')
++    if any(h<b for h,b in zip(half,certified)) or min(half)<=0:raise Hold('rectangle smaller than certified outward body half bound')
++    rp=value.get('motion_model',{}).get('max_roll_pitch_rad')
++    if not finite([rp]) or not 0<rp<=.25:raise Hold('rectangular model must bound entire motion/stop RP<=.25')
++    return dict(mode=mode,body_half_xy_m=half,padding_m=PADDING,proof_sha256=report_sha,
++        proof_manifest_sha256=manifest_sha,independent_review_sha256=review_sha,certified_roll_pitch_cap_rad=.25)
++
++
+ def validate_oracle(value,path):
+     if value.get('scope')!=SCOPE or value.get('mode')!=MODE:raise Hold('missing controlled static physical oracle')
+     audit=value.get('root_geometry_audit',{})
+@@ -218,7 +274,7 @@
+     if not valid_scene_instance(value.get('scene_instance_id')):raise Hold('physical oracle scene instance missing')
+     height=value.get('floor_height_model',{})
+     if value.get('truth_frame_id')!=TRUTH_FRAME or not isinstance(height,dict) or height.get('type')!='flat':raise Hold('unsupported truth/floor model')
+-    if value.get('body_half',value.get('body_half_xy_m'))!=[HALF_BODY,HALF_BODY] or value.get('padding',value.get('padding_m'))!=PADDING or value.get('footprint_inflation_in_grid_m')!=0.:raise Hold('full body .74 + .15 required; acquisition oracle must be un-eroded')
++    footprint_spec(value,path)
+     alias=value.get('frame_alias',{})
+     if not isinstance(alias,dict) or alias.get('verified') is not True or alias.get('observed_gt_frame')!=TRUTH_FRAME or alias.get('observed_gt_child_frame')!=TRUTH_CHILD or alias.get('numeric_transform')!='identity_verified_against_raw_scan':raise Hold('frame naming alone is not numeric coordinate alignment')
+     if value.get('point_coordinates')!='sensor_local_flu_despite_raw_frame_id_map':raise Hold('raw frame label is not a coordinate transform')
+@@ -259,6 +315,18 @@
+     cells: object
+     resolution: float
+     origin: tuple
++    body_half_xy: tuple=(HALF_BODY,HALF_BODY)
++    padding: float=PADDING
++    footprint_evidence: object=None
++
++    def __post_init__(self):
++        if len(self.body_half_xy)!=2 or not finite([*self.body_half_xy,self.padding]) or min(self.body_half_xy)<=0 or self.padding<0:raise Hold('invalid geometric body half widths/padding')
++
++    @property
++    def padded_half_xy(self):return tuple(h+self.padding for h in self.body_half_xy)
++
++    @property
++    def padded_radius(self):return math.hypot(*self.padded_half_xy)
+ 
+     @classmethod
+     def load(cls,manifest,path):
+@@ -269,7 +337,8 @@
+         for artifact in [grid.source_yaml,grid.source_image]:
+             if not any((Path(path).parent/key).resolve()==artifact and sha(artifact)==digest for key,digest in expected.items()):
+                 raise Hold('oracle grid YAML/image not bound to physical audit')
+-        return cls(grid.cells,grid.resolution,grid.origin)
++        body=footprint_spec(manifest,path)
++        return cls(grid.cells,grid.resolution,grid.origin,tuple(body['body_half_xy_m']),PADDING,body)
+ 
+     def local(self,x,y,yaw=0.):
+         ox,oy,angle=self.origin;c,s=math.cos(angle),math.sin(angle);dx,dy=x-ox,y-oy
+@@ -282,10 +351,10 @@
+ 
+     def footprint_free(self,x,y,yaw,inflation=0.):
+         if not finite([x,y,yaw,inflation]) or inflation<0:raise Hold('invalid footprint query')
+-        x,y,yaw=self.local(x,y,yaw);h=HALF_BODY+PADDING+inflation;r=self.resolution
+-        c,s=math.cos(yaw),math.sin(yaw);extent=h*(abs(c)+abs(s));guard=r
+-        lo_x,hi_x=math.floor((x-extent-guard)/r),math.floor((x+extent+guard)/r)
+-        lo_y,hi_y=math.floor((y-extent-guard)/r),math.floor((y+extent+guard)/r)
++        x,y,yaw=self.local(x,y,yaw);hx,hy=(h+inflation for h in self.padded_half_xy);r=self.resolution
++        c,s=math.cos(yaw),math.sin(yaw);extent_x=hx*abs(c)+hy*abs(s);extent_y=hx*abs(s)+hy*abs(c);guard=r
++        lo_x,hi_x=math.floor((x-extent_x-guard)/r),math.floor((x+extent_x+guard)/r)
++        lo_y,hi_y=math.floor((y-extent_y-guard)/r),math.floor((y+extent_y+guard)/r)
+         if lo_x<0 or lo_y<0 or hi_y>=len(self.cells) or hi_x>=len(self.cells[0]):return False
+         if hasattr(self.cells,'shape') and bool((self.cells[lo_y:hi_y+1,lo_x:hi_x+1]==1).all()):return True
+         # Same filled-cell SAT as the retained C++ checker, including its extra
+@@ -295,14 +364,14 @@
+             for ix in range(lo_x,hi_x+1):
+                 if int(self.cells[iy][ix])==1:continue
+                 dx,dy=(ix+.5)*r-x,(iy+.5)*r-y
+-                if abs(dx)>extent+half_cell or abs(dy)>extent+half_cell:continue
++                if abs(dx)>extent_x+half_cell or abs(dy)>extent_y+half_cell:continue
+                 projected=half_cell*(abs(c)+abs(s))
+-                if abs(c*dx+s*dy)>h+projected or abs(-s*dx+c*dy)>h+projected:continue
++                if abs(c*dx+s*dy)>hx+projected or abs(-s*dx+c*dy)>hy+projected:continue
+                 return False
+         return True
+ 
+     def sweep(self,a,b,inflation=0.):
+-        dyaw=wrap(b[2]-a[2]);radius=math.sqrt(2)*(HALF_BODY+PADDING+inflation)
++        dyaw=wrap(b[2]-a[2]);radius=math.hypot(*(h+inflation for h in self.padded_half_xy))
+         steps=max(1,math.ceil((math.hypot(b[0]-a[0],b[1]-a[1])+radius*abs(dyaw))/(.5*self.resolution)))
+         if steps>100000:raise Hold('unbounded sweep')
+         return [(a[0]+(b[0]-a[0])*i/steps,a[1]+(b[1]-a[1])*i/steps,a[2]+dyaw*i/steps) for i in range(steps+1)]
+@@ -317,8 +386,9 @@
+     """Engineering SIM envelope: original age + packet/watchdog tail + reserve."""
+     if kind not in ('forward','turn','zero','lateral') or sign not in (-1,0,1):raise Hold('unsupported acquisition primitive')
+     if not finite([*pose,input_age_s]) or not -FUTURE_ALLOWANCE<=input_age_s<=MAX_INPUT_AGE:raise Hold('invalid sweep age/pose')
+-    radius=math.sqrt(2)*(HALF_BODY+PADDING);age=max(0.,input_age_s)
+-    uncertainty=(model['max_truth_speed_mps']+radius*model['max_truth_yaw_rate_rps'])*age
++    radius=oracle.padded_radius;age=max(0.,input_age_s)
++    age_yaw_rate=lateral_model(model,sign)['max_yaw_rate_rps'] if kind=='lateral' else model['max_truth_yaw_rate_rps']
++    uncertainty=(model['max_truth_speed_mps']+radius*age_yaw_rate)*age
+     tail=CONTROL_RENEWAL_LIMIT+PACKET_AGE+RELAY_WATCHDOG
+     if kind=='forward':
+         distance=model['max_truth_speed_mps']*tail+model['stop_distance_reserve_m']
+@@ -379,14 +449,14 @@
+     points=np.asarray(points);kept=points[(points[:,2]>floor)&(points[:,2]<=top)]
+     # Cover motion between neighboring sweep samples, whose corner motion is
+     # bounded by half a cell. The oracle SAT has its own full-cell guard.
+-    h=HALF_BODY+PADDING+inflation+.5*oracle.resolution
+-    extent=math.sqrt(2)*h;poses=np.asarray(sweep)
++    hx,hy=(h+inflation+.5*oracle.resolution for h in oracle.padded_half_xy)
++    extent=math.hypot(hx,hy);poses=np.asarray(sweep)
+     nearby=kept[(kept[:,0]>=poses[:,0].min()-extent)&(kept[:,0]<=poses[:,0].max()+extent)&
+                 (kept[:,1]>=poses[:,1].min()-extent)&(kept[:,1]<=poses[:,1].max()+extent)]
+     for x,y,yaw in sweep:
+         c,s=math.cos(yaw),math.sin(yaw)
+         dx,dy=nearby[:,0]-x,nearby[:,1]-y
+-        if ((np.abs(c*dx+s*dy)<=h)&(np.abs(-s*dx+c*dy)<=h)).any():raise Hold('fresh raw hit contradicts body/stop swept corridor')
++        if ((np.abs(c*dx+s*dy)<=hx)&(np.abs(-s*dx+c*dy)<=hy)).any():raise Hold('fresh raw hit contradicts body/stop swept corridor')
+     bins=np.unique(((np.arctan2(kept[:,1]-sweep[0][1],kept[:,0]-sweep[0][0])+math.pi)/(2*math.pi)*72).astype(int)%72)
+     return dict(raw_hits=len(points),height_relevant_hits=len(kept),azimuth_bins_with_hits=len(bins),azimuth_bins_without_hits=72-len(bins),
+                 coverage_semantics='Hit/visibility statistics only; gaps/occlusion do not prove free. Physical static oracle is the free evidence.',
+@@ -442,12 +512,12 @@
+     This is geometric feasibility under the root's SIM bounds, not a promise of
+     successful control. A live age/drift/stop envelope may still require HOLD.
+     """
+-    pose=tuple(route['start_anchor_truth']);samples=0;legs=[];radius=math.sqrt(2)*(HALF_BODY+PADDING)
++    pose=tuple(route['start_anchor_truth']);samples=0;legs=[];radius=oracle.padded_radius
+     for point in route['waypoints']:
+         x,y,yaw=point['pose_truth'];length=math.hypot(x-pose[0],y-pose[1]);policy=point.get('leg_policy')
+         if policy is not None and policy.get('kind')=='lateral_fixed_body_heading':
+             sign=policy['lateral_sign'];body=policy['body_yaw_rad'];lat=lateral_model(model,sign)
+-            if length<lat['min_controllable_leg_m'] or policy['endpoint_tolerance_m']<lat['endpoint_accuracy_bound_m']:
++            if length+LENGTH_COMPARISON_EPS_M<lat['min_controllable_leg_m'] or policy['endpoint_tolerance_m']+LENGTH_COMPARISON_EPS_M<lat['endpoint_accuracy_bound_m']:
+                 raise Hold('lateral short leg/endpoint tracking unsupported by root measured engineering model')
+             lateral_leg_state(pose,(x,y,yaw),(*pose[:2],body),policy)
+             samples+=len(oracle.checked_sweep(pose,(*pose[:2],body),model['turn_drift_reserve_m']))
+@@ -489,11 +559,14 @@
+     if set(values)!={'positive','negative'}:raise Hold('both root directional lateral models required')
+     for name,sign in [('positive',1),('negative',-1)]:
+         value=values[name]
+-        keys=['max_truth_speed_mps','stop_distance_reserve_m','drift_reserve_m','yaw_reserve_rad','min_controllable_leg_m','endpoint_accuracy_bound_m']
++        keys=['max_truth_speed_mps','max_yaw_rate_rps','stop_distance_reserve_m','drift_reserve_m','yaw_reserve_rad','min_controllable_leg_m','endpoint_accuracy_bound_m',
++            'bias_vx_mps','nominal_vy_mps','k_cross_per_sec']
+         if value.get('raw_lateral')!=sign*MAX_LATERAL_RAW or not finite([value.get(k) for k in keys]):raise Hold('finite measured semantic single-axis model required')
+-        if (not 0<value['max_truth_speed_mps']<=model['max_truth_speed_mps'] or not .1<=value['stop_distance_reserve_m']<=5.
++        if (not 0<value['max_truth_speed_mps']<=model['max_truth_speed_mps'] or not 0<value['max_yaw_rate_rps']<=model['max_truth_yaw_rate_rps'] or not .1<=value['stop_distance_reserve_m']<=5.
+             or not 0<=value['drift_reserve_m']<=.5 or not 0<=value['yaw_reserve_rad']<=.5
+             or not 0<value['min_controllable_leg_m']<=100. or not 0<value['endpoint_accuracy_bound_m']<=.15):raise Hold('directional root model outside supported engineering bounds')
++        if (value['nominal_vy_mps']==0 or math.hypot(value['bias_vx_mps'],value['nominal_vy_mps'])>value['max_truth_speed_mps']
++            or value['k_cross_per_sec']<0):raise Hold('explicit finite directional bias/nominal/gain engineering model required')
+     return values
+ 
+ 
+@@ -506,8 +579,8 @@
+     dx,dy=target[0]-start[0],target[1]-start[1];length=math.hypot(dx,dy)
+     if length<=0 or abs(wrap(math.atan2(dy,dx)-travel))>.005 or abs(wrap(travel-body-sign*math.pi/2))>.005:
+         raise Hold('incoming leg is not pure signed body-Y translation')
+-    if (not 0<policy['max_yaw_error_rad']<=.08 or not 0<policy['max_cross_track_m']<=.15
+-        or not 0<policy['endpoint_tolerance_m']<=min(.15,length/4)):
++    if (not 0<policy['max_yaw_error_rad']<=MAX_LATERAL_YAW_BAND or not 0<policy['max_cross_track_m']<=.15
++        or not 0<policy['endpoint_tolerance_m'] or policy['endpoint_tolerance_m']>min(.15,length/4)+LENGTH_COMPARISON_EPS_M):
+         raise Hold('lateral yaw/tube/endpoint tolerance outside bounds; short legs cannot be skipped at.15')
+     along=(pose[0]-start[0])*math.cos(travel)+(pose[1]-start[1])*math.sin(travel)
+     cross=-(pose[0]-start[0])*math.sin(travel)+(pose[1]-start[1])*math.cos(travel)
+@@ -527,32 +600,68 @@
+     """A stationary/turn-only point is distinct from a nonzero acquisition leg."""
+     dx,dy=target[0]-start[0],target[1]-start[1];length=math.hypot(dx,dy)
+     if length<=1e-9:return dict(required=False,actual_along_m=0.,minimum_progress_m=0.)
+-    if not finite([*entry,*pose,tolerance]) or not 0<tolerance<=min(.15,length/4):raise Hold('invalid short-leg completion tolerance')
++    if not finite([*entry,*pose,tolerance]) or not 0<tolerance or tolerance>min(.15,length/4)+LENGTH_COMPARISON_EPS_M:raise Hold('invalid short-leg completion tolerance')
+     along=((pose[0]-entry[0])*dx+(pose[1]-entry[1])*dy)/length
+     minimum=min(tolerance,length/4)
+     if along+1e-9<minimum:raise Hold('endpoint reached without actual leg progress; no skipped short translation')
+     return dict(required=True,actual_along_m=along,minimum_progress_m=minimum)
+ 
+ 
+-def lateral_correction_state(state,pose,policy,attempts):
+-    """Only stop and return to the original cardinal yaw; never bias/mix axes."""
++def lateral_heading_target(state,pose,policy,model):
++    """Fixed-cardinal body-forward error is -sign times the travel-left error."""
++    sign=policy['lateral_sign'];directional=lateral_model(model,sign)
++    if not finite([*pose,state.get('cross_track_m'),directional.get('bias_vx_mps'),directional.get('nominal_vy_mps'),directional.get('k_cross_per_sec')]):raise Hold('nonfinite heading compensation model/state')
++    bias,vy,gain=directional['bias_vx_mps'],abs(directional['nominal_vy_mps']),directional['k_cross_per_sec']
++    if vy<=0 or gain<0:raise Hold('invalid nominal lateral velocity/cross gain')
++    error=-sign*state['cross_track_m'];delta=sign*math.atan2(bias+gain*error,vy)
++    band=policy['max_yaw_error_rad'];margin=band-abs(delta)
++    if not 0<band<=MAX_LATERAL_YAW_BAND or margin<=1e-6:raise Hold('heading compensation has no policy yaw-band margin; no silent clamp')
++    cross_margin=policy['max_cross_track_m']-abs(state['cross_track_m'])
++    minimum_margin=min(.005,policy['max_cross_track_m']/10)
++    if cross_margin<=minimum_margin:raise Hold('cross tracking has no hard-tube margin')
++    fine=min(.02,margin/2)
++    return dict(target_body_yaw_rad=wrap(policy['body_yaw_rad']+delta),target_delta_from_cardinal_rad=delta,
++        cardinal_body_yaw_rad=policy['body_yaw_rad'],body_forward_cross_error_m=error,
++        settled_yaw_tolerance_rad=fine,yaw_band_margin_rad=margin,cross_hard_margin_m=cross_margin,
++        yaw_error_to_target_rad=abs(wrap(pose[2]-policy['body_yaw_rad']-delta)))
++
++
++def lateral_correction_state(state,pose,policy,attempts,model):
++    """Target-error recovery; legal non-cardinal compensation is not a fault."""
+     if type(attempts) is not int or attempts<0:raise Hold('invalid correction count')
+     if not finite([*pose,state.get('cross_track_m'),policy.get('body_yaw_rad'),policy.get('max_yaw_error_rad'),policy.get('max_cross_track_m')]):raise Hold('nonfinite correction state')
+-    yaw_error=abs(wrap(pose[2]-policy['body_yaw_rad']))
+-    cross=abs(state['cross_track_m']);yaw_trigger=policy['max_yaw_error_rad']/2;cross_trigger=policy['max_cross_track_m']/2
+-    requested=yaw_error>=yaw_trigger or cross>=cross_trigger
+-    if requested and attempts>=4:raise Hold('bounded same-leg yaw corrections exhausted; no tracking generalization')
+-    return dict(stop_then_recheck=requested,yaw_error_rad=yaw_error,cross_track_m=cross,
+-        yaw_trigger_rad=yaw_trigger,cross_trigger_m=cross_trigger,
+-        target_body_yaw_rad=policy['body_yaw_rad'],settled_yaw_tolerance_rad=min(.02,policy['max_yaw_error_rad']/4))
++    target=lateral_heading_target(state,pose,policy,model)
++    yaw_error=target['yaw_error_to_target_rad'];fine=target['settled_yaw_tolerance_rad']
++    cross=abs(state['cross_track_m']);cross_trigger=policy['max_cross_track_m']/2
++    yaw_trigger=max(fine,min(.04,target['yaw_band_margin_rad']/2))
++    requested=yaw_error>yaw_trigger or cross>=cross_trigger and yaw_error>fine
++    if requested and attempts>=MAX_LATERAL_CORRECTIONS:raise Hold('bounded same-leg heading corrections exhausted')
++    return dict(target,stop_then_recheck=requested,yaw_error_rad=yaw_error,cross_track_m=cross,
++        yaw_trigger_rad=yaw_trigger,cross_trigger_m=cross_trigger,observe_cross=cross>=cross_trigger)
++
++
++def feedback_window(observation,state,steady,along):
++    if observation is None:return None
++    if steady-observation['started_steady']<FEEDBACK_WINDOW_SEC and along-observation['start_along_m']<FEEDBACK_WINDOW_PROGRESS_M:return observation
++    if abs(state['cross_track_m'])>=observation['start_abs_cross_m']-MIN_CROSS_IMPROVEMENT_M:
++        raise Hold('bounded compensated progress/time window showed no cross improvement')
++    return None
++
++
++def directional_yaw_guard(truth,model,sign):
++    rate=truth.get('original_header_yaw_rate_rps');twist=truth.get('twist',[])
++    if len(twist)!=6 or not finite([rate,*twist]):raise Hold('original lateral yaw-rate evidence missing/nonfinite')
++    maximum=lateral_model(model,sign)['max_yaw_rate_rps']
++    if max(abs(twist[5]),abs(rate))>maximum:raise Hold('actual lateral yaw exceeds directional cap')
++    return dict(original_header_yaw_rate_rps=rate,twist_yaw_rate_rps=twist[5],max_yaw_rate_rps=maximum)
+ 
+ 
+ def actual_gt_lateral_stopping_sweep(oracle,truth,bridge,model,now_ns,steady):
+-    """Keep .89+independent future errors; observed policy error is in GT pose.
++    """Keep the selected padded body+future errors; policy error is in GT pose.
+ 
+     This entry constructs its pose from the original accepted GT snapshot. It
+     cannot be used for a nominal route pose. Generic stopping_sweep and nominal
+-    audit keep their old policy-envelope semantics byte for byte.
++    audit keep nominal policy-envelope semantics with the selected body radius.
+     """
+     if (model.get('future_error_reference')!=ACTUAL_GT_STOP_REFERENCE
+         or model.get('independent_future_errors_reviewed') is not True):
+@@ -568,8 +677,8 @@
+         raise Hold('actual GT reference height/attitude invalid')
+     start,target,policy=bridge;state=lateral_leg_state(start,target,pose,policy)
+     sign=policy['lateral_sign'];directional=lateral_model(model,sign)
+-    if (math.sqrt(sum(v*v for v in truth['twist'][:3]))>directional['max_truth_speed_mps']
+-        or abs(truth['twist'][5])>model['max_truth_yaw_rate_rps']):raise Hold('actual GT speed exceeds future model')
++    yaw_rate=directional_yaw_guard(truth,model,sign)
++    if math.sqrt(sum(v*v for v in truth['twist'][:3]))>directional['max_truth_speed_mps']:raise Hold('actual lateral GT speed exceeds directional future model')
+     age_upper=command_age_upper((now_ns-truth['stamp_ns'])/1e9,cap)
+     # New scoped timers; independent future drift/yaw and D are not consumed.
+     samples,inflation=stopping_sweep(oracle,pose,'lateral',sign,model,age_upper,policy=None)
+@@ -577,8 +686,10 @@
+         child_frame_id=truth['child_frame_id'],actual_pose_truth=list(pose),input_age_upper_s=age_upper,max_truth_age_sec=cap,
+         observed_policy_error=state,observed_yaw_error_rad=wrap(yaw-policy['body_yaw_rad']),
+         observed_policy_envelope_readded=False,independent_future_errors_retained=True,
+-        nominal_body_half_m=HALF_BODY+PADDING,padding_consumed_as_error_budget=False,
+-        signed_stop_tail_sec=CONTROL_RENEWAL_LIMIT+PACKET_AGE+RELAY_WATCHDOG)
++        nominal_body_half_m=oracle.padded_half_xy[0] if oracle.padded_half_xy[0]==oracle.padded_half_xy[1] else None,
++        nominal_body_half_xy_m=list(oracle.padded_half_xy),footprint_radius_m=oracle.padded_radius,
++        footprint_evidence=oracle.footprint_evidence,padding_consumed_as_error_budget=False,
++        signed_stop_tail_sec=CONTROL_RENEWAL_LIMIT+PACKET_AGE+RELAY_WATCHDOG,directional_yaw_rate_guard=yaw_rate)
+     return samples,inflation,reference
+ 
+ 
+--- v4/mapping_lateral_relay.py
++++ v5/mapping_lateral_relay.py
+@@ -11,9 +11,9 @@
+ import sys
+ import time
+ 
+-SCOPE='MAPPING_ACQUISITION_LATERAL_V4_ONLY'
+-CAPABILITY='semantic_lateral_mag04_v4'
+-READY='MAPPING_LATERAL_RELAY_V4_READY 127.0.0.1:7447'
++SCOPE='MAPPING_ACQUISITION_LATERAL_RECT_V5_ONLY'
++CAPABILITY='semantic_lateral_mag04_rect_v5'
++READY='MAPPING_LATERAL_RELAY_RECT_V5_READY 127.0.0.1:7447'
+ ZERO=dict(version=1,action='walk',forward=0.,lateral=0.,yaw=0.)
+ PACKET_AGE_NS=100_000_000
+ WATCHDOG_SEC=.15
+--- v4/lateral_capability.py
++++ v5/lateral_capability.py
+@@ -4,9 +4,9 @@
+ import math
+ from pathlib import Path
+ 
+-CAPABILITY='semantic_lateral_mag04_v4'
++CAPABILITY='semantic_lateral_mag04_rect_v5'
+ ACTUAL_GT_STOP_REFERENCE='original_GT_actual_pose_future_errors_v1'
+-SCOPE='MAPPING_ACQUISITION_LATERAL_V4_ONLY'
++SCOPE='MAPPING_ACQUISITION_LATERAL_RECT_V5_ONLY'
+ CAL_SCOPE='MAPPING_SEMANTIC_LATERAL_BOUNDED_AMPLITUDE_SUSTAINED_CALIBRATION_ONLY'
+ CAL_SOURCES={'lateral_once.py','lateral_contract.py','semantic_tool_timed.py','host_preflight.py',
+              'calibration_observer.py','imu_gate.py','recording_deadline.py','bag_summary.py'}
+@@ -94,12 +94,20 @@
+     for name,item in artifacts.items():
+         value=Path(item['path']);value=value if value.is_absolute() else path.parent/value
+         require(value.is_file() and sha(value)==item['sha256'],'calibration artifact changed: '+name);files[name]=value
++    case=read(files['case'])
+     identity_record=read(files['adapter_identity'])
+-    identity_record=identity_record.get('new_source_container_identity',identity_record)
++    if 'sources' in identity_record:
++        require(identity_record.get('state')=='PASS' and isinstance(case.get('source_identities'),dict)
++            and set(identity_record['sources'])=={'new_adapter','bridge24','projector61'}
++            and identity_record['sources']==case['source_identities'],
++            'original actual precheck PASS/full source identities must equal frozen case')
++        identity_record=identity_record['sources']['new_adapter']
++    else:
++        identity_record=identity_record.get('new_source_container_identity',identity_record)
+     identity_five={key:identity_record.get(key) for key in ['pid','starttime_ticks','cmdline_sha256','argv','boot_id']}
+     require(artifacts['sensor_config']['sha256']==sensor_sha and identity_five==adapter_identity,
+         'actual sensor/container-adapter evidence differs')
+-    case=read(files['case']);duration=case.get('duration_sec')
++    duration=case.get('duration_sec')
+     require(case.get('scope')==CAL_SCOPE and case.get('magnitude')==.4 and case.get('probes')==[.4,-.4]
+         and finite([duration]) and 1.5<=duration<=4. and case.get('max_runtime_sec')==60.,'only exact actual0.4 paired case admitted')
+     require(case.get('scene_instance_id')==scene and case.get('sensor_config_artifact',{}).get('sha256')==sensor_sha,
+@@ -209,7 +217,7 @@
+     for actual in admission['audit']['probes']:
+         name='positive' if actual['sign']>0 else 'negative';bound=model['lateral_models'][name]
+         for engineering,measurement in [('max_truth_speed_mps','max_norm_speed_mps'),
+-              ('stop_distance_reserve_m','stop_distance_m'),('drift_reserve_m','cross_drift_m'),('yaw_reserve_rad','yaw_drift_rad')]:
++              ('max_yaw_rate_rps','max_yaw_rate_rps'),('stop_distance_reserve_m','stop_distance_m'),('drift_reserve_m','cross_drift_m'),('yaw_reserve_rad','yaw_drift_rad')]:
+             require(bound[engineering]>=actual[measurement],'root '+name+' engineering bound below actual '+measurement)
+         require(model['max_truth_speed_mps']>=actual['max_norm_speed_mps']
+             and model['max_truth_yaw_rate_rps']>=actual['max_yaw_rate_rps'],'global future-speed/yaw engineering bound below actual measurement')
+--- v4/motion_model.ROOT_HOLD.json
++++ v5/motion_model.ROOT_HOLD.json
+@@ -13,30 +13,44 @@
+   "floor_hit_tolerance_m": null,
+   "obstacle_top_m": null,
+   "basis": "root_reviewed_engineering_bound_sim_only",
+-  "lateral_capability": "semantic_lateral_mag04_v4",
++  "lateral_capability": "semantic_lateral_mag04_rect_v5",
+   "lateral_model_reviewed": false,
+   "lateral_calibration_proof_sha256": null,
+   "lateral_models": {
+     "positive": {
+       "raw_lateral": 0.4,
+       "max_truth_speed_mps": null,
++      "max_yaw_rate_rps": null,
+       "stop_distance_reserve_m": null,
+       "drift_reserve_m": null,
+       "yaw_reserve_rad": null,
+       "min_controllable_leg_m": null,
+-      "endpoint_accuracy_bound_m": null
++      "endpoint_accuracy_bound_m": null,
++      "bias_vx_mps": null,
++      "nominal_vy_mps": null,
++      "k_cross_per_sec": null
+     },
+     "negative": {
+       "raw_lateral": -0.4,
+       "max_truth_speed_mps": null,
++      "max_yaw_rate_rps": null,
+       "stop_distance_reserve_m": null,
+       "drift_reserve_m": null,
+       "yaw_reserve_rad": null,
+       "min_controllable_leg_m": null,
+-      "endpoint_accuracy_bound_m": null
++      "endpoint_accuracy_bound_m": null,
++      "bias_vx_mps": null,
++      "nominal_vy_mps": null,
++      "k_cross_per_sec": null
+     }
+   },
+   "future_error_reference": "original_GT_actual_pose_future_errors_v1",
+   "independent_future_errors_reviewed": false,
+-  "max_truth_age_sec": null
++  "max_truth_age_sec": null,
++  "footprint_mode": "legacy_square",
++  "body_half_xy_m": [
++    0.74,
++    0.74
++  ],
++  "padding_m": 0.15
+ }
