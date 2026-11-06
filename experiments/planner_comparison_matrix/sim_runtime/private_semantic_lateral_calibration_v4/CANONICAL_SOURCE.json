@@ -1,0 +1,19 @@
+{
+  "scope": "EXACT_REVIEWED_PRIVATE_CALIBRATION_EXPORT_V4R2",
+  "source_manifest_sha256": "548a22d29650aed6b93f8f85d0c305bedc48952a2f9c9151c8d0c915858bd1c9",
+  "review_sha256": "d9be0d3b431cd991278feeaf243aff4b754686c1116ca4edcee38b1bc1b791f4",
+  "runtime_package_sha256": {
+    "lateral_once.py": "8c430db01f61a8656466a57c9577329f5c3a7284b9231aebdac05c5b2b658cf3",
+    "lateral_contract.py": "b96423ffa183689234eb5bc290cb2b83b314ff616ca6e1315adbcf9f3c8f2e94",
+    "semantic_tool_timed.py": "895db93894c4bf1c3cb53301a5012a3e83657e82ab3b841877f6a4227e031e38",
+    "host_preflight.py": "200ac3f54141963f69eb2cd3923999cfdd953de686fdc284225e0f4734c23d1e",
+    "calibration_observer.py": "2d8b36b459b74b85fab36557515bb4bad7528bcda7434735fba0e919132a2515",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+    "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792"
+  },
+  "runtime_release": false,
+  "nav_acceptance": false,
+  "canonical_base_B": "39ae72d16a07ae38073ab5b232326ba6f7322564",
+  "created_unix_ns": 1793991871473592433
+}

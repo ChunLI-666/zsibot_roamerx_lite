@@ -1,0 +1,24 @@
+{
+  "base_manifest_sha256": "f76dde996285d99f6271dc9ae39250bb54040cf2e9cb8ec8d3fd9bd35e412c99",
+  "only_runtime_changed": [
+    "lateral_once.py"
+  ],
+  "other_seven_runtime_exact": true,
+  "unchanged_parent_functions_AST": [
+    "stat_birth",
+    "interrupt",
+    "semantic_sends",
+    "metrics",
+    "sustained_classification",
+    "main"
+  ],
+  "added_lifecycle_functions": [
+    "acquire_child_pidfd",
+    "child_snapshot",
+    "failed_child_cleanup"
+  ],
+  "parent_run_delta": "only attach failed child receipt, suppress false helper recording_closed, report failed-child closure",
+  "case_and_host_input_templates_exact": true,
+  "threshold_or_command_or_endpoint_changed": false,
+  "legacy_27_and_private_8_test_files_exact": true
+}

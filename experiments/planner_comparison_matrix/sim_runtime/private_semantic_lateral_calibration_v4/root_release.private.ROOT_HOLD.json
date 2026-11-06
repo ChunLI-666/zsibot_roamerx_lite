@@ -1,0 +1,35 @@
+{
+  "scope": "MAPPING_SEMANTIC_LATERAL_BOUNDED_AMPLITUDE_SUSTAINED_CALIBRATION_ONLY",
+  "allow_execute": false,
+  "release_id": null,
+  "case_sha256": null,
+  "output_directory": null,
+  "package_sha256": {
+    "lateral_once.py": "8c430db01f61a8656466a57c9577329f5c3a7284b9231aebdac05c5b2b658cf3",
+    "lateral_contract.py": "b96423ffa183689234eb5bc290cb2b83b314ff616ca6e1315adbcf9f3c8f2e94",
+    "semantic_tool_timed.py": "895db93894c4bf1c3cb53301a5012a3e83657e82ab3b841877f6a4227e031e38",
+    "host_preflight.py": "200ac3f54141963f69eb2cd3923999cfdd953de686fdc284225e0f4734c23d1e",
+    "calibration_observer.py": "2d8b36b459b74b85fab36557515bb4bad7528bcda7434735fba0e919132a2515",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+    "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792"
+  },
+  "boot_id": null,
+  "uid": 1000,
+  "network_namespace": null,
+  "controller_pid_namespace": null,
+  "host_preflight": {
+    "mode": "root_external_host_attestation",
+    "path": null,
+    "sha256": null,
+    "max_age_sec": 30.0
+  },
+  "root_unique_velocity_owner_approved": false,
+  "host_unique_velocity_owner_assumption": "Root holds every other command writer stopped; external host proof is not continuous monitoring.",
+  "root_static_patch_and_engineering_stop_reserve_approved": false,
+  "allow_private_network_endpoint": false,
+  "command_endpoint": [
+    "192.168.1.219",
+    7447
+  ]
+}
