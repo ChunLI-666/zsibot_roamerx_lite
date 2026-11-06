@@ -1,0 +1,29 @@
+{
+  "scope": "READ_ONLY_SIM_IMU_ADAPTER_READINESS_ONLY",
+  "allow_execute": false,
+  "root_read_only_capture_approved": false,
+  "release_id": null,
+  "config_sha256": null,
+  "output_directory": null,
+  "package_sha256": {
+    "readiness_capture.py": "8a0941a4ca9352e381b0dc6d79844fc200b0f2990321c75b244f10e36e0496cd",
+    "readiness_contract.py": "a55ad731c3416d92a5245a48baeab2ddf333b8a89de8e481655246cbeae132f8",
+    "readiness_observer.py": "8c0d55e3ad49b8b56eef1845a2a7e1cd6e5a527df7e5a604d81a60b4f691f088",
+    "readiness_validator.py": "4e849f5a1158c8ac3eabc0f9dd0c5aa9a49f6065f35543faf083dbbc64436349",
+    "owned_recorder.py": "0ad0678232e2abe8911e96f7dac30a112a2b38a1510e380bbac7f01bec167515",
+    "imu_converter.py": "2a63456718fc69fb404114932ec62c8886e297fc9d8ab5767c461de13b89dcbb",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+    "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792"
+  },
+  "uid": 1000,
+  "boot_id": null,
+  "network_namespace": null,
+  "controller_pid_namespace": null,
+  "host_preflight": {
+    "mode": "root_external_host_attestation",
+    "path": null,
+    "sha256": null,
+    "max_age_sec": 30.0
+  }
+}
