@@ -6,7 +6,7 @@ No fake plant, localization status publisher, TF publisher, sensor bridge, SDK a
 import argparse,copy,hashlib,json,math,os,pathlib,shutil,signal,subprocess,sys,time
 import yaml
 from static_layer_snapshot import EXCLUDED_LAYERS,capture as capture_static_layers,audit_recorded as audit_static_layers
-from recording_deadline import arm as arm_deadline,runtime_seconds
+from recording_deadline import arm as arm_deadline,runtime_seconds,process_identity
 BASE=pathlib.Path(__file__).resolve().parent
 NAV=BASE.parents[1]
 def sha(path):
@@ -65,6 +65,80 @@ def source_snapshot(path,template,with_waypoints=False):
             raise ValueError('Source snapshot file escapes deployment NAV or is not a file: '+name)
         if not hex_digest(digest,64) or sha(resolved)!=digest:raise ValueError('Source snapshot hash mismatch: '+name)
     return data,raw
+
+def native_bt_self_client_valid(proof):
+    """Verify the owned native self-client and its sealed, observed topic ingress."""
+    try:
+        run_id=proof['run_id'];topic='/experiment/native_waypoint_private/run_'+run_id+'/goal_pose'
+        if len(run_id)!=32 or any(char not in '0123456789abcdef' for char in run_id):return False
+        if proof['private_goal_topic']!=topic or proof['private_goal_publishers']!=[]:return False
+        if proof['first_private_goal_publisher_violation'] is not None:return False
+        if type(proof['received_private_goal_messages']) is not int or proof['received_private_goal_messages']!=0:return False
+        if not 0<proof['subscription_created_steady_ns']<proof['bt_launch_steady_ns']:return False
+        pose_subscriptions=[(name,types) for name,types in proof['bt_subscriptions'] if 'geometry_msgs/msg/PoseStamped' in types or name in (topic,'/goal_pose')]
+        if pose_subscriptions!=[(topic,['geometry_msgs/msg/PoseStamped'])]:return False
+        owners=[item for item in proof['private_goal_subscribers'] if item['name']=='bt_navigator' and item['namespace']=='/']
+        if len(owners)!=1 or owners[0]['type']!='geometry_msgs/msg/PoseStamped':return False
+        initial=proof['initial_process_identity'];current=proof['current_process_identity'];plan=proof['owned_process_plan']
+        if current!=initial or plan['role']!='bt_navigator' or plan['run_id']!=run_id or plan['pid']!=current['pid']:return False
+        if not current['pid']>0 or not current['starttime_ticks']>0 or not current['boot_id'] or len(current['cmdline_sha256'])!=64:return False
+        if current['argv']!=plan['executed_argv'] or current['argv'][0]!='/opt/ros/jazzy/lib/nav2_bt_navigator/bt_navigator':return False
+        if [arg for arg in current['argv'] if arg.startswith('goal_pose:=')]!=['goal_pose:='+topic]:return False
+        required={'/opt/ros/jazzy/lib/nav2_bt_navigator/bt_navigator','/opt/ros/jazzy/lib/libnav2_navigate_to_pose_navigator.so'}
+        if {item['path'] for item in proof['artifacts']}!=required or len(proof['artifacts'])!=2:return False
+        for item in proof['artifacts']:
+            if item['path'] not in proof['current_mapped_files']:return False
+            if len(item['expected_sha256'])!=64 or item['observed_sha256']!=item['expected_sha256']:return False
+            if item['initial_stat']!=item['current_stat'] or set(item['initial_stat'])!={'dev','ino','size','mtime_ns','ctime_ns'}:return False
+        return True
+    except (KeyError,TypeError,ValueError,AttributeError,IndexError):return False
+
+def waypoint_service_ownership(graph,action_classifier,native_self_client=None):
+    """Separate action-feedback observers from actual NavigateToPose callers.
+
+    Jazzy's action-client graph infers clients from feedback subscriptions. Any
+    of the three real service-client endpoints is conservatively a caller here;
+    the follower and sealed native BT self-client must each expose all three
+    with exact, unambiguous types. Only verified sealing removes the latter
+    from the legacy business-sender list, never from the actual graph evidence.
+    """
+    expected={
+      '/navigate_to_pose/_action/send_goal':'nav2_msgs/action/NavigateToPose_SendGoal',
+      '/navigate_to_pose/_action/get_result':'nav2_msgs/action/NavigateToPose_GetResult',
+      '/navigate_to_pose/_action/cancel_goal':'action_msgs/srv/CancelGoal'}
+    normalized=[];raw_actions=[];service_graph=[];callers=[];identities={};complete=True
+    sealed_bt=native_bt_self_client_valid(native_self_client)
+    for entry in graph:
+        identity=dict(name=entry['name'],namespace=entry['namespace'])
+        key=(entry['name'],entry['namespace']);identities[key]=identities.get(key,0)+1
+        clients=entry.get('service_clients')
+        if not isinstance(clients,(list,tuple)):
+            complete=False;clients=[]
+        endpoints={}
+        for name,types in clients:
+            if name in expected:endpoints.setdefault(name,[]).append(list(types))
+        exact=set(endpoints)==set(expected) and all(endpoints[name]==[[kind]] for name,kind in expected.items())
+        if endpoints:callers.append(dict(**identity,endpoints=endpoints,complete_exact_three=exact))
+        exclude=sealed_bt and exact and identity==dict(name='bt_navigator',namespace='/')
+        normalized.append(dict(**identity,clients=[('/navigate_to_pose',['nav2_msgs/action/NavigateToPose'])] if endpoints and not exclude else [],
+          servers=entry['servers']))
+        raw_actions.append(dict(**identity,clients=entry['clients'],servers=entry['servers']))
+        service_graph.append(dict(**identity,service_clients=clients))
+    duplicates=[dict(name=name,namespace=namespace,count=count) for (name,namespace),count in identities.items() if count>1]
+    follower=[item for item in callers if item['name']=='waypoint_follower' and item['namespace']=='/']
+    bt=[item for item in callers if item['name']=='bt_navigator' and item['namespace']=='/']
+    sealed_bt=sealed_bt and len(bt)==1 and bt[0]['complete_exact_three']
+    follower_complete=len(follower)==1 and follower[0]['complete_exact_three']
+    result=action_classifier(normalized)
+    result['exclusive_nav_client']=result['exclusive_nav_client'] and complete and follower_complete and sealed_bt and not duplicates
+    result.update(raw_action_graph=raw_actions,actual_service_client_graph=service_graph,
+      navigate_to_pose_service_client_evidence=callers,expected_navigate_to_pose_client_services=expected,
+      waypoint_follower_complete_service_client=follower_complete,service_client_graph_complete=complete,
+      duplicate_node_namespaces=duplicates,
+      actual_navigate_to_pose_clients=[dict(name=item['name'],namespace=item['namespace']) for item in callers],
+      controlled_native_self_client=dict(verified=sealed_bt,evidence=native_self_client),
+      client_classification_boundary='Actual service-client endpoints identify every caller/canceller, including partial/wrong types. Native follower and bt_navigator must each have all three exact service types. Only the owned, artifact-bound bt self-client with run-UUID private topic ingress, observed zero publishers/messages and exact subscription ownership is excluded from the legacy navigate_to_pose_clients business-sender list. Raw action graph and both actual callers remain recorded. This is monitored cooperative isolation, not an ACL. Existing action-server role checks are unchanged.')
+    return result
 
 def prepare(args):
     template=pathlib.Path(args.template).absolute()
@@ -156,19 +230,23 @@ def prepare(args):
         import xml.etree.ElementTree as ET
         waypoint_version=ET.parse('/opt/ros/jazzy/share/nav2_waypoint_follower/package.xml').getroot().findtext('version')
         if waypoint_version!='1.3.13':raise RuntimeError('Native waypoint integration is reviewed only for Jazzy 1.3.13')
+        if ET.parse('/opt/ros/jazzy/share/nav2_bt_navigator/package.xml').getroot().findtext('version')!='1.3.13':
+            raise RuntimeError('Native NavigateToPose self-client isolation is reviewed only for Jazzy 1.3.13')
         d['waypoint_follower']={'ros__parameters':copy.deepcopy(WAYPOINT_PARAMETERS)}
         d['lifecycle_manager']['ros__parameters']['node_names'].append('waypoint_follower')
         source_files=[BASE/'goal_pilot_source'/name for name in
           ['waypoint_batch.py','waypoint_contract.py','pilot_scan_timing.py','message_info_contract.py']]
         underlay_files=[pathlib.Path('/opt/ros/jazzy')/name for name in
           ['lib/nav2_waypoint_follower/waypoint_follower','lib/libwaypoint_follower_core.so','lib/libwait_at_waypoint.so',
-           'share/nav2_waypoint_follower/package.xml','share/nav2_msgs/action/FollowWaypoints.action','share/nav2_msgs/msg/MissedWaypoint.msg']]
+           'share/nav2_waypoint_follower/package.xml','share/nav2_msgs/action/FollowWaypoints.action','share/nav2_msgs/msg/MissedWaypoint.msg',
+           'lib/nav2_bt_navigator/bt_navigator','lib/libnav2_navigate_to_pose_navigator.so','share/nav2_bt_navigator/package.xml']]
         manifest['waypoint_contract']=dict(package_version=waypoint_version,parameters=WAYPOINT_PARAMETERS,number_of_loops=0,goal_index=0,
           underlay_files_sha256={str(path):sha(path) for path in underlay_files},
           client_sources_sha256={str(path.relative_to(NAV)):sha(path) for path in source_files},
           semantics='One native FollowWaypoints request; internal sequential NavigateToPose requests, no retry or skip after failure. Feedback is not visit proof.',
           child_cancellation_boundary='Upstream Jazzy 1.3.13 waypoint_follower uses async_cancel_all_goals on its NavigateToPose client when its own batch is canceled. The independent client cancels only its own FollowWaypoints UUID; this isolated experiment requires exclusive NavigateToPose ownership.',
-          child_goal_timestamp_boundary='Upstream follower refreshes each requested child goal header to dispatch time. Original route values and native source pose sample stamps remain separately recorded.')
+          child_goal_timestamp_boundary='Upstream follower refreshes each requested child goal header to dispatch time. Original route values and native source pose sample stamps remain separately recorded.',
+          native_self_client_policy='Jazzy NavigateToPose has a real self-client. Only with-waypoints remaps its sole goal_pose ingress to the fixed recording run UUID private topic, observes it before BT starts, and permits the exact artifact/owned-process-bound self-client only while actual subscription ownership, zero publishers and zero lifetime received messages remain verified. Actual service callers are recorded separately from legacy business-sender compatibility fields.')
     params=out/'params.yaml';params.write_text(yaml.safe_dump(d,sort_keys=False));manifest['params_sha256']=sha(params)
     shutil.copy2(__file__,out/'launcher_snapshot.py');manifest['launcher_sha256']=sha(__file__)
     helper=BASE/'static_layer_snapshot.py';shutil.copy2(helper,out/helper.name)
@@ -231,13 +309,28 @@ def run(args,out,selected_install,manifest,deadline_guard):
         qos=costmap_evidence_qos if topic in ('/global_costmap/costmap_raw','/local_costmap/costmap_raw') else qos_profile_sensor_data
         subscriptions.append(node.create_subscription(kind,topic,lambda m,t=topic:receive(t,m),qos))
     tf=Buffer();listener=TransformListener(tf,node)
-    action_status={}
+    action_status={};bt_binding=None;bt_launch_steady_ns=None;private_goal_messages=0;first_private_goal=None;first_private_publisher_violation=None
     if args.with_waypoints:
         from action_msgs.msg import GoalStatusArray
         from nav2_msgs.action import NavigateToPose
+        from geometry_msgs.msg import PoseStamped
         from rclpy.qos import qos_profile_action_status_default
         from rclpy.action.graph import get_action_client_names_and_types_by_node,get_action_server_names_and_types_by_node
         from waypoint_contract import exclusive_graph
+        private_goal_topic='/experiment/native_waypoint_private/run_'+deadline_guard.manifest['run_id']+'/goal_pose'
+        def private_goal_received(message):
+            nonlocal private_goal_messages,first_private_goal
+            private_goal_messages+=1
+            if first_private_goal is None:
+                first_private_goal=dict(received_steady_ns=time.monotonic_ns(),message=message_to_ordereddict(message))
+        subscriptions.append(node.create_subscription(PoseStamped,private_goal_topic,private_goal_received,QoSProfile(depth=10)))
+        private_subscription_steady_ns=time.monotonic_ns()
+        manifest['native_bt_self_client_ingress']=dict(run_id=deadline_guard.manifest['run_id'],private_goal_topic=private_goal_topic,
+          subscription_created_steady_ns=private_subscription_steady_ns,policy='No observed publisher or received message is permitted for this entire run; first publisher violation and message count never reset.')
+        write(out/'runtime_manifest.json',manifest)
+        def artifact_stat(path):
+            value=pathlib.Path(path).stat()
+            return dict(dev=value.st_dev,ino=value.st_ino,size=value.st_size,mtime_ns=value.st_mtime_ns,ctime_ns=value.st_ctime_ns)
         def status_receive(action,message):
             action_status[action]=dict(received_unix_ns=time.time_ns(),
               active=[dict(uuid=bytes(status.goal_info.goal_id.uuid).hex(),status=int(status.status),
@@ -254,12 +347,30 @@ def run(args,out,selected_install,manifest,deadline_guard):
         subscriptions.append(node.create_subscription(NavigateToPose.Impl.FeedbackMessage,
           '/navigate_to_pose/_action/feedback',child_feedback_receive,QoSProfile(depth=10)))
         def waypoint_ownership():
+            nonlocal first_private_publisher_violation
             graph=[]
             for name,namespace in node.get_node_names_and_namespaces():
                 graph.append(dict(name=name,namespace=namespace,
                   clients=get_action_client_names_and_types_by_node(node,name,namespace),
-                  servers=get_action_server_names_and_types_by_node(node,name,namespace)))
-            ownership=exclusive_graph(graph)
+                  servers=get_action_server_names_and_types_by_node(node,name,namespace),
+                  service_clients=node.get_client_names_and_types_by_node(name,namespace)))
+            bt=dict(bt_binding) if bt_binding is not None else {}
+            if bt_binding is not None:
+                pid=bt_binding['owned_process_plan']['pid']
+                mapped=pathlib.Path(f'/proc/{pid}/maps').read_text()
+                private_publishers=[dict(name=info.node_name,namespace=info.node_namespace,type=info.topic_type)
+                    for info in node.get_publishers_info_by_topic(private_goal_topic)]
+                if private_publishers and first_private_publisher_violation is None:
+                    first_private_publisher_violation=dict(observed_unix_ns=time.time_ns(),publishers=private_publishers)
+                bt.update(current_process_identity=process_identity(pid),
+                  current_mapped_files=sorted({line.split()[-1] for line in mapped.splitlines() if len(line.split())>=6}),
+                  artifacts=[dict(item,current_stat=artifact_stat(item['path'])) for item in bt_binding['artifacts']],
+                  bt_subscriptions=node.get_subscriber_names_and_types_by_node('bt_navigator','/'),
+                  private_goal_publishers=private_publishers,first_private_goal_publisher_violation=first_private_publisher_violation,
+                  private_goal_subscribers=[dict(name=info.node_name,namespace=info.node_namespace,type=info.topic_type)
+                    for info in node.get_subscriptions_info_by_topic(private_goal_topic)],
+                  received_private_goal_messages=private_goal_messages,first_received_private_goal=first_private_goal)
+            ownership=waypoint_service_ownership(graph,exclusive_graph,bt)
             publishers={action:[dict(name=info.node_name,namespace=info.node_namespace)
               for info in node.get_publishers_info_by_topic(action+'/_action/status')]
               for action in ['/navigate_to_pose','/follow_waypoints']}
@@ -389,12 +500,19 @@ def run(args,out,selected_install,manifest,deadline_guard):
         servers=[('nav2_map_server','map_server','map_server',[]),('nav2_planner','planner_server','planner_server',[]),
           ('nav2_controller','controller_server','controller_server',['-r','cmd_vel:=cmd_vel_nav']),
           ('nav2_velocity_smoother','velocity_smoother','velocity_smoother',['-r','cmd_vel:=cmd_vel_nav','-r','cmd_vel_smoothed:=cmd_vel']),
-          ('nav2_bt_navigator','bt_navigator','bt_navigator',[])]
+          ('nav2_bt_navigator','bt_navigator','bt_navigator',['-r','goal_pose:='+private_goal_topic] if args.with_waypoints else [])]
         if args.with_waypoints:servers.append(('nav2_waypoint_follower','waypoint_follower','waypoint_follower',[]))
         servers.append(('nav2_lifecycle_manager','lifecycle_manager','lifecycle_manager',[]))
         for package,exe,name,remaps in servers:
             exe_path=str(runtime/'lib/robot_feasible_navigation/segment_controller_server') if name=='controller_server' and args.variant=='segmented' else '/opt/ros/jazzy/lib/'+package+'/'+exe
+            if name=='bt_navigator' and args.with_waypoints:bt_launch_steady_ns=time.monotonic_ns()
             launch(name,[exe_path]+common+remaps)
+            if name=='bt_navigator' and args.with_waypoints:
+                pid=dict(procs)[name].pid
+                bt_binding=dict(run_id=deadline_guard.manifest['run_id'],private_goal_topic=private_goal_topic,
+                  subscription_created_steady_ns=private_subscription_steady_ns,bt_launch_steady_ns=bt_launch_steady_ns,
+                  initial_process_identity=process_identity(pid),owned_process_plan=dict(role=name,pid=pid,
+                    run_id=deadline_guard.manifest['run_id'],executed_argv=deadline_guard.children[name]['executed_argv']))
         write(out/'processes.json',{name:p.pid for name,p in procs})
         for name in ['map_server','planner_server','controller_server','velocity_smoother','bt_navigator']+(['waypoint_follower'] if args.with_waypoints else []):
             service='/'+name+'/get_state';client=node.create_client(GetState,service);deadline=time.monotonic()+90;attempts=0
@@ -457,6 +575,16 @@ def run(args,out,selected_install,manifest,deadline_guard):
             identities[name]=dict(pid=p.pid,cmdline=pathlib.Path(f'/proc/{p.pid}/cmdline').read_bytes().replace(b'\0',b' ').decode(),maps=maps,
               selected_libraries_sha256={library:sha(library) for library in libraries if pathlib.Path(library).is_file()})
         write(out/'runtime_identities.json',identities)
+        if args.with_waypoints:
+            bt_binding['artifacts']=[]
+            for path in ['/opt/ros/jazzy/lib/nav2_bt_navigator/bt_navigator','/opt/ros/jazzy/lib/libnav2_navigate_to_pose_navigator.so']:
+                before=artifact_stat(path);observed=sha(path);after=artifact_stat(path)
+                expected=manifest['waypoint_contract']['underlay_files_sha256'][path]
+                if before!=after or observed!=expected:raise RuntimeError('Native BT self-client artifact identity changed: '+path)
+                bt_binding['artifacts'].append(dict(path=path,expected_sha256=expected,observed_sha256=observed,initial_stat=after))
+            write(out/'native_bt_self_client_binding.json',bt_binding)
+            manifest['native_bt_self_client_binding_sha256']=sha(out/'native_bt_self_client_binding.json')
+            write(out/'runtime_manifest.json',manifest)
         recording_topics=[args.camera_topic,args.camera_info_topic,args.odom_topic,args.scan_topic,
           '/livox/lidar','/livox/imu','/lightning_bridge/debug','/lightning/debug','/debug/build_info',
           '/tf','/tf_static','/global_costmap/costmap_raw','/local_costmap/costmap_raw']
