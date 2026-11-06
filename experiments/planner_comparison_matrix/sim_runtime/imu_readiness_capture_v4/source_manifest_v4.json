@@ -1,0 +1,43 @@
+{
+  "schema": "locnav.read_only_sensor_readiness.source_freeze.v4",
+  "state": "SOURCE_ONLY_DEFAULT_HOLD",
+  "base_v3_manifest_sha256": "b3853dc1250dc0e2118375780565aad1330068b48f83c2f121e33342de97251f",
+  "runtime_package_sha256": {
+    "readiness_capture.py": "a0675b7645527858f4ff358bc595cdde11fc31e7e086df18246fcbc4983e6414",
+    "readiness_contract.py": "a55ad731c3416d92a5245a48baeab2ddf333b8a89de8e481655246cbeae132f8",
+    "readiness_observer.py": "1fca6a5739abf33d6034bc6099c6206b77d32be7fd12f1763d5eefb3fbad006c",
+    "readiness_validator.py": "1f6e19f74612cd479d6f74ccb8875c32dc0b41873f0d45f943238d7c3f7111aa",
+    "owned_recorder.py": "0ad0678232e2abe8911e96f7dac30a112a2b38a1510e380bbac7f01bec167515",
+    "imu_converter.py": "2a63456718fc69fb404114932ec62c8886e297fc9d8ab5767c461de13b89dcbb",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+    "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792"
+  },
+  "changed_runtime_files": [
+    "readiness_validator.py"
+  ],
+  "files_sha256": {
+    "sensor_config.json": "38aab54b3a6ca49570feaaa8e983f4f9bc9ee197060066b186478a70f92ea023",
+    "readiness_observer.py": "1fca6a5739abf33d6034bc6099c6206b77d32be7fd12f1763d5eefb3fbad006c",
+    "test_clock_admission.py": "5d9b18ad1b0b461fa6f9796472d3b3afe57320db5d7e674d917a27efdf574948",
+    "README.txt": "6c18f5355d2f77aef8e04d5425fe7157258de7c923e16edfaf49885235583dc7",
+    "imu_converter.py": "2a63456718fc69fb404114932ec62c8886e297fc9d8ab5767c461de13b89dcbb",
+    "readiness_capture.py": "a0675b7645527858f4ff358bc595cdde11fc31e7e086df18246fcbc4983e6414",
+    "runtime_bundle_v4.tar": "425eaa0e52ba4877281e964c8464aa4028719ae0d6c83a33dac7ef88a5a61beb",
+    "root_release.HOLD.json": "6ac373e1afab9adf1248a7073583b748a0dab786f11c2ba17a48e9ba7b03a638",
+    "config.HOLD.json": "074011848f3719c4b6b20491c5ce558ed16409bdae97b3264ce6ccf51eb6a83d",
+    "test_bounded_spin.py": "1bc5cc16ff921fda40e9c9ffcbcc9b1b5929e4ce77fc384f0b74925d333d6db4",
+    "test_readiness.py": "3ab17b3220826c93494e967ff90a5b2c8b33ed7dd681a95c136dbb864fcc4598",
+    "owned_recorder.py": "0ad0678232e2abe8911e96f7dac30a112a2b38a1510e380bbac7f01bec167515",
+    "test_padding_v2.py": "9f8520ee09cfe9210384e754aa20848925bb9acf3e8b4a75b31e436ce723efe5",
+    "fixtures_v4.log": "7f3182425896745d4696afc42d3b8330c333907881e9981bfd11c8fb4d051694",
+    "verification_v4.json": "7be952e6b183cadbba38302c3b876fbf272efb9d8cb428fea4a3885e87c38784",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792",
+    "readiness_contract.py": "a55ad731c3416d92a5245a48baeab2ddf333b8a89de8e481655246cbeae132f8",
+    "readiness_validator.py": "1f6e19f74612cd479d6f74ccb8875c32dc0b41873f0d45f943238d7c3f7111aa",
+    "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+    "actual_discovery_clock_failure.json": "898534dda04ece24359f6ab7c06cf537bfb9f4dd4fe9cc4018217d9c53779712"
+  },
+  "no_runtime_actions": true
+}
