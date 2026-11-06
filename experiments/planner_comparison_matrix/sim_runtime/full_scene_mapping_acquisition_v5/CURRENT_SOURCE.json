@@ -1,0 +1,10 @@
+{
+  "protocol_scope": "MAPPING_ACQUISITION_LATERAL_RECT_V5_ONLY",
+  "source_revision": 6,
+  "current_manifest": "source_manifest_v6.json",
+  "source_manifest_sha256": "3f7b602fa3c4c4c15b516375445d7c7af2f6ada1a78b5f14a942add6d6830710",
+  "source_main_sha256": "b6f921279e9b4f3ff3ac0fce0363ab90a0f76b30ca5a3171adef2039e0bc6fa3",
+  "runtime_release": false,
+  "native_navigation_acceptance": false,
+  "original_v5_metadata_historical": true
+}

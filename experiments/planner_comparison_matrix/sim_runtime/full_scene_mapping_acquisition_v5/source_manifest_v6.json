@@ -1,0 +1,43 @@
+{
+  "schema": "locnav.mapping_lateral_owner.source_freeze.v6",
+  "scope": "MAPPING_ACQUISITION_LATERAL_RECT_V5_ONLY",
+  "state": "SOURCE_ONLY_RUNTIME_ROOT_HOLD",
+  "base_v5_manifest_sha256": "ed3cf9c10964c4935100e3269593f24475579e4c196bcc91e387af66c3f24a63",
+  "runtime_package_sha256": {
+    "full_scene_mapping.py": "b6f921279e9b4f3ff3ac0fce0363ab90a0f76b30ca5a3171adef2039e0bc6fa3",
+    "full_scene_mapping_contract.py": "6a093710ff4f968fe02f215fb7b7a04ffbdcc8fe958e6a2ec04abce8f96ec790",
+    "mapping_lateral_relay.py": "3e8589d30b73eacd6b2b474701b6856f0066b84f6696ff5ea2dbac37f450f6e1",
+    "lateral_capability.py": "c4e24c6163800ff0badee6cbc912988ccfb71493670164636111fa9e5bdfa874",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "dependencies/waypoint_contract.py": "7258d6c9f5f56bf08930356187505628b446cfd74d02ec41b4c1851faacb4624",
+    "dependencies/map_coverage.py": "bd5f8b855e10d1cb6ad19955fc8b8c5283d31cb543e98dc988c78d9eb1e9f80b"
+  },
+  "runtime_bundle_sha256": "a0cd333e21b7148b21bf3050584e08435889f20ba295469b9cd4958c14f91d9f",
+  "files_sha256": {
+    "full_scene_mapping.py": "b6f921279e9b4f3ff3ac0fce0363ab90a0f76b30ca5a3171adef2039e0bc6fa3",
+    "full_scene_mapping_contract.py": "6a093710ff4f968fe02f215fb7b7a04ffbdcc8fe958e6a2ec04abce8f96ec790",
+    "mapping_lateral_relay.py": "3e8589d30b73eacd6b2b474701b6856f0066b84f6696ff5ea2dbac37f450f6e1",
+    "lateral_capability.py": "c4e24c6163800ff0badee6cbc912988ccfb71493670164636111fa9e5bdfa874",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "dependencies/waypoint_contract.py": "7258d6c9f5f56bf08930356187505628b446cfd74d02ec41b4c1851faacb4624",
+    "dependencies/map_coverage.py": "bd5f8b855e10d1cb6ad19955fc8b8c5283d31cb543e98dc988c78d9eb1e9f80b",
+    "motion_model.ROOT_HOLD.json": "d9dd5691586273a3e450819bc5914ac2ceaaec1dc383a10622adf57756fe857a",
+    "footprint.ROOT_HOLD.json": "600c5fab51ad30f5bc382cc20341f85ffb4ec9e1f30beabc056359beb8e687da",
+    "test_v4_core.py": "8a3741d8c00a5b51d4531bdac3ab6d8318a73c72d91312d96a93f8f1ebfcfcc5",
+    "test_v5_delta.py": "5d8d068449a76300e7bebd3a13e5dd1c64b7e7dfc362b13af494dcb6269ef638",
+    "test_startup_v6.py": "34fd7588ce929f9a2d125e671ce2405b1236b26c7d9f3ea52b663616b0c70cfb",
+    "fixtures_v6.log": "da4da831c03119cb50c8fde8ba4474f2cd86ffb28f67cb2343dd2f64a2939ff4",
+    "READOUT.txt": "f7fefc44a1aa2568fe1104ff58d15e7cf6bf6131df8cbf4b41fc777adb31346c",
+    "source_preservation_v6.json": "20ef5db6270bcf7349fbfea062a6cb528033181c50592388dadfd59e0e68dcb3",
+    "v5_to_v6.diff": "6099c6b77417e9823d5bc95807a2b5806fcf67498b1b1b128b7baba3f4c534c7",
+    "runtime_bundle_v6.tar": "a0cd333e21b7148b21bf3050584e08435889f20ba295469b9cd4958c14f91d9f"
+  },
+  "pure_tests": 39,
+  "new_targeted_tests": 7,
+  "other_six_runtime_files_exact_v5": true,
+  "scope_and_capability_unchanged": true,
+  "root_inputs_modified": false,
+  "canonical_modified": false,
+  "business_processes_started": 0,
+  "signals_sent": 0
+}
