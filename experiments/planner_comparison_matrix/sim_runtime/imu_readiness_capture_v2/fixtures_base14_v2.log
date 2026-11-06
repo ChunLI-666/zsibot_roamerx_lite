@@ -1,0 +1,19 @@
+test_actual_Jazzy_dict_callback_has_no_invented_publisher_GID (test_readiness.ReadinessFixtures.test_actual_Jazzy_dict_callback_has_no_invented_publisher_GID) ... ok
+test_all37_IMU_fields_and_header_are_compared_as_full_baseline_CDR (test_readiness.ReadinessFixtures.test_all37_IMU_fields_and_header_are_compared_as_full_baseline_CDR) ... ok
+test_camera_bytes_and_original_headers_are_not_reencoded (test_readiness.ReadinessFixtures.test_camera_bytes_and_original_headers_are_not_reencoded) ... ok
+test_camera_static_rotation_matches_independent_mount_times_optical_matrix (test_readiness.ReadinessFixtures.test_camera_static_rotation_matches_independent_mount_times_optical_matrix) ... ok
+test_default_HOLD_has_no_node_Popen_or_signal (test_readiness.ReadinessFixtures.test_default_HOLD_has_no_node_Popen_or_signal) ... ok
+test_dynamic_or_new_static_TF_is_rejected (test_readiness.ReadinessFixtures.test_dynamic_or_new_static_TF_is_rejected) ... ok
+test_exec_empty_birth_cleanup_and_wrong_identity_never_signal_source (test_readiness.ReadinessFixtures.test_exec_empty_birth_cleanup_and_wrong_identity_never_signal_source) ... ok
+test_graph_exact_unique_node_type_GID_and_two_static_publishers (test_readiness.ReadinessFixtures.test_graph_exact_unique_node_type_GID_and_two_static_publishers) ... ok
+test_owner_never_subscribes_before_ACK_and_MCAP (test_readiness.ReadinessFixtures.test_owner_never_subscribes_before_ACK_and_MCAP) ... ok
+test_owner_only_owned_recorder_closed_and_report_never_authorizes_motion (test_readiness.ReadinessFixtures.test_owner_only_owned_recorder_closed_and_report_never_authorizes_motion) ... ok
+test_raw_old_rejected_never_refreshes_but_derived_old_is_fatal (test_readiness.ReadinessFixtures.test_raw_old_rejected_never_refreshes_but_derived_old_is_fatal) ... ok
+test_source_identity_drift_is_read_only_HOLD (test_readiness.ReadinessFixtures.test_source_identity_drift_is_read_only_HOLD) ... ok
+test_unknown_clock_and_unmatched_core_are_reported_not_silently_skipped (test_readiness.ReadinessFixtures.test_unknown_clock_and_unmatched_core_are_reported_not_silently_skipped) ... ok
+test_valid_ten_second_core_window_and_freshness_stop_limits (test_readiness.ReadinessFixtures.test_valid_ten_second_core_window_and_freshness_stop_limits) ... ok
+
+----------------------------------------------------------------------
+Ran 14 tests in 0.145s
+
+OK

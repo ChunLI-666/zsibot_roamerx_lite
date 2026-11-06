@@ -1,0 +1,54 @@
+SOURCE-ONLY PADDING FIX / DEFAULT HOLD / NO MOTION AUTHORITY
+
+Cause proved from the actual failed closure
+Input capture_v1/bag_0.mcap SHA566887494f0fd6d93397e251a16edf828383b0926943ee5ea53116514b7d630a,
+12672034 bytes, raw2018 and derived1374. All1374 same-header pairs preserve all37
+float64 fields as the exact296 numeric bytes; no NaN/Inf exists. Every locally
+serialized expected-vs-actual difference is confined to byte offsets25,26,27.
+The original imu_to_local function is unchanged and correct.
+
+CDR1 layout:4-byte encapsulation; sec/nanosec/string length through offset16;
+imu_link plus NUL ends at25. The next float64 aligns to8 relative to payload
+start4, so the37 contiguous doubles begin at28. Offsets[25,28) are alignment
+padding, not time/frame/numeric fields. Actual wire padding is000000; local
+serialize(expected) can contain683a20 and other bytes there. The validator's
+whole-CDR SHA expectation was invalid. This is not an adapter value/time fix;
+the exact producer of padding contents is not inferred as a memory-corruption
+root cause. The source/adapter remains unchanged.
+
+Minimal runtime delta: only imu_converter.py and readiness_validator.py.
+imu_cdr_evidence accepts only324-byte CDR1 little-endian/options0, the exact
+9-byte imu_link string, valid original time and finite37 doubles. It replaces
+only offsets25/26/27 in a separate comparison buffer. Every other wire bit,
+including encapsulation, sec/nanosec, string and all37 numeric bit patterns,
+remains significant. Original wire bytes/SHA and actual padding hex are kept.
+Raw->baseline converter expected serialization and actual derived encoding
+must have identical padding-normalized SHA. Unknown layout/trailing bytes,
+field drift, NaN/Inf, signed-zero drift or time/frame change remains HOLD.
+The report now distinguishes semantic-bit matches, whole-CDR matches and
+padding-only differences; it no longer labels normalized matches full CDR.
+
+Validation
+19 pure tests PASS: original14 plus5 padding regressions. They exhaust all256
+values at each excluded byte, all2568 one-bit mutations outside those3 bytes,
+all37 fields with NaN/+Inf/-Inf, signed zero, header/frame/protocol/length,
+and actual-failure-shaped padding alongside finite numeric drift rejection.
+Original29 static checks PASS; delta checks confirm the other7 runtime files,
+original converter AST, source/age/GT/stop/camera/clock/graph/window logic,
+all original v1 frozen bytes and the failed bag remain unchanged.
+
+Offline closure replay: all1374 pairs pass the new field comparison. The677
+original callback log events contain549 raw IMU and1 derived IMU; replaying
+those exact wall/steady receipts through the unchanged gates accepts all550.
+The first failed derived age is153315443ns, within the unchanged .3s guard.
+An earlier offline attempt using MCAP recordTime as callback receipt correctly
+failed the age gate; its log is preserved. The corrected replay never replaces
+callback receipts with bag recordTime. Complete1374 pairing proves fields only.
+Original runtime remains HOLD; this is not a new10s readiness PASS.
+
+Default HOLD/root approvals/package binding/owned recorder45+15 deadline and
+all source identities/age/clock/TF gates remain. New independent source review,
+root read-only release and an actual new stationary10s capture are required.
+No ROS context, Node, recorder, source operation, signal, UDP, deployment or
+canonical write occurred. Offline storage/serialization libraries only were
+used; no dependency installed. Codacy tool unavailable, no analyzer PASS claimed.
