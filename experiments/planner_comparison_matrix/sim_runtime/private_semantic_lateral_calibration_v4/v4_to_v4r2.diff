@@ -1,0 +1,150 @@
+--- v4/lateral_once.py
++++ v4r2/lateral_once.py
+@@ -25,21 +25,88 @@
+     return dict(pid=pid,starttime_ticks=int(fields[19]),boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip())
+ 
+ 
++def child_snapshot(owned):
++    """Evidence only; a late snapshot can never authorize an unknown birth."""
++    value=dict(pid=owned['process'].pid,birth3=None,proc_state=None,observed_identity=None)
++    try:
++        value['birth3']=stat_birth(value['pid'])
++        value['proc_state']=(Path('/proc')/str(value['pid'])/'stat').read_text().rsplit(')',1)[1].split()[0]
++    except BaseException as exc:value['stat_error']=dict(error_type=type(exc).__name__,error=str(exc))
++    try:
++        actual=deadline.process_identity(value['pid'])
++        if value['birth3'] is None or any(actual[k]!=value['birth3'][k] for k in ['pid','starttime_ticks','boot_id']):raise c.Hold('snapshot argv/birth differs')
++        value['observed_identity']=actual
++    except BaseException as exc:value['identity_error']=dict(error_type=type(exc).__name__,error=str(exc))
++    return value
++
++
++def acquire_child_pidfd(owned,purpose):
++    attempt=dict(purpose=purpose);owned['pidfd_attempts'].append(attempt);descriptor=None
++    try:
++        if owned['process'].poll() is not None:raise c.Hold('owned child already exited; no pidfd reopen')
++        if owned['birth3'] is None:raise c.Hold('initial owned birth unknown; no later bootstrap')
++        attempt['birth_before']=stat_birth(owned['process'].pid)
++        if attempt['birth_before']!=owned['birth3']:raise c.Hold('owned birth changed before pidfd open')
++        descriptor=os.pidfd_open(owned['process'].pid)
++        attempt['birth_after']=stat_birth(owned['process'].pid)
++        if attempt['birth_after']!=owned['birth3']:raise c.Hold('owned birth changed after pidfd open')
++        attempt['same_birth_verified']=True;return descriptor
++    except BaseException as exc:
++        attempt.update(same_birth_verified=False,error_type=type(exc).__name__,error=str(exc))
++        if descriptor is not None:os.close(descriptor)
++        raise
++
++
++def failed_child_cleanup(owned,original):
++    """Only this exact Popen child; wait even when no safe signal is possible."""
++    cleanup=dict(pid=owned['process'].pid,expected_argv=owned['expected_argv'],birth3=owned['birth3'],
++        argv_ready=owned['argv_ready'],observed_identity=owned['birth'],initial_snapshot=owned.get('initial_snapshot'),
++        original_error_type=type(original).__name__,original_error=str(original),pidfd_attempts=owned['pidfd_attempts'],
++        wait_attempted=False,exited=False,still_live=None,returncode=None,errors=[])
++    try:
++        if owned['process'].poll() is None:
++            if owned['fd'] is None:
++                try:owned['fd']=acquire_child_pidfd(owned,'cleanup_recovery_once')
++                except BaseException as exc:cleanup['errors'].append(dict(stage='pidfd_recovery',error_type=type(exc).__name__,error=str(exc)))
++            if owned['fd'] is not None:interrupt(owned,owned['allowed_argv'])
++    except BaseException as exc:cleanup['errors'].append(dict(stage='signal_or_poll',error_type=type(exc).__name__,error=str(exc)))
++    finally:
++        cleanup['wait_attempted']=True
++        try:cleanup['wait_returncode']=owned['process'].wait(timeout=3.)
++        except BaseException as exc:cleanup['errors'].append(dict(stage='wait',error_type=type(exc).__name__,error=str(exc)))
++        try:
++            cleanup['returncode']=owned['process'].poll();cleanup['exited']=cleanup['returncode'] is not None
++            cleanup['still_live']=not cleanup['exited']
++        except BaseException as exc:cleanup['errors'].append(dict(stage='final_poll',error_type=type(exc).__name__,error=str(exc)))
++        cleanup['sigint_sent']=owned['signalled'];cleanup['final_snapshot']=child_snapshot(owned)
++        cleanup['state']='OWNED_CHILD_EXITED' if cleanup['exited'] else 'HOLD_OWNED_CHILD_OUTSTANDING'
++        if owned['fd'] is not None:
++            try:os.close(owned['fd']);cleanup['pidfd_closed']=True
++            except BaseException as exc:cleanup['errors'].append(dict(stage='close_pidfd',error_type=type(exc).__name__,error=str(exc)))
++            finally:owned['fd']=None
++    return cleanup
++
++
+ def child(argv,log,env,check=None):
+-    with log.open('x') as stream:
+-        process=subprocess.Popen(argv,cwd='/',stdin=subprocess.DEVNULL,stdout=stream,stderr=subprocess.STDOUT,env=env,close_fds=True)
+-    descriptor=os.pidfd_open(process.pid)
+-    owned=dict(process=process,fd=descriptor,birth=None,birth3=None,argv_ready=False,signalled=False)
+-    try:
++    process=owned=None
++    try:
++        with log.open('x') as stream:
++            process=subprocess.Popen(argv,cwd='/',stdin=subprocess.DEVNULL,stdout=stream,stderr=subprocess.STDOUT,env=env,close_fds=True)
++            # Retain before any /proc, pidfd, watch callback, or log close.
++            owned=dict(process=process,fd=None,birth=None,birth3=None,argv_ready=False,signalled=False,
++                expected_argv=list(argv),allowed_argv=[list(argv)],pidfd_attempts=[])
++            owned['birth3']=stat_birth(process.pid)
++            owned['initial_snapshot']=dict(pid=process.pid,birth3=owned['birth3'],observed_argv=None)
++            owned['allowed_argv'].append(deadline.command_argv(argv))
++            owned['fd']=acquire_child_pidfd(owned,'initial')
+         # Stable across exec even when /proc/cmdline is momentarily empty.
+         # Retain this before any watch callback; complete argv is a separate gate.
+-        owned['birth3']=stat_birth(process.pid)
+         until=time.monotonic()+2.
+         while time.monotonic()<until:
+-            if select.select([descriptor],[],[],0)[0]:return owned
++            if select.select([owned['fd']],[],[],0)[0]:return owned
+             try:
+                 actual=deadline.process_identity(process.pid)
+-                if any(actual[k]!=owned['birth3'][k] for k in ['pid','starttime_ticks','boot_id']) or actual['argv'] not in [list(argv),deadline.command_argv(argv)]:raise c.Hold('unexpected owned child exec identity')
++                if any(actual[k]!=owned['birth3'][k] for k in ['pid','starttime_ticks','boot_id']) or actual['argv'] not in owned['allowed_argv']:raise c.Hold('unexpected owned child exec identity')
+                 owned['birth']=actual;owned['argv_ready']=True
+             except ProcessLookupError:pass
+             if check is not None:check()
+@@ -47,17 +114,14 @@
+             time.sleep(.005)
+         raise c.Hold('owned child identity unavailable')
+     except BaseException as original:
+-        # A guard failure during spawn/exec must not lose the newly owned tool.
+-        cleanup=dict(birth3=owned['birth3'],argv_ready=owned['argv_ready'],original_error=str(original))
+-        try:
+-            interrupt(owned,[list(argv),deadline.command_argv(argv)])
+-        except BaseException as exc:cleanup['signal_error']=str(exc)
+-        finally:
+-            try:process.wait(timeout=3.)
+-            except BaseException as exc:cleanup['wait_error']=str(exc)
+-            cleanup.update(sigint_sent=owned['signalled'],exited=process.poll() is not None)
+-            try:deadline.atomic_json(log.with_suffix('.spawn_cleanup.json'),cleanup)
+-            finally:os.close(descriptor)
++        if process is None:raise
++        # An interruption after Popen but before retention has no trusted birth.
++        if owned is None:owned=dict(process=process,fd=None,birth=None,birth3=None,argv_ready=False,signalled=False,
++            expected_argv=list(argv),allowed_argv=[list(argv)],pidfd_attempts=[])
++        cleanup=failed_child_cleanup(owned,original)
++        setattr(original,'owned_spawn_cleanup',cleanup)
++        try:deadline.atomic_json(log.with_suffix('.spawn_cleanup.json'),cleanup)
++        except BaseException as exc:cleanup['evidence_write_error']=dict(error_type=type(exc).__name__,error=str(exc))
+         raise
+ 
+ 
+@@ -283,6 +347,7 @@
+         result['state']='COMPLETE_PROBES_STOPPED_PLUS5S_RAW_TAIL'
+     except BaseException as exc:
+         result.update(state='HOLD_DIAGNOSTIC_FAILED',error_type=type(exc).__name__,error=str(exc))
++        if hasattr(exc,'owned_spawn_cleanup'):result['spawn_failed_child']=exc.owned_spawn_cleanup
+     finally:
+         if tool is not None:
+             try:interrupt(tool,[tool_argv])
+@@ -316,7 +381,7 @@
+                 try:recorder['process'].wait(timeout=15.)
+                 except BaseException as exc:result['recorder_wait_error']=str(exc)
+             result['recorder_exited']=recorder['process'].poll() is not None;result['recorder_sigint_sent']=recorder['signalled'];os.close(recorder['fd'])
+-        if guard and (recorder is None or recorder['process'].poll() is not None):
++        if guard and (recorder is None or recorder['process'].poll() is not None) and result.get('spawn_failed_child',{}).get('exited',True):
+             guard.recording_closed(result['state'])
+             try:guard.process.wait(timeout=3.)
+             except subprocess.TimeoutExpired:result['helper_exit_pending']=True
+@@ -327,6 +392,7 @@
+             and all(p['state']=='MEASURED_SUSTAINED_LATERAL_PROBE' for p in result['probes']) and result.get('bag_audit',{}).get('complete'))
+         result.update(finished_unix_ns=time.time_ns(),scene_identity_basis='root external host-preflight, not continuous host monitoring',
+             source_package_sha256=release['package_sha256'],no_motion_model_generalization=True)
++        if 'spawn_failed_child' in result:result['all_spawn_failed_children_closed']=result['spawn_failed_child']['exited']
+         deadline.atomic_json(output/'result.json',result)
+         for n,h in previous.items():signal.signal(n,h)
+     return result

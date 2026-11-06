@@ -1,0 +1,13 @@
+test_actual_collector_legacy_default_stays_shared (test_private_endpoint_v4.PrivateEndpoint.test_actual_collector_legacy_default_stays_shared) ... ok
+test_actual_collector_private_has_distinct_host_and_container_ns (test_private_endpoint_v4.PrivateEndpoint.test_actual_collector_private_has_distinct_host_and_container_ns) ... ok
+test_actual_host_nspid_translation_and_source_change_rejection (test_private_endpoint_v4.PrivateEndpoint.test_actual_host_nspid_translation_and_source_change_rejection) ... ok
+test_explicit_case_root_endpoint_and_old_default (test_private_endpoint_v4.PrivateEndpoint.test_explicit_case_root_endpoint_and_old_default) ... ok
+test_fake_private_nonzero_and_finally_neutral_target_same_and_default_old (test_private_endpoint_v4.PrivateEndpoint.test_fake_private_nonzero_and_finally_neutral_target_same_and_default_old) ... ok
+test_parent_trace_and_metrics_require_selected_target (test_private_endpoint_v4.PrivateEndpoint.test_parent_trace_and_metrics_require_selected_target) ... ok
+test_proof_sha_freshness_and_partial_scene_cannot_be_relabelled (test_private_endpoint_v4.PrivateEndpoint.test_proof_sha_freshness_and_partial_scene_cannot_be_relabelled) ... ok
+test_real_private_host_proof_and_wrong_identity_topology_target (test_private_endpoint_v4.PrivateEndpoint.test_real_private_host_proof_and_wrong_identity_topology_target) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.017s
+
+OK
