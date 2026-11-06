@@ -1,0 +1,15 @@
+{
+  "canonical_head": "cfb942f3bb64a0426bf8081407c9384ff81afc66",
+  "files": {
+    "test_v4_core.py": {
+      "path": "/home/charles/project/colcon_ws/src/zsibot/zsibot_roamerx_lite/experiments/planner_comparison_matrix/sim_runtime/full_scene_mapping_acquisition_v5/test_v4_core.py",
+      "sha256": "ddc9b78092a69794cf57ad8bb4eb7f6cd6cbcb8e8b01fd94f58f9dd3cd1bbaad",
+      "note": "Root canonical test-locator-only portability fix; runtime baseline remains frozen v7"
+    },
+    "test_lifecycle_v7.py": {
+      "path": "/home/charles/project/colcon_ws/src/zsibot/zsibot_roamerx_lite/experiments/planner_comparison_matrix/sim_runtime/full_scene_mapping_acquisition_v5/test_lifecycle_v7.py",
+      "sha256": "95bc8372f404cb721e49f2a22790e32125983f01c2ec841d4567608da2926611",
+      "note": "Root canonical test-locator-only portability fix; runtime baseline remains frozen v7"
+    }
+  }
+}

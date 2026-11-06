@@ -510,7 +510,7 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
                     tick(bridge=(leg_start,(x,y,heading),policy),lateral_raw=policy['lateral_sign']*contract.MAX_LATERAL_RAW)
                     continue
                 if policy is not None:contract.straight_leg_state(leg_start,(x,y,heading),(*truth['xyz'][:2],yaw),policy)
-                if math.hypot(dx,dy)<=tolerance:
+                if contract.forward_endpoint_state(leg_start,(x,y,heading),(*truth['xyz'][:2],yaw),policy)['reached']:
                     contract.require_translation_progress(leg_start,(x,y,heading),leg_entry,(*truth['xyz'][:2],yaw),tolerance);break
                 bearing=math.atan2(dy,dx)
                 if policy is not None:tick(contract.MAX_VX,0.,bridge=(leg_start,(x,y,heading),policy))
@@ -518,7 +518,7 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
                     stable(contract.STOP_STABLE,8.);rotate_to(bearing)
                 else:tick(contract.MAX_VX,0.)
             stable(contract.STOP_STABLE,8.);truth,yaw=rotate_to(heading)
-            if math.hypot(x-truth['xyz'][0],y-truth['xyz'][1])>tolerance:raise contract.Hold('settled acquisition XY target missed; no retry')
+            if (math.hypot(x-truth['xyz'][0],y-truth['xyz'][1])>tolerance if lateral else not contract.forward_endpoint_state(leg_start,(x,y,heading),(*truth['xyz'][:2],yaw),policy)['reached']):raise contract.Hold('settled acquisition XY target missed; no retry')
             progress=contract.require_translation_progress(leg_start,(x,y,heading),leg_entry,(*truth['xyz'][:2],yaw),tolerance)
             emit('point_visited',index=index,truth=truth,target=point,measured_and_commanded_stop=True,actual_leg_progress=progress)
         truth,yaw=stable(contract.END_STABLE,28.);stop_verified=True

@@ -1,3 +1,7 @@
+# Current source revision v8 / protocol v5 — ROOT HOLD
+
+Fixed-heading forward legs may additionally require `along_endpoint_tolerance_m`, bounded by the unchanged original radial tolerance. Completion requires the original radial condition AND the absolute along error condition, using the frozen leg start and heading. The same helper applies before stop and after measured stop; original progress checks remain. Omitted fields and all lateral behavior retain their previous semantics. This is an optional stricter capture condition, not a new motion model or a successful full-map result.
+
 # Current source revision v7 / protocol v5 — ROOT HOLD
 
 The live checkpoint is now a complete `runtime_ready` receipt in the bounded events stream and MCAP; enqueue does not imply durable evidence. Writer close/error/drop checks remain authoritative. Every health entry services the existing bounded executor before reading the original sensor stamps and rechecks stop requests. All original age, renewal, collision, model, ownership and stop gates remain. Runtime bytes match source revision7 freeze; only the canonical unit fixture locator additionally finds its historical baseline through workspace `analysis_outputs`.

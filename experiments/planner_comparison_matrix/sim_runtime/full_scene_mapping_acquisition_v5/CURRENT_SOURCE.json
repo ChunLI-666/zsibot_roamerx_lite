@@ -1,15 +1,11 @@
 {
   "protocol_scope": "MAPPING_ACQUISITION_LATERAL_RECT_V5_ONLY",
-  "source_revision": 7,
-  "current_manifest": "source_manifest_v7.json",
-  "source_manifest_sha256": "1490d5ac39d9815023a55d5113ae9e75427eaa3e8519d4db888e82d073ccd0fc",
-  "source_main_sha256": "cfb9bd4bbb8dae38e6cd99853028482a450861596e1667d3a6a4ebc35b1954af",
-  "canonical_test_locator_sha256": {
-    "test_v4_core.py": "ddc9b78092a69794cf57ad8bb4eb7f6cd6cbcb8e8b01fd94f58f9dd3cd1bbaad",
-    "test_lifecycle_v7.py": "95bc8372f404cb721e49f2a22790e32125983f01c2ec841d4567608da2926611"
-  },
-  "canonical_test_only_delta": "Locate unchanged historical revision6 fixture through workspace analysis_outputs; original test freeze retained in analysis archive.",
+  "source_revision": 8,
+  "current_manifest": "source_manifest_v8.json",
+  "source_manifest_sha256": "cfdf35a87173f9988a2e51e93b7bbd0a8c1d3b3041f3d812ba88a110578eac32",
+  "source_main_sha256": "b1dbb3efc6f9e042c9e777fecf9ff987d082ecc0362c05d92242648b2e6dd67d",
+  "source_contract_sha256": "6b10f34371ad1dfa94d30aeeda851b2d7c34e0f80b485de40aedf87618c9c15c",
   "runtime_release": false,
   "native_navigation_acceptance": false,
-  "original_v5_v6_metadata_historical": true
+  "original_v5_v6_v7_metadata_historical": true
 }
