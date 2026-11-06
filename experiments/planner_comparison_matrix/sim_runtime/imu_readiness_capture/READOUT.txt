@@ -1,0 +1,101 @@
+SOURCE ONLY / DEFAULT ROOT_HOLD / NO MOTION AUTHORITY
+
+READ_ONLY_SIM_IMU_ADAPTER_READINESS_ONLY. This is an independent, recorder-only
+readiness capture, not the semantic canary and not a sensor-source launcher.
+No ROS context, recorder, remote business command, actual signal or UDP packet
+was started/sent for preparation. Existing parent/backend freezes remain intact.
+
+Fixed future capture
+- One exclusive release/output marker. Validate config/source package SHA,
+  UID/boot/container namespaces/environment and fresh external root host proof.
+- Only runtime child is recorder: all topics + hidden, MCAP, zstd_fast.
+  Original CDR is recorded unchanged. Start/exec-empty birth/pidfd ownership and
+  independent ACK precede MCAP magic, which precedes subscriber construction.
+- Unmodified e850 deadline helper: launcher SIGINT at45s from launcher start;
+  existing15s shutdown grace gives owned-recorder fallback SIGINT by60s. The
+  helper may signal its own launcher and registered recorder only. The parent
+  signals only its retained recorder pidfd. No source/24/61/UE signal or action.
+  SIGINT is not a hard I/O-exit guarantee; actual recorder exit/MCAP closure is
+  required for a passing report. No escalation or process-group signal exists.
+- Discovery is bounded3s, then ten continuous observed seconds. Every freshness
+  check is at most100ms apart. Accepted source age[-.05,.3]s and callback receipt
+  age<=.3s; strict original-GT stop>=.3s, linear3Dnorm<=.03m/s,
+  angular3Dnorm<=.05rad/s, stable position/yaw, bodyz>.2, bounded attitude.
+- Poll exact five fields of new adapter/container4744, raw bridge24 and
+  projector61 during the window (nominal20ms polling target; actual intervals logged), with actual
+  source/config SHA checks and a final exact identity/artifact readback.
+  The prepared input uses root's replacement_execution_v2 evidence. It does
+  not copy historical host-view cgroup data into container identities.
+
+Observed contracts
+- Standard messages only: raw/derived IMU, raw lidar, GT, original/passthrough
+  compressed image, camera info, clock, static/dynamic TF. No image reencoding.
+  /livox/lidar is checked through actual graph type/node/GID uniqueness only;
+  this tool does not claim derived lidar per-point/payload validation.
+- Frozen imu_gate0b451... rejects raw old/equal CDR with audit, without updating
+  accepted latest/header/receipt. Derived IMU must strictly advance; any reject
+  fails readiness. Baseline imu_to_local AST is unchanged. Re-serialize only
+  the expected IMU for comparison: same header and all37 values/covariances must
+  yield exactly the observed derived CDR SHA. Bag CDR is never rewritten.
+- Every observed core raw/derived IMU, image/info and clock correspondence must
+  close. A350ms end drain handles callback order; unmatched core samples are
+  reported/HOLD. Ten-second core topic header span must be at least9.3s.
+- Every clock stamp must belong to an accepted original raw IMU header and
+  strictly increase. Raw old samples never advance clock freshness locally.
+- Original camera stamp/data/format hash must match passthrough; info frame,
+  dimensions and K match config38a. Header/receipt ranges/deltas/counts and
+  original-CDR SHA/byte count are retained in JSONL, alongside full raw MCAP.
+- Actual ROS graph requires raw three topics plus GT from ue_zenoh_bridge;
+  IMU/lidar/camera/info/clock from one matrix_sensor_contract_adapter; tf_static
+  exactly two publishers (adapter and livox_scan_projector), three expected
+  edges with config38a/baseline values. Endpoint GIDs pin after discovery.
+  Any /tf publisher/message or new static edge is HOLD. No new map/odom/base TF.
+
+Actual Jazzy API boundary — no invented provenance
+Both installed and frozen runtime package.xml identify rclpy7.1.12. Its official
+tagged subscription.cpp lines182–186 returns a dict with source_timestamp,
+received_timestamp, publication_sequence_number and reception_sequence_number.
+It has no per-message publisher_gid. Local executor passes that dict through.
+Source: https://github.com/ros2/rclpy/blob/7.1.12/rclpy/src/rclpy/subscription.cpp#L182
+The downloaded primary file and installed API hashes are frozen here.
+This observer records those actual fields and matched publisher count; graph
+queries record endpoint GIDs. It never claims direct per-message GID attribution
+or OS PID from DDS. Static two-writer message-to-GID ownership is unavailable;
+the edge ownership basis is reviewed source/config plus the exact two-node
+graph. Root must review node-to-process association alongside co-observed exact
+process identities. The report explicitly records these limits.
+
+Output and release state
+readiness_report.json always has ready_for_motion=false. A successful result is
+READ_ONLY_READY_OBSERVED_NO_MOTION_AUTHORITY for this closed window only. It
+requires payload/age/stop/graph/identity checks, owned recorder exit, metadata
+and MCAP summary/schema/count/hash audit. No map/nav or motion release follows.
+sample_receipts.jsonl and graph_snapshots.jsonl retain original header/receipt
+statistics, raw CDR SHA, raw IMU rejects and graph evidence; source_identity_polls
+retains live five-field readbacks. bag_summary is unchanged1293667a....
+summary-only MCAP audit does not claim a compressed-chunk CRC or full payload
+decode audit; the full raw recording remains available for later offline audit.
+
+config.HOLD.executable=false; expected source/node naming review=false;
+root_release.HOLD.allow_execute=false and root read-only approval=false. Root
+must refresh actual identities/artifacts/namespace/host proof and bind a new
+unique release before any runtime invocation. Prepared4744 identity is root's
+closed replacement evidence, not this agent's current live probe.
+
+Validation
+14 targeted pure fixtures PASS, including actual Jazzy dict callback, complete
+synthetic10s window, unchanged raw rejection, derived regression/payload drift,
+clock orphan, camera bytes, independent optical rotation matrix, graph/type/GID
+drift, dynamic TF, ACK/magic ordering and owned exec-empty cleanup. 29 static
+byte/AST/release/ordering/API checks PASS. Gate11/cal15/helper18 prior evidence
+is reused where source bytes/functions are unchanged; no helper process suite
+or real-data replay was rerun. One intermediate test log retains a fixture-only
+MagicMock serialization error after adding artifact readback; corrected mocks
+return JSON data, final fixtures pass. No product code was relaxed for it.
+Codacy analyzer is unavailable in active tools; not run and no dependencies
+installed. No actual readiness result exists from this preparation.
+
+Offline reproduction
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s <this-directory> -p test_readiness.py -v
+PYTHONDONTWRITEBYTECODE=1 python3 <this-directory>/verify_source.py
+These are pure checks. This document authorizes no --execute invocation.

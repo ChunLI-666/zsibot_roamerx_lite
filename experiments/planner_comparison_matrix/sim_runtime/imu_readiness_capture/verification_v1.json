@@ -1,0 +1,48 @@
+{
+  "schema": "locnav.read_only_sensor_readiness.verification.v1",
+  "state": "PASS_SOURCE_ONLY_DEFAULT_HOLD",
+  "created_utc": "2026-11-06T07:04:30.148808+00:00",
+  "pure_target_fixtures": 14,
+  "passed": 14,
+  "errors": 0,
+  "failed": 0,
+  "elapsed_sec": 0.072,
+  "static_checks": 29,
+  "prior_helper18_not_rerun": true,
+  "prior_imu_gate11_and_cal15_reused_by_bytes_AST": true,
+  "runtime_test_performed": false,
+  "ROS_Node_or_recorder_or_remote_business_or_actual_signal_performed": false,
+  "actual_graph_read_performed": false,
+  "source_replacement_performed_by_this_agent": false,
+  "primary_API_correction": "rclpy7.1.12 callback dict has no publisher GID; endpoint GID is graph-only",
+  "parent_sole_owned_runtime_role": "recorder",
+  "parent_signal_target": "own recorder pidfd SIGINT only",
+  "helper_deadline": {
+    "launcher_SIGINT_sec": 45.0,
+    "shutdown_grace_sec": 15.0,
+    "owned_recorder_fallback_SIGINT_by_sec": 60.0,
+    "hard_IO_exit_guarantee": false
+  },
+  "scope": "READ_ONLY_SIM_IMU_ADAPTER_READINESS_ONLY",
+  "root_prepared_new_source_pid": 4744,
+  "default_HOLD": true,
+  "ready_for_motion": false,
+  "package_sha256": {
+    "readiness_capture.py": "a0675b7645527858f4ff358bc595cdde11fc31e7e086df18246fcbc4983e6414",
+    "readiness_contract.py": "a55ad731c3416d92a5245a48baeab2ddf333b8a89de8e481655246cbeae132f8",
+    "readiness_observer.py": "432d6d0edffb1add98b07e4b8c71695b126b69bc04b3cf8d2829aff5b175427c",
+    "readiness_validator.py": "8c15d7f60cb14b55d9e844a7b6082fc58ed5aceea7ff16479069af8f6b5cc08e",
+    "owned_recorder.py": "0ad0678232e2abe8911e96f7dac30a112a2b38a1510e380bbac7f01bec167515",
+    "imu_converter.py": "fb304b7803fc05e89cad31e57146e5d0b0f5b994fef1713549465a372a674181",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+    "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792"
+  },
+  "codacy": {
+    "analyze_available": false,
+    "analyze_performed": false,
+    "dependencies_installed": false
+  },
+  "intermediate_failed_fixture_log": "fixtures_receipt_change_mock_failure.log",
+  "final_fixture_log": "fixtures_final_v1.log"
+}

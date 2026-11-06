@@ -1,0 +1,95 @@
+{
+  "state": "REQUIRED_NOT_YET_OBSERVED",
+  "ready_for_motion": false,
+  "actor": "new exact sensor adapter identity, no velocity/action/goal provider",
+  "duration_sec": [
+    5,
+    10
+  ],
+  "recording": "Root existing new semantic canary recorder -a --include-hidden-topics, original raw CDR; no separate recorder framework here",
+  "bind": [
+    "new_source_identity.json PID/start/argvhash/boot/UID",
+    "reviewed four source SHA/config38a",
+    "raw bag SHA + closed MCAP metadata",
+    "fresh graph snapshot with publisher GIDs/process lineage",
+    "external newUE1172665/start9427026/7447 host proof"
+  ],
+  "publishers": {
+    "/front_lidar/imu": {
+      "count": 1,
+      "node": "ue_zenoh_bridge",
+      "retained": "24"
+    },
+    "/livox/imu": {
+      "count": 1,
+      "node": "matrix_sensor_contract_adapter",
+      "actor": "new exact PID"
+    },
+    "/livox/lidar": {
+      "count": 1,
+      "node": "matrix_sensor_contract_adapter"
+    },
+    "/camera/front/image/compressed": {
+      "count": 1,
+      "node": "matrix_sensor_contract_adapter"
+    },
+    "/camera/front/camera_info": {
+      "count": 1,
+      "node": "matrix_sensor_contract_adapter"
+    },
+    "/clock": {
+      "count": 1,
+      "node": "matrix_sensor_contract_adapter",
+      "semantics": "same original IMU-derived clock role; no extra clock publisher"
+    },
+    "/tf_static": {
+      "count": 2,
+      "actors": [
+        "retained projector61",
+        "new adapter"
+      ],
+      "note": "Baseline total is2, not1; adapter sends2 static edges, projector1"
+    }
+  },
+  "header_payload": {
+    "IMU": "Each accepted original raw header retained exactly; baseline converter only frame map\u2192imu_link;37 values/cov and baseline serialized CDR match; rejected old CDR/SHA/event retained and not published/clock/freshness.",
+    "lidar": "Original raw sampling header\u2192CustomMsg header/timebase preserved; existing conversion unchanged.",
+    "camera": "Original input header stamp\u2192image/info retained; baseline frame/optical transform only, no restamp.",
+    "freshness": "accepted original header[-.05,.3]s / callback receipt<=.3s / accepted IMU gap<=.1s; root post-start actual data required"
+  },
+  "static_TF": {
+    "expected_edges": [
+      [
+        "base_link",
+        "livox_frame"
+      ],
+      [
+        "base_link",
+        "imu_link"
+      ],
+      [
+        "base_link",
+        "front_camera_optical"
+      ]
+    ],
+    "expected_provenance": "closed failed calibration bag_0.mcap two /tf_static records, config38a and unchanged baseline adapter/projector code",
+    "no_nav_edges": [
+      [
+        "map",
+        "odom"
+      ],
+      [
+        "odom",
+        "base_link"
+      ]
+    ],
+    "no_new_dynamic_tf": true
+  },
+  "forbidden": [
+    "Nav/native/command publishers or actions",
+    "new map/odom/pose/TF bridge",
+    "teleport/spawn",
+    "auto retry/rollback/source churn"
+  ],
+  "source_count_boundary": "MCAP channel counts alone do not prove publishers; require actual fresh graph/GID evidence."
+}

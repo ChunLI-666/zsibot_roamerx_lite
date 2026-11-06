@@ -1,0 +1,35 @@
+{
+  "schema": "locnav.read_only_sensor_readiness.runtime_inventory.v1",
+  "scope": "READ_ONLY_SIM_IMU_ADAPTER_READINESS_ONLY",
+  "source_files": [
+    "readiness_capture.py",
+    "readiness_contract.py",
+    "readiness_observer.py",
+    "readiness_validator.py",
+    "owned_recorder.py",
+    "imu_converter.py",
+    "imu_gate.py",
+    "recording_deadline.py",
+    "bag_summary.py"
+  ],
+  "files_sha256": {
+    "readiness_capture.py": "a0675b7645527858f4ff358bc595cdde11fc31e7e086df18246fcbc4983e6414",
+    "readiness_contract.py": "a55ad731c3416d92a5245a48baeab2ddf333b8a89de8e481655246cbeae132f8",
+    "readiness_observer.py": "432d6d0edffb1add98b07e4b8c71695b126b69bc04b3cf8d2829aff5b175427c",
+    "readiness_validator.py": "8c15d7f60cb14b55d9e844a7b6082fc58ed5aceea7ff16479069af8f6b5cc08e",
+    "owned_recorder.py": "0ad0678232e2abe8911e96f7dac30a112a2b38a1510e380bbac7f01bec167515",
+    "imu_converter.py": "fb304b7803fc05e89cad31e57146e5d0b0f5b994fef1713549465a372a674181",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+    "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792",
+    "config.HOLD.json": "074011848f3719c4b6b20491c5ce558ed16409bdae97b3264ce6ccf51eb6a83d",
+    "root_release.HOLD.json": "23cb8d4ec81313ef4c1b21c790bfab8b493fef8e171fa202bb9235f7744d08a2",
+    "sensor_config.json": "38aab54b3a6ca49570feaaa8e983f4f9bc9ee197060066b186478a70f92ea023",
+    "READOUT.txt": "97a2eb28e195413849d574de2c73a41983eb0519d0722afcc97732818c68b5d5",
+    "immutable_inputs.json": "7957d1f550d98bddb649e779aa88bf60d79b810ce4e4f24cc557e6fd18aa8d13",
+    "helper_evidence_reuse.json": "cfb98f07628f1b76db2a4963228b73abed41159b0f8dd4b94cffc252c5ef6e8f",
+    "root_replacement_evidence.json": "2f92003d68310eb8ad989f9b8f3268006e9e7cdd8f710c491cbe570488fbefa9"
+  },
+  "default_HOLD": true,
+  "ready_for_motion": false
+}
