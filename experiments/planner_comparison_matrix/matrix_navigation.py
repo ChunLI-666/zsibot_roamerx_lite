@@ -6,6 +6,7 @@ No fake plant, localization status publisher, TF publisher, sensor bridge, SDK a
 import argparse,copy,hashlib,json,math,os,pathlib,shutil,signal,subprocess,sys,time
 import yaml
 from static_layer_snapshot import EXCLUDED_LAYERS,capture as capture_static_layers,audit_recorded as audit_static_layers
+from recording_deadline import arm as arm_deadline,runtime_seconds
 BASE=pathlib.Path(__file__).resolve().parent
 NAV=BASE.parents[1]
 def sha(path):
@@ -43,7 +44,7 @@ def source_snapshot(path,template):
     if not isinstance(files,dict) or not files:raise ValueError('Source snapshot requires source file hashes')
     root=NAV.resolve()
     # The wrapper executes before this process; the other files are consumed here.
-    required=[pathlib.Path(__file__),BASE/'static_layer_snapshot.py',BASE/'run_matrix_navigation.sh',
+    required=[pathlib.Path(__file__),BASE/'static_layer_snapshot.py',BASE/'recording_deadline.py',BASE/'run_matrix_navigation.sh',
       template,NAV/'src/navigation/src/robot_navigo/scripts/nav_safety_gate.py']
     required_names=set()
     for source in required:
@@ -142,12 +143,16 @@ def prepare(args):
     shutil.copy2(__file__,out/'launcher_snapshot.py');manifest['launcher_sha256']=sha(__file__)
     helper=BASE/'static_layer_snapshot.py';shutil.copy2(helper,out/helper.name)
     manifest['static_layer_snapshot_helper_sha256']=sha(helper)
+    helper=BASE/'recording_deadline.py';shutil.copy2(helper,out/helper.name)
+    manifest['recording_deadline_helper_sha256']=sha(helper)
+    manifest['recording_deadline_policy']=dict(max_runtime_sec=args.max_runtime_sec,clock='CLOCK_BOOTTIME from launcher process start',
+      detached=True,signal='one launcher SIGINT; after 15s grace exact registered child SIGINT fallback',armed_before='ROS setup and all runtime children')
     manifest['recording_policy']=dict(excluded_continuous_topics_regex=EXCLUDED_LAYERS,
       replacement='One original-CDR snapshot of each frozen static layer under /experiment/static_layer_snapshot; map and master costmaps remain continuous')
     write(out/'runtime_manifest.json',manifest);write(out/'invocation.json',dict(argv=sys.argv,cwd=os.getcwd()))
     return out,selected_install,manifest
 
-def run(args,out,selected_install,manifest):
+def run(args,out,selected_install,manifest,deadline_guard):
     if os.environ.get('ROS_DOMAIN_ID')!='185':raise RuntimeError('Matrix navigation requires the isolated domain185 environment from simulation_setup')
     if not args.build_receipt:raise RuntimeError('--run requires a concrete selected-artifact --build-receipt')
     if not args.message_install:raise RuntimeError('--run requires an isolated custom-message --message-install for complete recording')
@@ -174,9 +179,9 @@ def run(args,out,selected_install,manifest):
     from tf2_ros import Buffer,TransformListener
     from rclpy.qos import qos_profile_sensor_data,QoSProfile,ReliabilityPolicy,DurabilityPolicy
     import cv2,numpy as np
-    stopped=False;static_snapshots=[]
-    def request_stop(*unused):
-        nonlocal stopped;stopped=True
+    stopped=False;shutdown_started=False;static_snapshots=[];stop_signals=[]
+    def request_stop(signum,*unused):
+        nonlocal stopped;stopped=True;stop_signals.append(signum)
     rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
     signal.signal(signal.SIGINT,request_stop);signal.signal(signal.SIGTERM,request_stop)
     node=Node('matrix_navigation_evidence_observer');latest={};counts={};procs=[];logs=[]
@@ -207,7 +212,9 @@ def run(args,out,selected_install,manifest):
             if not -.05<=age<=.3:raise RuntimeError('Stale/future actual TF '+source+' -> '+target)
     def pump(seconds):
         end=time.monotonic()+seconds
-        while time.monotonic()<end and rclpy.ok():rclpy.spin_once(node,timeout_sec=.02)
+        while time.monotonic()<end and rclpy.ok():
+            if not shutdown_started and not stopped:deadline_guard.check_live()
+            rclpy.spin_once(node,timeout_sec=.02)
     def wait(future,timeout=3.,operation=None):
         started=time.monotonic();end=started+timeout;outcome=None
         def rpc_event(kind,**kw):
@@ -259,7 +266,12 @@ def run(args,out,selected_install,manifest):
     manifest['runtime_install_files']={str(p.relative_to(runtime)):sha(p) for p in runtime.rglob('*') if p.is_file()}
     write(out/'runtime_manifest.json',manifest)
     def launch(name,cmd,process_env=None):
-        log=(out/(name+'.log')).open('w');logs.append(log);proc=subprocess.Popen(cmd,env=env if process_env is None else process_env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True);procs.append((name,proc));event('process_started',name=name,pid=proc.pid,argv=cmd)
+        if stopped:raise InterruptedError('Stop requested before starting '+name)
+        deadline_guard.check_live()
+        owned_cmd,process_env=deadline_guard.owned_command(name,cmd,env if process_env is None else process_env)
+        log=(out/(name+'.log')).open('w');logs.append(log);deadline_guard.runtime_children_started=True
+        proc=subprocess.Popen(owned_cmd,env=process_env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True);procs.append((name,proc))
+        deadline_guard.wait_for_child(name,proc.pid);event('process_started',name=name,pid=proc.pid,argv=cmd,deadline_pidfd_registered=True)
     try:
         pump(2.)
         for topic in ['/cmd_vel_nav','/cmd_vel','/cmd_vel_safe']:
@@ -391,24 +403,33 @@ def run(args,out,selected_install,manifest):
             if readiness['ready']!=previous:event('readiness_changed',ready=readiness['ready'],reason=readiness['reason'])
     except Exception as e:write(out/'failed.json',dict(error=repr(e)));event('failure',error=repr(e));raise
     finally:
+        shutdown_started=True
+        deadline_guard.begin_shutdown('runtime_shutdown_started')
+        event('shutdown_started',requested_signals=stop_signals)
         readiness=json.loads((out/'ready.json').read_text()) if (out/'ready.json').exists() else {}
         readiness.update(ready=False,stopped_at_ns=node.get_clock().now().nanoseconds)
         write(out/'ready.json',readiness)
         # Stop command-producing servers first; keep smoother/gate/recorder alive for the zero tail.
         for name,p in procs:
             if name in ['bt_navigator','controller_server'] and p.poll() is None:os.killpg(p.pid,signal.SIGINT)
+        event('command_producers_stop_requested')
         pump(1.)
         for name,p in reversed(procs):
             if name!='recorder' and p.poll() is None:os.killpg(p.pid,signal.SIGINT)
+        event('smoother_gate_stop_requested',command_producer_zero_tail_sec=1.)
         pump(.5)
         for name,p in procs:
             if name=='recorder' and p.poll() is None:os.killpg(p.pid,signal.SIGINT)
+        event('recorder_stop_requested',additional_zero_tail_sec=.5)
         for name,p in procs:
             try:p.wait(timeout=30. if name=='recorder' else 8.)
             except subprocess.TimeoutExpired:os.killpg(p.pid,signal.SIGTERM);p.wait(timeout=3.)
+        deadline_guard.recording_closed('all_owned_processes_waited')
+        event('owned_processes_closed',returncodes={name:p.returncode for name,p in procs})
         for log in logs:log.close()
         metadata=out/'bag/metadata.yaml'
         if metadata.exists():
+            event('recording_audit_started',note='Recorder is already closed; MCAP decoding and hashing can take time')
             md=yaml.safe_load(metadata.read_text())['rosbag2_bagfile_information'];topic_counts={x['topic_metadata']['name']:x['message_count'] for x in md['topics_with_message_count']}
             try:snapshot_audit=audit_static_layers(out/'bag',static_snapshots)
             except Exception as error:snapshot_audit=dict(passed=False,error=repr(error))
@@ -417,6 +438,7 @@ def run(args,out,selected_install,manifest):
             required += [snapshot['recorded_topic'] for snapshot in static_snapshots]
             write(out/'final_audit.json',dict(message_count=md['message_count'],topic_counts=topic_counts,required_topics_nonempty={t:topic_counts.get(t,0)>0 for t in required},
               static_layer_exactly_once_cdr_verified=snapshot_audit['passed'],mcap_sha256={p.name:sha(p) for p in (out/'bag').glob('*.mcap')},note='Sequential decode and per-case action/results remain required before acceptance.'))
+            event('recording_audit_completed')
         event('stopped',observed_counts=counts);event_stream.close();node.destroy_node();rclpy.shutdown()
 
 def main():
@@ -430,12 +452,22 @@ def main():
     p.add_argument('--rotate-threshold',type=float,help='Explicit RPP heading threshold override; otherwise frozen template value')
     p.add_argument('--xy-tolerance',type=float,default=.15);p.add_argument('--yaw-tolerance',type=float,default=.08)
     p.add_argument('--build-receipt');p.add_argument('--message-install');p.add_argument('--preflight-timeout',type=float,default=30.);p.add_argument('--run',action='store_true')
+    p.add_argument('--max-runtime-sec',type=runtime_seconds,default=600.,help='Fixed deadline from launcher process start, in (0,3600] seconds; default 600')
     args=p.parse_args();out,install,manifest=prepare(args)
     if args.run:
-        try:run(args,out,install,manifest)
+        deadline_guard=None
+        try:
+            deadline_guard=arm_deadline(out,args.max_runtime_sec)
+            manifest['recording_deadline']=deadline_guard.manifest;write(out/'runtime_manifest.json',manifest)
+            run(args,out,install,manifest,deadline_guard)
         except Exception as error:
             if not (out/'failed.json').exists():write(out/'failed.json',dict(error=repr(error),stage='receipt_or_runtime_setup'))
             write(out/'ready.json',dict(ready=False,stopped_at_ns=time.time_ns()))
             raise
+        finally:
+            if deadline_guard is not None:
+                if not deadline_guard.runtime_children_started:
+                    deadline_guard.recording_closed('launcher_exiting_before_any_runtime_children')
+                if deadline_guard.closing:deadline_guard.process.wait(timeout=2.)
     else:print(str(out/'runtime_manifest.json'))
 if __name__=='__main__':main()

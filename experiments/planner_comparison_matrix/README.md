@@ -20,6 +20,55 @@ and recorder subscriptions must be present before READY. Do not substitute an
 old full navigation overlay. A bag without these interfaces is incomplete even
 when its raw sensors and front camera are available.
 
+Every new `--run` arms an independent, detached recording deadline before ROS
+setup or runtime children. `--max-runtime-sec` defaults to 600 and accepts only
+finite values in `(0, 3600]`; startup time counts from the launcher's Linux process
+start, using `CLOCK_BOOTTIME`, independently of agent/SSH lifetime or ROS time.
+Arming must acknowledge successfully or startup fails. The frozen helper runs
+with Python's isolated import path, no terminal, no inherited stdio pipes and no
+ROS dependency. Linux `pidfd_open` and `pidfd_send_signal` support is required.
+It binds the PID, process start ticks, complete command line hash, boot ID,
+unique run ID and output directory before sending one launcher SIGINT through
+the retained pidfd. Identity changes fail closed without a signal. PID reuse
+cannot redirect the signal. Before each owned executable, a dormant stdlib-only
+wrapper self-registers its PID, role and run/launch identity and waits for the
+watchdog's retained-pidfd acknowledgement. It then uses exec with the same PID;
+the watchdog verifies the final full argv against the frozen command plan,
+including a direct ELF-interpreter shebang expansion. Unsupported ambiguous
+shebangs fail closed. The launcher waits for that final identity acknowledgement
+before continuing. Even if the parent freezes or exits immediately after Popen,
+the real executable cannot run unregistered. An unacknowledged wrapper exits
+without exec when its watchdog exits or the fixed deadline passes. The child's
+initial environment binds the run ID, output directory, role and launch token.
+Source services are excluded; the independent watchdog uses a minimal PATH/LANG
+environment while owned targets retain their supplied ROS/DDS environment.
+
+`recording_deadline.json` records the fixed deadline and launcher identity;
+`recording_deadline_armed.json` records the helper identity; the separate
+`recording_deadline_events.jsonl` records arming, deadline/reason, signal or
+identity rejection. On entry to the existing shutdown path, the launcher
+atomically writes a `shutdown_started` stage to `recording_deadline_shutdown.json`
+and records each closure stage in `events.jsonl`; this leaves the deadline armed.
+Only after all owned processes have exited does it write `recording_closed`,
+before MCAP decoding/hashing. The helper verifies retained child pidfds are
+closed before disarming. Command producers still stop before the smoother/gate
+zero tail and recorder. If no confirmed closure appears within 15 seconds of
+the deadline SIGINT, or the launcher exits while owned children remain alive,
+the independent helper applies the same order: exact registered command
+producers receive SIGINT, a 1 second zero tail elapses, remaining navigation
+children receive SIGINT, another 0.5 seconds elapses, and the recorder receives
+SIGINT. Each child identity and initial run binding is rechecked immediately
+before its one fallback signal. `recording_deadline_children.json` and
+`recording_deadline_children_armed.json` audit registration and acknowledgement;
+per-role plan and self-registration JSON files bind wrapper and final argv;
+fallback phases/results are in the helper event log. It waits up to 30 seconds
+for child exit and reports any remaining child without escalation. These are
+normal SIGINT requests, not a hard bound under kernel hangs or disk faults.
+Long post-closure hashing receives no further deadline signals. Existing
+recordings, build receipts and running launchers are not modified.
+Run the non-ROS process checks with
+`python3 experiments/planner_comparison_matrix/test_recording_deadline.py`.
+
 For a frozen deployment without `.git`, pass `--source-snapshot <JSON>`. Build
 the deployment from the retained canonical commit (for example with `git archive`),
 then generate the manifest from the exact exported bytes. No linked worktree or
@@ -38,6 +87,7 @@ second Git checkout is needed. The manifest has this versioned shape:
   "files_sha256": {
     "experiments/planner_comparison_matrix/matrix_navigation.py": "<SHA256>",
     "experiments/planner_comparison_matrix/static_layer_snapshot.py": "<SHA256>",
+    "experiments/planner_comparison_matrix/recording_deadline.py": "<SHA256>",
     "experiments/planner_comparison_matrix/run_matrix_navigation.sh": "<SHA256>",
     "experiments/planner_comparison_matrix/matrix_profile.yaml": "<SHA256>",
     "src/navigation/src/robot_navigo/scripts/nav_safety_gate.py": "<SHA256>"
