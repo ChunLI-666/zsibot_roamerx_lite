@@ -57,11 +57,11 @@ class FinePulses(unittest.TestCase):
             f=PulsePlant(ticks=ticks,cost=.05);f.run()
             issued=[v for n,v in f.events if n=='fine_pulse_issued'];stopped=[v for n,v in f.events if n=='fine_pulse_stopped']
             counts={}
-            for v in issued:counts[v['index']]=counts.get(v['index'],0)+1
+            for v in issued:counts[v['pulse_index']]=counts.get(v['pulse_index'],0)+1
             self.assertTrue(counts);self.assertTrue(all(1<=v<=ticks for v in counts.values()));self.assertEqual(len(stopped),len(counts))
             self.assertEqual([v['issued_ticks'] for v in stopped],list(counts.values()))
             self.assertTrue(all(p['forward']==.2 and p['lateral']==p['yaw']==0. and 'primitive_phase' not in p for p in f.packets))
-            self.assertEqual([v['index'] for v in stopped],list(range(1,len(stopped)+1)))
+            self.assertEqual([v['pulse_index'] for v in stopped],list(range(1,len(stopped)+1)))
     def test_failed_measured_stop_blocks_every_next_positive(self):
         f=PulsePlant(ticks=1,cost=.05);f.block_stop=True
         with self.assertRaisesRegex(c.Hold,'actual stable'):f.run()
@@ -69,7 +69,7 @@ class FinePulses(unittest.TestCase):
     def test_shared_pulse_count_and_existing_correction_limit_not_renewed(self):
         f=PulsePlant(ticks=1,limit=2,steps=[.28,.28,.28],stops=[.2,.274,.274,.274],cost=.05)
         with self.assertRaisesRegex(c.Hold,'pulse budget'):f.run()
-        self.assertEqual(len(f.packets),2);self.assertEqual([v['index'] for n,v in f.events if n=='fine_pulse_started'],[1,2])
+        self.assertEqual(len(f.packets),2);self.assertEqual([v['pulse_index'] for n,v in f.events if n=='fine_pulse_started'],[1,2])
         f=PulsePlant(ticks=1,limit=32,steps=[.28,.28,.28],stops=[.2,.274,.274,.274],cost=.05)
         with self.assertRaisesRegex(c.Hold,'correction count'):f.run()
         self.assertEqual(len(f.packets),3)
@@ -80,7 +80,7 @@ class FinePulses(unittest.TestCase):
         f=PulsePlant(ticks=3,steps=[.34],cost=.05)
         with self.assertRaisesRegex(c.Hold,'overshoot'):f.run()
         self.assertEqual(len(f.packets),1);self.assertEqual(f.packets[0]['forward'],.2)
-        self.assertFalse(any(n=='fine_pulse_started' and v['index']>1 for n,v in f.events))
+        self.assertFalse(any(n=='fine_pulse_started' and v['pulse_index']>1 for n,v in f.events))
     def test_actual_tick_armed_deadline_and_original_issued_anchor(self):
         for before_arm in [True,False]:
             ns,unused,rows=tick_fixture();q=o.PrearmImuQualification(lambda:dict(command=[0.,0.,0.],request=[0.,0.,0.],latest_inputs={}),ns['time'])

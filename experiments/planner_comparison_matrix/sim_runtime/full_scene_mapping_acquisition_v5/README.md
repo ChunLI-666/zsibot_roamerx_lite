@@ -1,4 +1,8 @@
-# Current source revision v13 / protocol v5 — ROOT HOLD
+# Current source revision v14 / protocol v5 — ROOT HOLD
+
+Pulse events use pulse_index while the actual execution wrapper retains the route point index. The three event payload keys are the only runtime change; all control, stop, input, deadline and geometry behavior remains Source13. The real wrapper and terminal helper are now tested together. The original Source13 runtime failure remains archived; motion and full-map acceptance remain pending.
+
+# Historical source revision v13 / protocol v5 — ROOT HOLD
 
 An optional terminal pulse policy uses one to three ticks of the existing forward command, then requires the original measured stable stop before another burst. The shared pulse count and original 20 second deadline never renew; original target, radial and along acceptance, full-body collision, source, ownership and armed gates remain. Low-forward profiles and pulse mode are mutually exclusive. Default behavior is unchanged. This is source validation only; physical pulse convergence and full-map/native acceptance remain pending.
 
