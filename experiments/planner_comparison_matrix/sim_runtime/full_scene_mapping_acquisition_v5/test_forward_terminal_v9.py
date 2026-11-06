@@ -123,7 +123,8 @@ class ForwardTerminal(unittest.TestCase):
             deadline=state['time'].monotonic()+.04
             with mock.patch.object(c,'guard_hits',return_value={}),self.assertRaises(c.Hold):
                 state['rotate_to'](.005,deadline_steady=deadline,terminal_deadline_steady=deadline if propagate else None)
-            self.assertEqual(len(rows),0 if propagate else 1)
+            # Source22 also binds a call-only deadline to the final command guard.
+            self.assertEqual(len(rows),0)
             state['stable'].assert_not_called()
     def test_old_route_branch_and_all_other_runtime_files_preserved(self):
         from pathlib import Path
