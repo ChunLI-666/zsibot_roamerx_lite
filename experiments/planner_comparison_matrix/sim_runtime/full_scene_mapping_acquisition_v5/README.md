@@ -1,4 +1,8 @@
-# Current source revision v11 / protocol v5 — ROOT HOLD
+# Current source revision v12 / protocol v5 — ROOT HOLD
+
+An explicit Root flag may select zero-only startup input qualification: at most three accepted-header-gap epoch reopens within one fixed 40 second limit. Every new lease requires the original 10 second measured stop and continuous original-header/receipt spans; cross-epoch high-water prevents replay. No nonzero request is authorized before arming. After arming, original gap/fatal latches remain permanent. Historical CDR, rejected windows and lifetime counters remain, alongside the active epoch. Gate bytes, health/model/geometry/clock/stop thresholds remain unchanged; the default flag is false. This source is not runtime, map or native navigation acceptance.
+
+# Historical source revision v11 / protocol v5 — ROOT HOLD
 
 Passive relay file preparation now finishes before ROS initialization and sensor subscription. Process start remains after the original fresh standing and raw-fault checks, with callback pumping during READY. The other six runtime files and all timing, model, geometry and stop thresholds remain exact Source10. This removes one synchronous preparation window from the subscription interval; the new source has no runtime or full-map acceptance.
 
