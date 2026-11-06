@@ -1,0 +1,35 @@
+{
+  "scope": "MAPPING_SEMANTIC_LATERAL_CANARY_ONLY",
+  "executable": false,
+  "probes": [
+    0.2
+  ],
+  "duration_sec": 1.0,
+  "max_runtime_sec": 60.0,
+  "packet": {
+    "version": 1,
+    "action": "walk",
+    "forward": 0.0,
+    "lateral": 0.2,
+    "yaw": 0.0
+  },
+  "body_half_m": 0.74,
+  "padding_m": 0.15,
+  "root_patch_approved": false,
+  "observer_module": "calibration_observer.py",
+  "observer_sha256": "c1713ef3e8190b8d903087085365efad76bd12c8615e47336c5d2db9c1db86b9",
+  "imu_gate_sha256": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+  "require_new_parent_contract_release_review": true,
+  "accepted_source_header_age_s": [
+    -0.05,
+    0.3
+  ],
+  "accepted_receipt_age_s": [
+    0.0,
+    0.3
+  ],
+  "accepted_imu_gap_ns": 100000000,
+  "reject_does_not_update_snapshot_or_lease": true,
+  "raw_MCAP_all_hidden_topics_required": true,
+  "note": "Preparation only; not consumable by old approved parent. Semantic backend is independent and wire equivalence is not claimed; root decides later."
+}

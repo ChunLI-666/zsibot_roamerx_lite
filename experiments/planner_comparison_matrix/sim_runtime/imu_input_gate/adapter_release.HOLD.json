@@ -1,0 +1,21 @@
+{
+  "scope": "SIM_ONLY_IMU_MONOTONIC_GATE",
+  "allow_execute": false,
+  "release_id": null,
+  "uid": 1000,
+  "boot_id": null,
+  "pid_namespace": null,
+  "network_namespace": null,
+  "sources_sha256": {
+    "sim_imu_adapter.py": "8b21f321ed7fe79042d28202ebf1fb4ec848ceacb720a4066fd21dbbba52edc2",
+    "adapter_with_gate.py": "be6c4863a0616e2d2b861a9e31e559f0d60f4cde18fa85093042b2198a5df53c",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "matrix_sensor_contract.py": "3159610e54ae74e50312979103cb37e6634b24a6c47dcf74a32685d130e9dc7a"
+  },
+  "runtime_config_sha256": null,
+  "old_adapter60_retired": false,
+  "bridge24_projector61_preserved": false,
+  "old_adapter_identity": null,
+  "retained_source_identities": [],
+  "evidence_boundary": "Root must independently freeze planned exact adapter60 stop/new sole publisher and retained24/61, raw recorder and graph. This template authorizes nothing."
+}

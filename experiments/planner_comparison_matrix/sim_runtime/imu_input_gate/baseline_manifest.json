@@ -1,0 +1,10 @@
+{
+  "files": {
+    "baseline/lateral_once.py": "d9544d7ea8a11a10c5641c4473ab73b1bed759009f3aaa791117d34df223b1e2",
+    "baseline/live_sensor_adapter.py": "e8e7c2fb24db5ef08b4cdc0ee53392575f9b3f67a6265d8cfdbe240f42f48b06",
+    "baseline/matrix_sensor_contract.py": "3159610e54ae74e50312979103cb37e6634b24a6c47dcf74a32685d130e9dc7a",
+    "calibration_contract_frozen.py": "851bf34337151048a581d625553a210c1331430ba0abe0211f1d906b2baf124d",
+    "matrix_sensor_contract.py": "3159610e54ae74e50312979103cb37e6634b24a6c47dcf74a32685d130e9dc7a"
+  },
+  "scope": "Preparation only; originals untouched; no ROS/source action"
+}
