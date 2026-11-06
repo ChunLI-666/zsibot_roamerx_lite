@@ -1,11 +1,17 @@
 {
   "protocol_scope": "MAPPING_ACQUISITION_LATERAL_RECT_V5_ONLY",
-  "source_revision": 8,
-  "current_manifest": "source_manifest_v8.json",
-  "source_manifest_sha256": "cfdf35a87173f9988a2e51e93b7bbd0a8c1d3b3041f3d812ba88a110578eac32",
-  "source_main_sha256": "b1dbb3efc6f9e042c9e777fecf9ff987d082ecc0362c05d92242648b2e6dd67d",
-  "source_contract_sha256": "6b10f34371ad1dfa94d30aeeda851b2d7c34e0f80b485de40aedf87618c9c15c",
+  "source_revision": 9,
+  "current_manifest": "source_manifest_v9r2.json",
+  "source_manifest_sha256": "b16219261975bb62c6fcb18df80731b48d88bdad499782437f94c75c1f054612",
+  "source_main_sha256": "1f4d69c81aeb3cd8288cff74a6468ab4461b51b04ee2c349a662a0ae5a048784",
+  "source_contract_sha256": "d4ca9f8cacf1365e98048e21c5715eb34ac94a05fe90b9ed0087f44dc553af89",
   "runtime_release": false,
   "native_navigation_acceptance": false,
-  "original_v5_v6_v7_metadata_historical": true
+  "original_v5_v6_v7_metadata_historical": true,
+  "source_revision_id": "v9r2",
+  "canonical_fixture_locator_adjustment": {
+    "path": "canonical_test_locator_v9.json",
+    "sha256": "83abab8a7de2d37621fd0f6d118f1841af4cfe309703cf9e0415013b89de259e",
+    "independent_addendum_sha256": "8c1379f95cdbfcf6912548c6a837a0b95d989d528027fbe3f718b86f0bf81a8a"
+  }
 }
