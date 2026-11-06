@@ -652,6 +652,7 @@ def forward_terminal_leg(start,target,entry,policy,health,tick,stable,rotate_to,
     config=contract.forward_terminal_policy(start,target,policy)
     if config is None:raise contract.Hold('forward terminal policy was not explicitly selected')
     bridge=(start,target,policy);deadline=None;corrections=0;fine_vx=config.get('fine_forward_mps',contract.MAX_VX)
+    pulse_count=0;pulse_ticks=config.get('fine_pulse_ticks')
     tolerance=contract.translation_endpoint_tolerance(start,target)
     def budget():
         if deadline is not None and clock.monotonic()>=deadline:raise contract.Hold('forward terminal extra work deadline expired')
@@ -662,11 +663,11 @@ def forward_terminal_leg(start,target,entry,policy,health,tick,stable,rotate_to,
         remaining=track['length_m']-track['along_m']
         if remaining < -endpoint['along_endpoint_tolerance_m']:raise contract.Hold('forward terminal overshoot; no reverse correction')
         return remaining,endpoint,pose
-    def stop(phase):
+    def stop(phase,**phase_fields):
         budget();truth,yaw=stable(contract.STOP_STABLE,min(8.,deadline-clock.monotonic()))
         remaining,endpoint,pose=state(truth,yaw)
         emit(phase,truth=truth,remaining_m=remaining,endpoint=endpoint,correction=corrections,
-            deadline_steady=deadline,original_start=start,original_target=target)
+            deadline_steady=deadline,original_start=start,original_target=target,**phase_fields)
         budget();return truth,yaw
     # Coarse travel retains the ordinary route/controller deadline. The20s extra
     # budget begins at the first neutral/stopped terminal transition, not mid-leg.
@@ -683,6 +684,25 @@ def forward_terminal_leg(start,target,entry,policy,health,tick,stable,rotate_to,
         while not endpoint['reached']:
             if remaining<=endpoint['along_endpoint_tolerance_m']:
                 raise contract.Hold('forward terminal radial miss cannot be repaired by forward-only correction')
+            if pulse_ticks is not None:
+                if pulse_count>=config['max_fine_pulses']:raise contract.Hold('total fine pulse budget exhausted')
+                pulse_count+=1;issued_ticks=0;reached_during_pulse=False
+                emit('fine_pulse_started',index=pulse_count,max_ticks=pulse_ticks,correction=corrections,truth=truth,
+                    original_start=start,original_goal=target,deadline_steady=deadline)
+                for burst_tick in range(pulse_ticks):
+                    budget();issued_truth,issued_yaw=tick(contract.MAX_VX,0.,bridge=bridge,terminal_deadline_steady=deadline);issued_ticks+=1
+                    emit('fine_pulse_issued',index=pulse_count,tick_index=issued_ticks,max_ticks=pulse_ticks,correction=corrections,
+                        truth=issued_truth,original_start=start,original_goal=target,deadline_steady=deadline,
+                        applied_forward_policy_mps=contract.MAX_VX,semantic_forward=contract.MAX_VX/2.,
+                        basis='guarded parent tick returned; childUDP or actuation not asserted')
+                    budget();truth,yaw=health()[:2];remaining,endpoint,pose=state(truth,yaw)
+                    if endpoint['reached']:reached_during_pulse=True;break
+                # This measured stop is mandatory before another positive pulse.
+                truth,yaw=stop('fine_pulse_stopped',index=pulse_count,issued_ticks=issued_ticks,max_ticks=pulse_ticks,original_goal=target,fine_pulse_count=pulse_count);remaining,endpoint,pose=state(truth,yaw)
+                if reached_during_pulse and not endpoint['reached']:
+                    if corrections>=config['max_corrections']:raise contract.Hold('forward terminal correction count exhausted after pulse stop')
+                    corrections+=1
+                continue  # Same absolute deadline/count/frozen target, no new axis.
             budget()
             if 'fine_forward_mps' in config:tick(fine_vx,0.,bridge=bridge,terminal_deadline_steady=deadline,fine_phase=True)
             else:tick(contract.MAX_VX,0.,bridge=bridge,terminal_deadline_steady=deadline)

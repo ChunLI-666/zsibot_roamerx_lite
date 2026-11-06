@@ -616,11 +616,13 @@ def forward_terminal_policy(start,target,policy):
     value=policy['forward_terminal'];length=math.hypot(target[0]-start[0],target[1]-start[1])
     keys={'kind','coarse_stop_remaining_m','max_corrections','max_extra_work_sec'}
     along=policy.get('along_endpoint_tolerance_m');heading=policy.get('travel_yaw_rad')
-    if (policy.get('kind')!='straight_fixed_heading' or not isinstance(value,dict) or set(value) not in (keys,keys|{'fine_forward_mps'})
+    if (policy.get('kind')!='straight_fixed_heading' or not isinstance(value,dict) or set(value) not in (keys,keys|{'fine_forward_mps'},keys|{'fine_pulse_ticks','max_fine_pulses'})
         or value.get('kind')!='coarse_stop_then_fine_v1' or not finite([*start,*target,along,heading])
         or not 0<along<=min(.15,length/4) or abs(wrap(target[2]-heading))>.005):
         raise Hold('forward terminal requires explicit valid fixed-heading along tolerance and unchanged target heading')
     if 'fine_forward_mps' in value and (not finite([value['fine_forward_mps']]) or value['fine_forward_mps'] not in (.2,.3)):raise Hold('fine forward allows only explicit internal.2/.3; absent retainsMAX_VX')
+    if 'fine_pulse_ticks' in value and (type(value['fine_pulse_ticks']) is not int or value['fine_pulse_ticks'] not in (1,2,3)
+        or type(value['max_fine_pulses']) is not int or not 1<=value['max_fine_pulses']<=32):raise Hold('fine pulse ticks exactint1/2/3 and total max_fine_pulses exactint1..32 required')
     coarse=value['coarse_stop_remaining_m'];budget=value['max_extra_work_sec'];count=value['max_corrections']
     if (not finite([coarse,budget]) or not .05<=coarse<=min(.15,length/2) or coarse<=along
         or not 0<budget<=20. or type(count) is not int or not 1<=count<=2):
@@ -814,6 +816,7 @@ def validate_fine_route(release,route):
     start=route['start_anchor_truth']
     for point in route['waypoints']:
         target=point['pose_truth'];policy=point.get('leg_policy');config=forward_terminal_policy(start,target,policy)
+        if config is not None and 'fine_pulse_ticks' in config and profile is not None:raise Hold('plain fine pulses require unused low-forward profile disabled/unselected')
         if config is not None and 'fine_forward_mps' in config:fine_command_profile(release,(start,target,policy),config['fine_forward_mps'])
         start=target
     return profile

@@ -1,4 +1,8 @@
-# Current source revision v12 / protocol v5 — ROOT HOLD
+# Current source revision v13 / protocol v5 — ROOT HOLD
+
+An optional terminal pulse policy uses one to three ticks of the existing forward command, then requires the original measured stable stop before another burst. The shared pulse count and original 20 second deadline never renew; original target, radial and along acceptance, full-body collision, source, ownership and armed gates remain. Low-forward profiles and pulse mode are mutually exclusive. Default behavior is unchanged. This is source validation only; physical pulse convergence and full-map/native acceptance remain pending.
+
+# Historical source revision v12 / protocol v5 — ROOT HOLD
 
 An explicit Root flag may select zero-only startup input qualification: at most three accepted-header-gap epoch reopens within one fixed 40 second limit. Every new lease requires the original 10 second measured stop and continuous original-header/receipt spans; cross-epoch high-water prevents replay. No nonzero request is authorized before arming. After arming, original gap/fatal latches remain permanent. Historical CDR, rejected windows and lifetime counters remain, alongside the active epoch. Gate bytes, health/model/geometry/clock/stop thresholds remain unchanged; the default flag is false. This source is not runtime, map or native navigation acceptance.
 
