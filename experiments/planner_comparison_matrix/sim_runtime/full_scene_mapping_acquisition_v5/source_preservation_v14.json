@@ -1,0 +1,18 @@
+{
+  "base_source13_manifest_sha256": "98ae7556a35e4353e4d73e0beb4d871161c84ad7df1c750f7c178c0796721c12",
+  "only_three_main_keyword_renames": true,
+  "entire_main_AST_exact_after_reverting_three_keywords": true,
+  "other_six_runtime_exact": {
+    "full_scene_mapping_contract.py": true,
+    "mapping_lateral_relay.py": true,
+    "lateral_capability.py": true,
+    "imu_gate.py": true,
+    "dependencies/waypoint_contract.py": true,
+    "dependencies/map_coverage.py": true
+  },
+  "actual_execute_wrapper_AST_unmodified": true,
+  "control_guard_stop_deadline_armed_contract_logic_unchanged": true,
+  "tests_base82_plus_real_wrapper1": true,
+  "canonical_modified": false,
+  "root_cases_modified": false
+}

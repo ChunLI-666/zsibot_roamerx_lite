@@ -1,14 +1,14 @@
 {
   "protocol_scope": "MAPPING_ACQUISITION_LATERAL_RECT_V5_ONLY",
-  "source_revision": 13,
-  "current_manifest": "source_manifest_v13.json",
-  "source_manifest_sha256": "98ae7556a35e4353e4d73e0beb4d871161c84ad7df1c750f7c178c0796721c12",
-  "source_main_sha256": "c5a0cdfb1c0992be7671e8c9b69605a8ab6a506c3e644322a92db0fe14115e23",
+  "source_revision": 14,
+  "current_manifest": "source_manifest_v14.json",
+  "source_manifest_sha256": "88390f02199d41e30b512a79470e9d5d5d3cef308e037ecc4149eb89705c756c",
+  "source_main_sha256": "ecff63ce935406d5ca62c06be1e6c001b9a1cb8ca1d5f538844de3b6296417ad",
   "source_contract_sha256": "f297bd799ebb482e217fcc93f6c4cae65587666f68abf0f3ff938120bbe0a41d",
   "runtime_release": false,
   "native_navigation_acceptance": false,
   "original_v5_v6_v7_metadata_historical": true,
-  "source_revision_id": "v13",
+  "source_revision_id": "v14",
   "canonical_fixture_locator_adjustments": [
     {
       "path": "canonical_test_locator_v10.json",

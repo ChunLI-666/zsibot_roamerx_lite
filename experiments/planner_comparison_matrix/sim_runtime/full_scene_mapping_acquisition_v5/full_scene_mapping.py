@@ -687,18 +687,18 @@ def forward_terminal_leg(start,target,entry,policy,health,tick,stable,rotate_to,
             if pulse_ticks is not None:
                 if pulse_count>=config['max_fine_pulses']:raise contract.Hold('total fine pulse budget exhausted')
                 pulse_count+=1;issued_ticks=0;reached_during_pulse=False
-                emit('fine_pulse_started',index=pulse_count,max_ticks=pulse_ticks,correction=corrections,truth=truth,
+                emit('fine_pulse_started',pulse_index=pulse_count,max_ticks=pulse_ticks,correction=corrections,truth=truth,
                     original_start=start,original_goal=target,deadline_steady=deadline)
                 for burst_tick in range(pulse_ticks):
                     budget();issued_truth,issued_yaw=tick(contract.MAX_VX,0.,bridge=bridge,terminal_deadline_steady=deadline);issued_ticks+=1
-                    emit('fine_pulse_issued',index=pulse_count,tick_index=issued_ticks,max_ticks=pulse_ticks,correction=corrections,
+                    emit('fine_pulse_issued',pulse_index=pulse_count,tick_index=issued_ticks,max_ticks=pulse_ticks,correction=corrections,
                         truth=issued_truth,original_start=start,original_goal=target,deadline_steady=deadline,
                         applied_forward_policy_mps=contract.MAX_VX,semantic_forward=contract.MAX_VX/2.,
                         basis='guarded parent tick returned; childUDP or actuation not asserted')
                     budget();truth,yaw=health()[:2];remaining,endpoint,pose=state(truth,yaw)
                     if endpoint['reached']:reached_during_pulse=True;break
                 # This measured stop is mandatory before another positive pulse.
-                truth,yaw=stop('fine_pulse_stopped',index=pulse_count,issued_ticks=issued_ticks,max_ticks=pulse_ticks,original_goal=target,fine_pulse_count=pulse_count);remaining,endpoint,pose=state(truth,yaw)
+                truth,yaw=stop('fine_pulse_stopped',pulse_index=pulse_count,issued_ticks=issued_ticks,max_ticks=pulse_ticks,original_goal=target,fine_pulse_count=pulse_count);remaining,endpoint,pose=state(truth,yaw)
                 if reached_during_pulse and not endpoint['reached']:
                     if corrections>=config['max_corrections']:raise contract.Hold('forward terminal correction count exhausted after pulse stop')
                     corrections+=1
