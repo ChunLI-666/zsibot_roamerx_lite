@@ -1,0 +1,9 @@
+{
+  "state": "SOURCE_ONLY_ROOT_RELEASE_PENDING",
+  "root_approved": false,
+  "executable": false,
+  "allow_prearm_imu_gap_requalification": false,
+  "scope": "MAPPING_ACQUISITION_LATERAL_RECT_V5_ONLY",
+  "runtime_capability_approved": false,
+  "boundary": "Only a fresh Root release may select true. No release/identity/once/case is generated here."
+}
