@@ -1,0 +1,13 @@
+{
+  "state": "PASS_V2_PREPARATION_ONLY",
+  "source_manifest_sha256": "33e5cdcc2533dd56516138ed357044685aa2a41ff77a50212455992a9c1b85be",
+  "freeze_sha256": "6914410c75c48e5701cfe5fc2c1a8305a8144b0c257fb0b65c7fc88c41ce647e",
+  "archive_sha256": "2e89e475bd12db54f7fcc65a5372a68e46539cd7b58438089dbadfd596f4e766",
+  "archive_bytes": 54532,
+  "source_file_count": 21,
+  "harmless_tests_passed": 15,
+  "source_snapshot_and_tar_all_hashes_verified": true,
+  "v1_snapshot_unchanged": true,
+  "default_ROOT_HOLD": true,
+  "no_actual_runtime": true
+}

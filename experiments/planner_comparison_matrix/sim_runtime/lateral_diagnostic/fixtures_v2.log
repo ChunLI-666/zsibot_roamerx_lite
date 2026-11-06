@@ -1,0 +1,21 @@
+test_admitted_child_does_not_gain_stat_only_signal_permission (__main__.Pure.test_admitted_child_does_not_gain_stat_only_signal_permission) ... ok
+test_default_hold_has_no_runtime_side_effect (__main__.Pure.test_default_hold_has_no_runtime_side_effect) ... ok
+test_exec_empty_birth_is_retained_and_wait_is_unconditional (__main__.Pure.test_exec_empty_birth_is_retained_and_wait_is_unconditional) ... ok
+test_external_host_proof_age_hash_and_honest_scope (__main__.Pure.test_external_host_proof_age_hash_and_honest_scope) ... ok
+test_freshness_standing_and_excursion_fail_closed (__main__.Pure.test_freshness_standing_and_excursion_fail_closed) ... ok
+test_hold_case_cannot_validate (__main__.Pure.test_hold_case_cannot_validate) ... ok
+test_host_proc_fixture_catches_actual_calibration_writers (__main__.Pure.test_host_proc_fixture_catches_actual_calibration_writers) ... ok
+test_no_tool_before_ack_or_mcap (__main__.Pure.test_no_tool_before_ack_or_mcap) ... ok
+test_once_marker_no_repeat (__main__.Pure.test_once_marker_no_repeat) ... ok
+test_own_pidfd_closes_standin_and_guard_failure_does_not_orphan (__main__.Pure.test_own_pidfd_closes_standin_and_guard_failure_does_not_orphan) ... ok
+test_packet_axis_and_official_finally (__main__.Pure.test_packet_axis_and_official_finally) ... ok
+test_raw_patch_and_full_stop_envelope (__main__.Pure.test_raw_patch_and_full_stop_envelope) ... ok
+test_stop_metrics_reject_gapped_or_nonadvancing_GT (__main__.Pure.test_stop_metrics_reject_gapped_or_nonadvancing_GT) ... ok
+test_strict_stop_and_advancing_window (__main__.Pure.test_strict_stop_and_advancing_window) ... ok
+test_timed_send_guards_each_nonzero_and_neutral_survives (__main__.Pure.test_timed_send_guards_each_nonzero_and_neutral_survives) ... ok
+
+----------------------------------------------------------------------
+Ran 15 tests in 0.189s
+
+OK
+停止移动并进入平衡站立：LB+B
