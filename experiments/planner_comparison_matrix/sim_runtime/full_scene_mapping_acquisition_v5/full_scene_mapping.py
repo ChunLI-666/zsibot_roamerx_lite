@@ -378,13 +378,13 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
                 break
             if cloud_cache is None:raise contract.Hold('no fresh original-stamp raw/derived lidar+GT association')
             contract.fresh(dict(stamp_ns=cloud_cache['stamp_ns'],received_steady=cloud_cache['raw_received_steady']),now_ns,steady)
-            graph=dict(source_publishers=[],guarded_nodes=[],recorder_subscriptions=[])
+            graph=dict(source_publishers=[],guarded_nodes=[],recorder_subscriptions=[],unresolved_publishers=[])
             missing=[]
-            def graph_hold(reason,missing_only=False):
-                snapshot=dict(graph,missing=missing,missing_only=missing_only)
+            def graph_hold(reason,missing_only=False,unresolved_identity=False):
+                snapshot=dict(graph,missing=missing,missing_only=missing_only,unresolved_identity=unresolved_identity)
                 emit('graph_readiness_not_qualified',reason=reason,graph=snapshot)
                 exc=contract.Hold(reason)
-                exc.graph_readiness=True;exc.graph_missing_only=missing_only;exc.graph_observation=snapshot
+                exc.graph_readiness=True;exc.graph_missing_only=missing_only;exc.graph_unresolved_identity=unresolved_identity;exc.graph_observation=snapshot
                 raise exc
             for topic in ['/cmd_vel_nav','/cmd_vel','/cmd_vel_safe','/simulation/command_adapter/policy_cmd']:
                 observed=[dict(name=info.node_name,namespace=info.node_namespace,type=info.topic_type) for info in node.get_publishers_info_by_topic(topic)]
@@ -402,6 +402,9 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
                 graph['source_publishers'].append(detail)
                 if observed!=expected:
                     if not observed:missing.append(detail)
+                    elif len(expected)==len(observed)==1 and observed[0]==dict(name='_NODE_NAME_UNKNOWN_',namespace='_NODE_NAMESPACE_UNKNOWN_',type=expected[0]['type']):
+                        detail['resolution_status']='ROS_node_identity_unresolved_not_expected_identity'
+                        graph['unresolved_publishers'].append(detail)
                     else:graph_hold('original/derived publisher ownership changed: '+topic)
             identities=node.get_node_names_and_namespaces()
             guarded=[(release['recorder_node_name'],release['recorder_node_namespace'])]+[(entry[0]['name'],entry[0]['namespace']) for entry in release['expected_sensor_publishers'].values()]
@@ -421,6 +424,7 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
                 graph['recorder_subscriptions'].append(detail)
                 if count==0:missing.append(detail)
                 elif count!=1:graph_hold('duplicate raw recorder subscription: '+topic)
+            if graph['unresolved_publishers']:graph_hold('startup publisher identity unresolved',unresolved_identity=True)
             if missing:graph_hold('startup graph discovery incomplete',missing_only=True)
             return truth,yaw,cloud_cache,(now_ns-truth['stamp_ns'])/1e9
         def tick(vx=0.,wz=0.,bridge=None,lateral_raw=0.,terminal_deadline_steady=None,fine_phase=False):
@@ -514,7 +518,7 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
                 if evidence['dropped'] or evidence['worker_error'] is not None or imu_gate_fault is not None:return False
                 if audit['first_violation'] is not None or (audit['checked_steady'] and (not audit['valid'] or time.monotonic()-audit['checked_steady']>.3)):return False
                 if getattr(exc,'graph_readiness',False):
-                    if getattr(exc,'graph_missing_only',False) is not True or not isinstance(raw_imu_gate,PrearmImuQualification):return False
+                    if (getattr(exc,'graph_missing_only',False) is not True and getattr(exc,'graph_unresolved_identity',False) is not True) or not isinstance(raw_imu_gate,PrearmImuQualification):return False
                     context=raw_imu_gate.context()
                     return (not raw_imu_gate.armed and not raw_imu_gate.ever_armed and not raw_imu_gate.ever_nonzero_requested
                         and raw_imu_gate.fault is None and time.monotonic()<raw_imu_gate.deadline
