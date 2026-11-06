@@ -1,0 +1,227 @@
+--- frozen_observer_v2/lateral_once.py
++++ sustained_v3/lateral_once.py
+@@ -1,5 +1,5 @@
+ #!/usr/bin/python3
+-"""ROOT_HOLD by default. Exactly two short lateral probes in one raw MCAP."""
++"""ROOT_HOLD by default. Two conditional sustained4s lateral probes in one raw MCAP."""
+ import argparse
+ import hashlib
+ import json
+@@ -137,7 +137,51 @@
+         gt_stopped_after_neutral_send_sec_interval=[(stop_start-neutral['send_after_unix_ns'])/1e9,(stop_start-neutral['send_before_unix_ns'])/1e9] if stop_start and neutral and motion_ok else None,
+         timing_basis='Original GT header deltas and midpoint original body yaw. Send syscall interval is not simulator actuation time.',
+         stop_definition='linear3Dnorm<=.03m/s, angular3Dnorm<=.05rad/s, stable position/yaw and advancing original GT >=.3s',
+-        hard_plant_guarantee=False,scope='Only these two one-second probes; no general motion model inferred.')
++        hard_plant_guarantee=False,scope='Only these two fixed four-second probes; no general motion model inferred.')
++
++
++def sustained_classification(history,trace_path,sign,legacy,cutoff_stamp_ns):
++    """Original GT only; command-time window is not simulator actuation time."""
++    sends=semantic_sends(trace_path,sign);moving=[s for s in sends if s['command']['lateral']]
++    failed=dict(state='FAILED_NOT_SUSTAINED_LATERAL',measurement_cutoff_gt_stamp_ns=cutoff_stamp_ns,
++        signed_net_stopped_body_y_m=None,signed_final_active1s_body_vy_median_mps=None,
++        final_active1s_complete=False,strict_stopped_at_cutoff=False,hard_plant_guarantee=False,
++        basis='Original GT headers/probe-initial body yaw; last1s ends at last nonzero send-after time, not actuation. Parent freshness/stop gates remain required.')
++    if not moving:return failed
++    first,last=moving[0],moving[-1]
++    neutral=next((s for s in sends if not s['command']['lateral'] and s['send_before_steady_ns']>last['send_after_steady_ns']),None)
++    if neutral is None:return failed
++    end=last['send_after_unix_ns'];start=end-1_000_000_000
++    initial=next((s for s in reversed(history) if s['stamp_ns']<=first['send_before_unix_ns']),None)
++    if initial is None or first['send_before_unix_ns']-initial['stamp_ns']>300_000_000:return failed
++    rows=[s for s in history if initial['stamp_ns']<=s['stamp_ns']<=cutoff_stamp_ns]
++    if len(rows)<2:return failed
++    if rows[-1]['stamp_ns']!=cutoff_stamp_ns:return failed
++    if any(not c.finite([*r['position'],*r['linear'],*r['angular']]) for r in rows):raise c.Hold('nonfinite sustained GT')
++    if any(b['stamp_ns']<=a['stamp_ns'] for a,b in zip(rows,rows[1:])):raise c.Hold('nonadvancing sustained GT')
++    direction=math.copysign(1.,sign);current=rows[-1];initial_yaw=c.rpy(initial['quaternion'])[2]
++    net=c.body_xy(current['position'][0]-initial['position'][0],current['position'][1]-initial['position'][1],initial_yaw)
++    tracker=c.StableStop()
++    for row in rows:
++        if row['stamp_ns']>=neutral['send_before_unix_ns']:tracker.update(row)
++    stopped=tracker.start is not None and tracker.stamp-tracker.start[0]>=300_000_000
++    covered=start;velocities=[];complete=True
++    for a,b in zip(rows,rows[1:]):
++        lo,hi=a['stamp_ns'],b['stamp_ns']
++        if hi<=start or lo>=end:continue
++        if lo>covered or hi-lo>100_000_000:complete=False;break
++        dt=(hi-lo)/1e9
++        vx,vy=c.body_xy((b['position'][0]-a['position'][0])/dt,(b['position'][1]-a['position'][1])/dt,initial_yaw)
++        velocities.append(direction*vy);covered=max(covered,min(hi,end))
++    complete=complete and covered>=end and bool(velocities)
++    median=statistics.median(velocities) if complete else None
++    passed=legacy.get('state')=='MEASURED_SHORT_PROBE' and stopped and direction*net[1]>.05 and median is not None and median>.03
++    failed.update(state='MEASURED_SUSTAINED_LATERAL_PROBE' if passed else 'FAILED_NOT_SUSTAINED_LATERAL',
++        signed_net_stopped_body_y_m=direction*net[1],signed_final_active1s_body_vy_median_mps=median,
++        final_active1s_complete=complete,strict_stopped_at_cutoff=stopped,final_active1s_original_header_window_ns=[start,end],
++        initial_gt_stamp_ns=initial['stamp_ns'],stopped_gt_stamp_ns=current['stamp_ns'],body_displacement_xy_m=list(net),
++        final_active1s_velocity_intervals=len(velocities),short_probe_state=legacy.get('state'))
++    return failed
+ 
+ 
+ def run(case_path,release_path,output):
+@@ -177,7 +221,10 @@
+             else:stable_since=None
+         raise c.Hold('fresh measured stop/tail gate timed out')
+     def record_probe(index):
+-        try:item=dict(index=index,**metrics(observer.history,output/f'probe_{index}_send.jsonl',case['probes'][index]))
++        try:
++            legacy=metrics(observer.history,output/f'probe_{index}_send.jsonl',case['probes'][index])
++            sustained=sustained_classification(observer.history,output/f'probe_{index}_send.jsonl',case['probes'][index],legacy,observer.latest['/odom']['stamp_ns'])
++            item=dict(index=index,**legacy);item.update(short_probe_state=item['state'],state=sustained['state'],sustained=sustained)
+         except BaseException as exc:item=dict(index=index,state='FAILED_METRICS',error=str(exc))
+         probe_results[index]=item
+         try:deadline.atomic_json(output/f'probe_{index}.acceptance.json',item)
+@@ -213,23 +260,24 @@
+             wait_stop();c.host_proof(release,case)
+             if c.package_hashes()!=release['package_sha256']:raise c.Hold('source changed before semantic tool')
+             if guard.manifest['deadline_boottime_sec']-time.clock_gettime(time.CLOCK_BOOTTIME)<15.:raise c.Hold('insufficient capped recording reserve')
+-            if index==1 and probe_results.get(0,{}).get('state')!='MEASURED_SHORT_PROBE':raise c.Hold('positive semantic probe must pass before negative plan')
++            if index==1 and record_probe(0)['state']!='MEASURED_SUSTAINED_LATERAL_PROBE':raise c.Hold('positive sustained probe must still pass after between-stop before negative plan')
+             c.claim(output/f'probe_{index}.planned.json',dict(release_id=release['release_id'],probe=index,original_gt_stamp_ns=observer.latest['/odom']['stamp_ns'],
+                 prior_positive_acceptance_sha256=c.sha(output/'probe_0.acceptance.json') if index==1 else None))
+             watch(force_lease=True)  # Original stamps; refreshed lease, never restamped data.
+             tool_argv=[sys.executable,'-u',str(c.HERE/c.TOOL_FILENAME),'--execute','--case',str(case_path),
+                 '--root-release',str(release_path),'--ready',str(output/'recorder_ready.json'),'--ready-sha256',c.sha(output/'recorder_ready.json'),'--probe-index',str(index)]
+             tool=child(tool_argv,output/f'probe_{index}_stdout.receipt.log',dict(os.environ),check=watch);tool_logs.append(index)
+-            until=time.monotonic()+3.
++            until=time.monotonic()+6.
+             while tool['process'].poll() is None:
+                 watch()
+                 if time.monotonic()>until:raise c.Hold('semantic tool exceeded normal duration/finally budget')
+             if tool['process'].returncode!=0:raise c.Hold('semantic tool failed/interrupted')
+             os.close(tool['fd']);tool=None
+             wait_stop()
+-            if record_probe(index)['state']!='MEASURED_SHORT_PROBE':raise c.Hold('semantic probe lacks correct-direction measurable GT response and strict stop')
++            if record_probe(index)['state']!='MEASURED_SUSTAINED_LATERAL_PROBE':raise c.Hold('semantic probe lacks sustained signed tail velocity and net stopped displacement')
+             if index==0:wait_stop(seconds=3.)
+         wait_stop(seconds=5.,limit=8.)
++        if record_probe(1)['state']!='MEASURED_SUSTAINED_LATERAL_PROBE':raise c.Hold('negative sustained net displacement did not survive final stopped tail')
+         result['state']='COMPLETE_PROBES_STOPPED_PLUS5S_RAW_TAIL'
+     except BaseException as exc:
+         result.update(state='HOLD_DIAGNOSTIC_FAILED',error_type=type(exc).__name__,error=str(exc))
+@@ -250,7 +298,7 @@
+                 except BaseException as exc:result['failure_stop_and_tail_verified']=False;result['stop_tail_error']=str(exc)
+             for index in tool_logs:
+                 path=output/f'probe_{index}_send.jsonl'
+-                if path.exists():record_probe(index)
++                if path.exists() and index not in probe_results:record_probe(index)
+             result['probes']=[probe_results[index] for index in sorted(probe_results)]
+             result['observed_topic_counts']=observer.counts
+             try:observer.close()
+@@ -274,7 +322,7 @@
+             try:result['bag_audit']=bag_summary.audit(output/'bag',c.TOPICS)
+             except BaseException as exc:result['bag_audit']=dict(complete=False,error=str(exc))
+         result['diagnostic_passed']=bool(result['state']=='COMPLETE_PROBES_STOPPED_PLUS5S_RAW_TAIL' and len(result['probes'])==2
+-            and all(p['state']=='MEASURED_SHORT_PROBE' for p in result['probes']) and result.get('bag_audit',{}).get('complete'))
++            and all(p['state']=='MEASURED_SUSTAINED_LATERAL_PROBE' for p in result['probes']) and result.get('bag_audit',{}).get('complete'))
+         result.update(finished_unix_ns=time.time_ns(),scene_identity_basis='root external host-preflight, not continuous host monitoring',
+             source_package_sha256=release['package_sha256'],no_motion_model_generalization=True)
+         deadline.atomic_json(output/'result.json',result)
+--- frozen_observer_v2/lateral_contract.py
++++ sustained_v3/lateral_contract.py
+@@ -7,7 +7,7 @@
+ import time
+ 
+ HERE=Path(__file__).resolve().parent
+-SCOPE='MAPPING_SEMANTIC_LATERAL_CANARY_ONLY'
++SCOPE='MAPPING_SEMANTIC_LATERAL_SUSTAINED_CALIBRATION_ONLY'
+ TOOL_FILENAME='semantic_tool_timed.py'
+ HELPER_SHA='e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c'
+ PACKAGE=('lateral_once.py','lateral_contract.py',TOOL_FILENAME,'host_preflight.py',
+@@ -74,7 +74,7 @@
+         or release.get('controller_pid_namespace')!=os.readlink('/proc/self/ns/pid')):raise Hold('same-host/container identity differs')
+     if not release.get('root_unique_velocity_owner_approved') or not release.get('root_static_patch_and_engineering_stop_reserve_approved'):raise Hold('root unique-owner/patch engineering approval missing')
+     if not case.get('root_patch_approved') or not case.get('coordinate_verified_by_root'):raise Hold('patch/coordinate root audit pending')
+-    if case.get('probes')!=[.2,-.2] or any(case.get(k)!=v for k,v in [('max_runtime_sec',60.),('duration_sec',1.),('between_sec',3.),('tail_sec',5.),('body_half_m',.74),('padding_m',.15),('cell_guard_m',.05),('lateral_abort_m',.8),('forward_drift_abort_m',.1),('yaw_abort_rad',.08),('speed_abort_mps',1.),('stop_reserve_m',1.)]):raise Hold('fixed once-probe case was changed')
++    if case.get('probes')!=[.2,-.2] or any(case.get(k)!=v for k,v in [('max_runtime_sec',60.),('duration_sec',4.),('between_sec',3.),('tail_sec',5.),('body_half_m',.74),('padding_m',.15),('cell_guard_m',.05),('lateral_abort_m',.8),('forward_drift_abort_m',.1),('yaw_abort_rad',.08),('speed_abort_mps',1.),('stop_reserve_m',1.)]):raise Hold('fixed once-probe case was changed')
+     if case['scene_instance_id']['pid']!=1172665 or case['scene_instance_id']['starttime_ticks']!=9427026:raise Hold('this case is only for the frozen new UE instance')
+     if any(os.environ.get(k)!=v for k,v in case['expected_environment'].items()):raise Hold('ROS source environment differs')
+     for key in ['sensor_config_artifact','coordinate_evidence_artifact']:
+--- frozen_observer_v2/semantic_tool_timed.py
++++ sustained_v3/semantic_tool_timed.py
+@@ -12,10 +12,11 @@
+ import signal
+ import time
+ 
+-SCOPE = 'MAPPING_SEMANTIC_LATERAL_CANARY_ONLY'
++SCOPE = 'MAPPING_SEMANTIC_LATERAL_SUSTAINED_CALIBRATION_ONLY'
+ TARGET = ('127.0.0.1', 7447)
+ PERIOD_NS = 50_000_000
+-MAX_ACTIVE_NS = 1_000_000_000
++MAX_ACTIVE_NS = 4_000_000_000
++MAX_MOTION_PACKETS = 80
+ FINAL_ZERO_PACKETS = 5
+ SOCKET_TIMEOUT_SEC = .05
+ 
+@@ -92,15 +93,15 @@
+ def run_probe(sign, duration_sec, socket_factory, prove, stream, clock=time, signal_api=signal):
+     """One socket. All clocks/sockets/proofs/signals can be replaced by pure fakes."""
+     frame(sign)
+-    if type(duration_sec) not in (int, float) or not math.isfinite(duration_sec) or not 0 < duration_sec <= 1.:
+-        raise CanaryHold('active duration must be finite in (0,1] seconds')
++    if type(duration_sec) not in (int, float) or not math.isfinite(duration_sec) or not 0 < duration_sec <= MAX_ACTIVE_NS/1e9:
++        raise CanaryHold('active duration must be finite in (0,4] seconds')
+     duration_ns = round(duration_sec*1e9)
+     if duration_ns <= 0:
+         raise CanaryHold('active duration below nanosecond resolution')
+     state = dict(stopping=False, signals=[])
+     result = dict(scope=SCOPE, direct_bounded_backend=True, relay_watchdog_sec=None,
+         engine_timeout_sec_observed_in_prior_evidence=.5, hard_plant_guarantee=False,
+-        sign=sign, requested_active_sec=duration_sec, maximum_motion_packets=20,
++        sign=sign, requested_active_sec=duration_sec, maximum_motion_packets=MAX_MOTION_PACKETS,
+         motion_packets_sent=0, per_motion_proof_checks=0,
+         final_zero_attempts=0, final_zero_logged_successes=0, close_returned=False,
+         errors=[], completed=False)
+@@ -118,7 +119,7 @@
+         start = clock.monotonic_ns()
+         end, due = start + duration_ns, start
+         result.update(active_start_steady_ns=start, active_deadline_steady_ns=end)
+-        while result['motion_packets_sent'] < min(20, math.ceil(duration_ns/PERIOD_NS)):
++        while result['motion_packets_sent'] < min(MAX_MOTION_PACKETS, math.ceil(duration_ns/PERIOD_NS)):
+             now = clock.monotonic_ns()
+             if now >= end:
+                 break
+@@ -195,9 +196,9 @@
+     contract.validate(case, release, args.case, output)
+     contract.patch_check(case)  # Original .89 body +1m engineering stop reserve, no new geometry.
+     if (case.get('probes') != [.2, -.2] or type(case.get('duration_sec')) not in (int, float)
+-            or not math.isfinite(case['duration_sec']) or not 0 < case['duration_sec'] <= 1.
++            or not math.isfinite(case['duration_sec']) or case['duration_sec'] != 4.
+             or case.get('max_runtime_sec') != 60.):
+-        raise CanaryHold('only the reviewed two-sign <=1s/60s-recorder case')
++        raise CanaryHold('only the reviewed two-sign fixed4s/60s-recorder case')
+     ready = contract.read(args.ready)
+     if (args.ready != output/'recorder_ready.json' or contract.sha(args.ready) != args.ready_sha256
+             or ready.get('release_id') != release['release_id'] or ready.get('mcap_magic_verified') is not True
+--- frozen_observer_v2/case.HOLD.json
++++ sustained_v3/case.HOLD.json
+@@ -1,13 +1,13 @@
+ {
+   "schema_version": 1,
+-  "scope": "MAPPING_SEMANTIC_LATERAL_CANARY_ONLY",
++  "scope": "MAPPING_SEMANTIC_LATERAL_SUSTAINED_CALIBRATION_ONLY",
+   "executable": false,
+   "max_runtime_sec": 60.0,
+   "probes": [
+     0.2,
+     -0.2
+   ],
+-  "duration_sec": 1.0,
++  "duration_sec": 4.0,
+   "between_sec": 3.0,
+   "tail_sec": 5.0,
+   "oracle_path": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_combined_v1/acquisition_oracle.npz",
+@@ -88,9 +88,9 @@
+   },
+   "container_id": "b5ebab492d5dbc3994fd859605d24e0bcba2f11ea094e7c7e59e07d5be2dc468",
+   "root_preparation_notes": [
+-    "Monotonic sensor adapter is independently staged/released; replacement and original-source retirement plan pending root.",
+-    "Actual current sensor source identities/artifacts/scene proof, material and coordinate binding must be refreshed by root.",
+-    "One canary release contains fixed[+0.2,-0.2], each1s; negative plan only after positive measured-direction+strict-stop acceptance."
++    "Source-only sustained4s revision. No executable root release supplied.",
++    "Fixed[+0.2,-0.2],each4s; correct signed net settledY>.05m and final active1s medianVy>.03m/s required before negative plan.",
++    "Original sensor/source/coordinate/current patch/stop-reserve proof still requires root refresh; no mapping capability acceptance."
+   ],
+   "sensor_adapter_transition_actual_verified": false
+ }
