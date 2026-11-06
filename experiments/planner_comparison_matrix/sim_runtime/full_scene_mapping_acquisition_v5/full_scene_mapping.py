@@ -63,6 +63,7 @@ class BoundedCallbacks:
 def validate_release(release,route,route_path,oracle_path,output):
     if release.get('scope')!=contract.SCOPE or release.get('mode')!=contract.MODE or release.get('allow_execute') is not True:
         raise contract.Hold('root release absent or not executable')
+    contract.validate_fine_route(release,route)
     rid=release.get('release_id','')
     if len(rid)!=32 or any(c not in '0123456789abcdef' for c in rid):raise contract.Hold('unique root release UUID required')
     if release.get('route_sha256')!=contract.sha(route_path) or release.get('oracle_sha256')!=contract.sha(oracle_path):raise contract.Hold('root route/oracle hash mismatch')
@@ -131,9 +132,10 @@ class OwnedRelay:
         self.process=None;self.pidfd=None;self.identity=None;self.output=output;self.command=(0.,0.,0.);self.run_id=run_id;self.close_errors=[]
         source=HERE/'mapping_lateral_relay.py';self.frozen=output/'mapping_lateral_relay_frozen.py';shutil.copy2(source,self.frozen)
         shutil.copy2(HERE/'lateral_capability.py',output/'lateral_capability.py')
+        self.fine_forward_profile=lateral_capability.fine_profile_from_release(contract.read_json(root_release))
         self.admission_path=output/'relay_admission.json'
         contract.claim_once(self.admission_path,dict(root_release_path=str(root_release.resolve()),root_release_sha256=contract.sha(root_release),
-            owner_identity=owner_identity,motion_model=model))
+            owner_identity=owner_identity,motion_model=model,fine_forward_profile=self.fine_forward_profile))
         self.argv=[sys.executable,'-I',str(self.frozen),'--execute','--admission',str(self.admission_path),'--admission-sha256',contract.sha(self.admission_path)]
         self.source_sha256=contract.sha(self.frozen)
         self.log=(output/'relay.stderr').open('w')
@@ -169,12 +171,14 @@ class OwnedRelay:
         except BaseException:
             self.close();raise
 
-    def send(self,vx=0.,wz=0.,preflight=None,lateral_raw=0.):
+    def send(self,vx=0.,wz=0.,preflight=None,lateral_raw=0.,fine_phase=False):
+        if type(fine_phase) is not bool:raise contract.Hold('fine phase must be exact boolean')
         if self.process.poll() is not None or contract.process_identity(self.process.pid)!=self.identity:raise contract.Hold('owned relay exited/changed')
         if (vx or wz or lateral_raw) and preflight is None:raise contract.Hold('positive relay command requires final input guard')
         issued_ns,steady=time.time_ns(),time.monotonic()
         if preflight is not None:preflight(issued_ns,steady)
-        packet=contract.primitive_packet(vx,wz,issued_ns,lateral_raw)
+        packet=(contract.primitive_packet(vx,wz,issued_ns,lateral_raw,fine_forward_profile=self.fine_forward_profile,fine_phase=True)
+            if fine_phase is True else contract.primitive_packet(vx,wz,issued_ns,lateral_raw))
         payload=(json.dumps(packet)+'\n').encode()
         if os.write(self.process.stdin.fileno(),payload)!=len(payload):raise contract.Hold('incomplete nonblocking owned-relay command write')
         self.command=(vx,wz,lateral_raw)
@@ -205,8 +209,12 @@ def finalize_owned_relay(relay,observe_stop):
     """Zero first, then observe; any observation failure still closes only ours."""
     result=dict(stop_verified=False,relay_closed=False,relay_close_errors=[])
     try:
-        try:relay.send()
-        except BaseException as exc:result['zero_error']=str(exc)
+        try:
+            packet=relay.send()
+            if not isinstance(packet,dict) or any(packet.get(k)!=0. for k in ['forward','lateral','yaw']) or type(packet.get('issued_unix_ns')) is not int:raise ValueError('successful cleanup zero did not return an issued zero packet')
+            result['initial_cleanup_zero_receipt']=dict(packet=packet,basis='parent_pipe_issue_not_SDK_or_engine_dispatch')
+        except BaseException as exc:
+            result['initial_cleanup_zero_receipt']=None;result['zero_error']=str(exc)
         try:result['stop_verified']=bool(observe_stop())
         except BaseException as exc:result['stop_observation_error']=str(exc)
     finally:
@@ -368,9 +376,13 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
             for topic in required:
                 if (release['recorder_node_name'],release['recorder_node_namespace']) not in [(info.node_name,info.node_namespace) for info in node.get_subscriptions_info_by_topic(topic)]:raise contract.Hold('raw recorder subscription absent: '+topic)
             return truth,yaw,cloud_cache,(now_ns-truth['stamp_ns'])/1e9
-        def tick(vx=0.,wz=0.,bridge=None,lateral_raw=0.,terminal_deadline_steady=None):
+        def tick(vx=0.,wz=0.,bridge=None,lateral_raw=0.,terminal_deadline_steady=None,fine_phase=False):
             nonlocal last_send,last_request,active_lateral
-            contract.primitive_packet(vx,wz,time.time_ns(),lateral_raw)
+            if fine_phase is not False:
+                if fine_phase is not True or terminal_deadline_steady is None:raise contract.Hold('fine phase requires fixed terminal deadline')
+                fine_profile=contract.fine_command_profile(release,bridge,vx)
+                contract.primitive_packet(vx,wz,time.time_ns(),lateral_raw,fine_forward_profile=fine_profile,fine_phase=True)
+            else:contract.primitive_packet(vx,wz,time.time_ns(),lateral_raw)
             last_request=dict(vx=vx,wz=wz,lateral_raw=lateral_raw,requested_unix_ns=time.time_ns())
             until=time.monotonic()+contract.PERIOD
             while time.monotonic()<until:callbacks.spin()
@@ -420,11 +432,13 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
                 final_facts['cloud']=contract.fresh(dict(stamp_ns=cloud['stamp_ns'],received_steady=cloud['raw_received_steady']),issued_ns,steady)
                 if last_send is not None and steady-last_send>contract.CONTROL_RENEWAL_LIMIT:raise contract.Hold('guard computation exceeded command renewal bound')
                 if not audit['valid'] or audit['first_violation'] is not None or steady-audit['checked_steady']>.3:raise contract.Hold('owner audit expired during guard computation')
-            packet=relay.send(vx,wz,preflight=final_guard,lateral_raw=lateral_raw);last_send=final_facts['issued_steady_sec']
+            packet=(relay.send(vx,wz,preflight=final_guard,lateral_raw=lateral_raw,fine_phase=True) if fine_phase is True else relay.send(vx,wz,preflight=final_guard,lateral_raw=lateral_raw));last_send=final_facts['issued_steady_sec']
             if lateral_raw:active_lateral=lateral_context
             if time.monotonic()-last_send>contract.CONTROL_RENEWAL_LIMIT:raise contract.Hold('command write/dispatch exceeded renewal bound; issued anchor retained')
             accepted=writer.submit('state_trace',dict(unix_ns=time.time_ns(),scope=contract.SCOPE,truth=truth,lidar_stamp_ns=cloud['stamp_ns'],
               lidar_gt_association=cloud['pose'],command=packet,policy_vx=vx,policy_wz=wz,policy_lateral_raw=lateral_raw,primitive=kind,
+              fine_forward_phase=fine_phase,applied_forward_policy_mps=vx,applied_command=dict(version=1,action='walk',forward=packet['forward'],lateral=packet['lateral'],yaw=packet['yaw']),
+              applied_command_basis='owner pipe write accepted; not child UDP or actuation proof',
               lateral_stop_envelope_retained=bool(lateral_context),
               actual_GT_stop_reference=stop_reference,
               original_inputs={key:{k:v for k,v in value.items() if k!='message'} for key,value in latest.items()},
@@ -556,6 +570,9 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
                     except BaseException:checker=contract.StableStop(contract.truth_age_limit(model))
                 return False
             closed=finalize_owned_relay(relay,observe_stop);result.update(closed);stop_verified=closed['stop_verified']
+            if writer is not None:
+                try:emit('initial_cleanup_zero_receipt',receipt=closed.get('initial_cleanup_zero_receipt'),zero_error=closed.get('zero_error'))
+                except BaseException as exc:result['cleanup_zero_receipt_emit_error']=str(exc)
             result.update(relay_identity=relay.identity,relay_source_sha256=relay.source_sha256,relay_returncode=relay.process.poll() if relay.process is not None else None)
             if not result['relay_closed']:result['classification']='HOLD_owned_relay_not_closed'
             elif result['relay_close_errors']:result['classification']='HOLD_owned_relay_close_error'
@@ -600,7 +617,7 @@ def forward_terminal_leg(start,target,entry,policy,health,tick,stable,rotate_to,
     """Bounded optional terminal work. All packets use the original guarded tick."""
     config=contract.forward_terminal_policy(start,target,policy)
     if config is None:raise contract.Hold('forward terminal policy was not explicitly selected')
-    bridge=(start,target,policy);deadline=None;corrections=0
+    bridge=(start,target,policy);deadline=None;corrections=0;fine_vx=config.get('fine_forward_mps',contract.MAX_VX)
     tolerance=contract.translation_endpoint_tolerance(start,target)
     def budget():
         if deadline is not None and clock.monotonic()>=deadline:raise contract.Hold('forward terminal extra work deadline expired')
@@ -628,11 +645,14 @@ def forward_terminal_leg(start,target,entry,policy,health,tick,stable,rotate_to,
         tick(contract.MAX_VX,0.,bridge=bridge)
     while True:
         remaining,endpoint,pose=state(truth,yaw)
-        emit('fine_started' if corrections==0 else 'correction_started',truth=truth,remaining_m=remaining,correction=corrections)
+        emit('fine_started' if corrections==0 else 'correction_started',truth=truth,remaining_m=remaining,correction=corrections,applied_forward_policy_mps=fine_vx,semantic_forward=fine_vx/2.)
         while not endpoint['reached']:
             if remaining<=endpoint['along_endpoint_tolerance_m']:
                 raise contract.Hold('forward terminal radial miss cannot be repaired by forward-only correction')
-            budget();tick(contract.MAX_VX,0.,bridge=bridge,terminal_deadline_steady=deadline);budget()
+            budget()
+            if 'fine_forward_mps' in config:tick(fine_vx,0.,bridge=bridge,terminal_deadline_steady=deadline,fine_phase=True)
+            else:tick(contract.MAX_VX,0.,bridge=bridge,terminal_deadline_steady=deadline)
+            budget()
             truth,yaw=health()[:2];remaining,endpoint,pose=state(truth,yaw)
         contract.require_translation_progress(start,target,entry,pose,tolerance)
         truth,yaw=stop('fine_stopped')

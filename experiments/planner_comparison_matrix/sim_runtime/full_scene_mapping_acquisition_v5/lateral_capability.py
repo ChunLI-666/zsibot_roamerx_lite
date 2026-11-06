@@ -222,3 +222,27 @@ def validate_model_evidence(model,admission):
         require(model['max_truth_speed_mps']>=actual['max_norm_speed_mps']
             and model['max_truth_yaw_rate_rps']>=actual['max_yaw_rate_rps'],'global future-speed/yaw engineering bound below actual measurement')
     return admission
+
+
+FINE_FORWARD_SUBCAPABILITY='sim_acquisition_forward_terminal_fine_v1'
+
+def fine_profile(value):
+    require(isinstance(value,dict) and set(value)=={'subcapability','selected_fine_forward_mps'}
+        and value.get('subcapability')==FINE_FORWARD_SUBCAPABILITY
+        and finite([value.get('selected_fine_forward_mps')]) and value['selected_fine_forward_mps'] in (.2,.3),
+        'exact root-selected fine-forward subcapability/value required')
+    return dict(value)
+
+def fine_profile_from_release(release):
+    allow=release.get('allow_fine_forward_profile',False)
+    if allow is False:
+        require(release.get('selected_fine_forward_mps') is None and release.get('fine_forward_subcapability') is None,
+            'disabled fine profile must not select a magnitude/subcapability')
+        return None
+    require(allow is True,'fine profile authorization must be explicit true')
+    return fine_profile(dict(subcapability=release.get('fine_forward_subcapability'),selected_fine_forward_mps=release.get('selected_fine_forward_mps')))
+
+def fine_admission_profile(admission,release):
+    value=fine_profile_from_release(release)
+    require(admission.get('fine_forward_profile')==value,'relay fine-forward admission differs from exact root release')
+    return value
