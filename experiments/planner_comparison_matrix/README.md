@@ -159,3 +159,112 @@ Keep every attempted run, including startup failures, network outages and
 controller rejections. An Action success alone is insufficient: verify the
 original goal after stopping, ordered turns, collision checks, camera continuity,
 MCAP readability and concrete code/config/map identities.
+
+For an authorized native multi-waypoint experiment, prepare/run with
+`--with-waypoints`. The default single-goal profile is unchanged. The option adds
+the installed Jazzy 1.3.13 `nav2_waypoint_follower/waypoint_follower` lifecycle
+server and activates it with the existing nodes. Its effective parameters are
+read back: `stop_on_failure=true`, `loop_rate=20`, and the native
+`WaitAtWaypoint` task pauses for 1000 ms at every reached point. The new server is
+an exact owned deadline role and stops with the command producers before the
+smoother/gate zero tail. Its executable, core/plugin DSOs, package version and
+Action/message definitions are hashed separately from the unchanged selected
+planner/controller build receipt. The READY lease binds these identities and
+the independent batch client source hashes. Include `waypoint_batch.py`,
+`waypoint_contract.py`, the unchanged `pilot_scan_timing.py` and
+`message_info_contract.py` in a frozen source deployment manifest.
+
+The independent `goal_pilot_source/waypoint_batch.py` defaults to observation.
+Its authorized `--execute --ready <lease> --route <route.json> --output <new-dir>`
+submits exactly one native `FollowWaypoints` request with `goal_index=0` and
+`number_of_loops=0`. Internally the official server sends one `NavigateToPose`
+per leg, preserving the existing single-goal BT and terminal-goal binding.
+This is sequential native waypoint execution; it does not plan one concatenated
+global route. It stops on a failed leg without automatic retries or skipped
+points. Its route contract is:
+
+```json
+{
+  "schema_version": 1,
+  "frame_id": "map",
+  "executable": true,
+  "mission_budget_sec": 300,
+  "waypoints": [
+    {"id": "first", "pose": [1.0, 1.0, 0.0], "require_stopped": true},
+    {"id": "turn180", "pose": [1.0, 1.0, 3.141592653589793], "require_stopped": true, "tags": ["in_place_180"]}
+  ]
+}
+```
+
+The coordinates above illustrate the schema and are not an approved scene
+route. An executable route needs 2–256 unique IDs and finite poses, including
+each original heading. Repeated XY with a different heading remains a distinct
+ordered point. Each adjacent leg and the first goal from the final live start
+must be shorter than 8 m; this necessary check does not prove that the complete
+path and padded body stay inside the current rolling costmap or mapped free
+space. A route may cover the full map through successive local windows.
+`executable=false` design documents are rejected. The preregistered mission
+budget must be finite and in `(0,3300]` seconds; an explicit client `--timeout`
+must equal it. Before sending, the client checks the launcher's fixed
+`CLOCK_BOOTTIME` deadline and same boot ID, requiring the full budget plus
+30 seconds for stopping/closure. Stop observation is bounded to `[.3,8]` seconds
+so an override cannot consume that reserve. The launcher retains its default 600-second
+deadline and explicit maximum 3600 seconds. Choose a sufficient explicit
+launcher deadline before starting a long experiment.
+
+The batch client inherits the unchanged a63b observer's 13 explicit
+subscriptions, sensor QoS, map/odom frame checks, original `.3s` old/`.05s`
+future input limits, JPEG/Info checks and `.5s` READY lease. It requires 10
+continuous healthy, measured-and-commanded-stopped seconds after Action
+discovery within a total preflight budget no greater than 40 seconds. It never
+uses GT odometry for navigation. Native feedback selects the expected index;
+each point independently requires fresh `/lightning/pose` within `.15m/.08rad`
+and a continuous `.3s` measured stop from `/odom/current_pose` and commanded stop
+from `/cmd_vel_safe`. A feedback advance before this proof cancels this client's
+own batch. Original map poses, per-point entry/arrival/pass times, phase,
+sampling/receive ages, observed motion and all missed-waypoint results are
+retained. `/plan` endpoint matching and feedback-to-plan receipt latency remain
+explicit geometric/time inferences, not planner CPU/search durations.
+
+The launcher separately watches the Jazzy Action graph, native Action status
+and child feedback without adding to the client's 13 sensor/evidence
+subscriptions. READY requires exactly the native follower as the only
+`NavigateToPose` client and the expected unique servers/status publishers; an
+already active goal prevents initial READY. It continuously revokes READY when
+this ownership changes. Native statuses are event-driven, not periodic health
+heartbeats. Observed child UUIDs/feedback are recorded through the launcher
+lease and full hidden-topic MCAP; parent/child association has no direct UUID
+field and remains contextual under exclusive ownership.
+
+Cancellation has a specific upstream boundary: this client targets only its
+own nonzero `FollowWaypoints` UUID, including a missing goal response. The
+official 1.3.13 server internally calls `async_cancel_all_goals()` on its
+`NavigateToPose` endpoint. This experiment therefore supports exclusive domain
+185 ownership only; it is unsuitable for a shared navigation server. The
+upstream server also refreshes each child goal's intent stamp at dispatch;
+original route intent and sensor sample stamps stay separately recorded.
+Every possibly sent goal reaches own-UUID cancellation and an independent stop
+observation in `finally`, including goal-response timeout and runtime exceptions.
+The new client handles SIGINT/SIGTERM as flags and keeps its ROS context alive
+until this cleanup finishes. A missing stop observation remains explicitly false.
+Measured and commanded stop velocities must all be finite; the unchanged a63b
+observer is not edited.
+The safe-command velocity components must also be present and finite during
+motion; this check applies no stop-speed threshold while navigating.
+The new client also preserves raw native pose XYZ/quaternion values and rejects
+nonfinite components before trusting a projected yaw. It performs no quaternion
+normalization or coordinate conversion; legal missing scan-range values retain
+their existing interpretation.
+
+Long-route scan MessageInfo and state evidence use a bounded 4096-record
+nonblocking queue and a dedicated low-frequency writer. Safety callbacks do no
+JSON serialization or file I/O. The original first-invalid snapshot and ring of
+50 samples are retained; the old 2048-sample trace cap does not apply to this
+new client. Queue overflow, writer failure or an incomplete drain is a permanent
+evidence gap and makes the final attempt invalid. Instrumentation failure does
+not replace the own-UUID cancellation/finally path. Nonfinite numeric observations
+are encoded only during writer/final persistence as a
+`{"nonfinite_float":"NaN"}` (or `+Infinity`/`-Infinity`) object, preserving their
+location without changing the original safety caches or first-invalid references.
+Run the additional offline
+checks with `python3 experiments/planner_comparison_matrix/test_native_waypoints.py`.

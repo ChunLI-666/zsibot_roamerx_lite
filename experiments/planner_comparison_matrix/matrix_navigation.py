@@ -15,7 +15,7 @@ def write(path,value):
     path=pathlib.Path(path);temporary=path.with_suffix(path.suffix+'.tmp')
     temporary.write_text(json.dumps(value,indent=2)+'\n');temporary.replace(path)
 
-def source_snapshot(path,template):
+def source_snapshot(path,template,with_waypoints=False):
     """Validate a deployment source manifest without inspecting a Git checkout."""
     def unique_object(pairs):
         result={}
@@ -46,6 +46,9 @@ def source_snapshot(path,template):
     # The wrapper executes before this process; the other files are consumed here.
     required=[pathlib.Path(__file__),BASE/'static_layer_snapshot.py',BASE/'recording_deadline.py',BASE/'run_matrix_navigation.sh',
       template,NAV/'src/navigation/src/robot_navigo/scripts/nav_safety_gate.py']
+    if with_waypoints:
+        required += [BASE/'goal_pilot_source'/name for name in
+          ['waypoint_batch.py','waypoint_contract.py','pilot_scan_timing.py','message_info_contract.py']]
     required_names=set()
     for source in required:
         resolved=source.resolve(strict=True)
@@ -65,7 +68,7 @@ def source_snapshot(path,template):
 
 def prepare(args):
     template=pathlib.Path(args.template).absolute()
-    snapshot,snapshot_raw=source_snapshot(args.source_snapshot,template) if args.source_snapshot else (None,None)
+    snapshot,snapshot_raw=source_snapshot(args.source_snapshot,template,args.with_waypoints) if args.source_snapshot else (None,None)
     out=pathlib.Path(args.output).resolve();out.mkdir(parents=True,exist_ok=False)
     footprint=json.loads(args.footprint)
     if len(footprint)<3 or any(len(p)!=2 or any(not math.isfinite(v) for v in p) for p in footprint):raise ValueError('finite polygon required')
@@ -139,6 +142,28 @@ def prepare(args):
         source=pathlib.Path(planner['lattice_filepath']);shutil.copy2(source,out/'lattice.json');planner['lattice_filepath']=str(out/'lattice.json');manifest['lattice_sha256']=sha(out/'lattice.json')
     bt=out/'navigate.xml';bt.write_text('<root BTCPP_format="4" main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree"><Sequence><ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/><FollowPath path="{path}" controller_id="FollowPath" goal_checker_id="Checker" progress_checker_id="Progress"/></Sequence></BehaviorTree></root>\n')
     d['bt_navigator']['ros__parameters']['default_nav_to_pose_bt_xml']=str(bt)
+    manifest['with_waypoints']=args.with_waypoints
+    if args.with_waypoints:
+        # Official Jazzy 1.3.13: one native batch, internally one NavigateToPose
+        # per leg. The existing single-goal BT and terminal binding stay intact.
+        sys.path.insert(0,str(BASE/'goal_pilot_source'))
+        from waypoint_contract import WAYPOINT_PARAMETERS
+        import xml.etree.ElementTree as ET
+        waypoint_version=ET.parse('/opt/ros/jazzy/share/nav2_waypoint_follower/package.xml').getroot().findtext('version')
+        if waypoint_version!='1.3.13':raise RuntimeError('Native waypoint integration is reviewed only for Jazzy 1.3.13')
+        d['waypoint_follower']={'ros__parameters':copy.deepcopy(WAYPOINT_PARAMETERS)}
+        d['lifecycle_manager']['ros__parameters']['node_names'].append('waypoint_follower')
+        source_files=[BASE/'goal_pilot_source'/name for name in
+          ['waypoint_batch.py','waypoint_contract.py','pilot_scan_timing.py','message_info_contract.py']]
+        underlay_files=[pathlib.Path('/opt/ros/jazzy')/name for name in
+          ['lib/nav2_waypoint_follower/waypoint_follower','lib/libwaypoint_follower_core.so','lib/libwait_at_waypoint.so',
+           'share/nav2_waypoint_follower/package.xml','share/nav2_msgs/action/FollowWaypoints.action','share/nav2_msgs/msg/MissedWaypoint.msg']]
+        manifest['waypoint_contract']=dict(package_version=waypoint_version,parameters=WAYPOINT_PARAMETERS,number_of_loops=0,goal_index=0,
+          underlay_files_sha256={str(path):sha(path) for path in underlay_files},
+          client_sources_sha256={str(path.relative_to(NAV)):sha(path) for path in source_files},
+          semantics='One native FollowWaypoints request; internal sequential NavigateToPose requests, no retry or skip after failure. Feedback is not visit proof.',
+          child_cancellation_boundary='Upstream Jazzy 1.3.13 waypoint_follower uses async_cancel_all_goals on its NavigateToPose client when its own batch is canceled. The independent client cancels only its own FollowWaypoints UUID; this isolated experiment requires exclusive NavigateToPose ownership.',
+          child_goal_timestamp_boundary='Upstream follower refreshes each requested child goal header to dispatch time. Original route values and native source pose sample stamps remain separately recorded.')
     params=out/'params.yaml';params.write_text(yaml.safe_dump(d,sort_keys=False));manifest['params_sha256']=sha(params)
     shutil.copy2(__file__,out/'launcher_snapshot.py');manifest['launcher_sha256']=sha(__file__)
     helper=BASE/'static_layer_snapshot.py';shutil.copy2(helper,out/helper.name)
@@ -162,7 +187,12 @@ def run(args,out,selected_install,manifest,deadline_guard):
         frozen=out/'deployment_source_snapshot.json'
         if sha(frozen)!=manifest['deployment_source_snapshot']['sha256']:
             raise RuntimeError('Deployment source snapshot changed after preparation')
-        source_snapshot(frozen,pathlib.Path(args.template).absolute())
+        source_snapshot(frozen,pathlib.Path(args.template).absolute(),args.with_waypoints)
+    if args.with_waypoints:
+        for path,digest in manifest['waypoint_contract']['underlay_files_sha256'].items():
+            if sha(path)!=digest:raise RuntimeError('Native waypoint underlay changed after preparation: '+path)
+        for name,digest in manifest['waypoint_contract']['client_sources_sha256'].items():
+            if sha(NAV/name)!=digest:raise RuntimeError('Native waypoint client source changed after preparation: '+name)
     import rclpy
     from rclpy.node import Node
     from rclpy.signals import SignalHandlerOptions
@@ -196,6 +226,47 @@ def run(args,out,selected_install,manifest,deadline_guard):
         qos=costmap_evidence_qos if topic in ('/global_costmap/costmap_raw','/local_costmap/costmap_raw') else qos_profile_sensor_data
         subscriptions.append(node.create_subscription(kind,topic,lambda m,t=topic:receive(t,m),qos))
     tf=Buffer();listener=TransformListener(tf,node)
+    action_status={}
+    if args.with_waypoints:
+        from action_msgs.msg import GoalStatusArray
+        from nav2_msgs.action import NavigateToPose
+        from rclpy.qos import qos_profile_action_status_default
+        from rclpy.action.graph import get_action_client_names_and_types_by_node,get_action_server_names_and_types_by_node
+        from waypoint_contract import exclusive_graph
+        def status_receive(action,message):
+            action_status[action]=dict(received_unix_ns=time.time_ns(),
+              active=[dict(uuid=bytes(status.goal_info.goal_id.uuid).hex(),status=int(status.status),
+                accepted_stamp_ns=status.goal_info.stamp.sec*1_000_000_000+status.goal_info.stamp.nanosec)
+                for status in message.status_list if status.status in (0,1,2,3)],
+              all_statuses=[dict(uuid=bytes(status.goal_info.goal_id.uuid).hex(),status=int(status.status)) for status in message.status_list])
+        for action in ['/navigate_to_pose','/follow_waypoints']:
+            subscriptions.append(node.create_subscription(GoalStatusArray,action+'/_action/status',
+              lambda message,a=action:status_receive(a,message),qos_profile_action_status_default))
+        child_feedback={}
+        def child_feedback_receive(message):
+            child_feedback.update(received_unix_ns=time.time_ns(),goal_uuid=bytes(message.goal_id.uuid).hex(),
+              feedback=message_to_ordereddict(message.feedback))
+        subscriptions.append(node.create_subscription(NavigateToPose.Impl.FeedbackMessage,
+          '/navigate_to_pose/_action/feedback',child_feedback_receive,QoSProfile(depth=10)))
+        def waypoint_ownership():
+            graph=[]
+            for name,namespace in node.get_node_names_and_namespaces():
+                graph.append(dict(name=name,namespace=namespace,
+                  clients=get_action_client_names_and_types_by_node(node,name,namespace),
+                  servers=get_action_server_names_and_types_by_node(node,name,namespace)))
+            ownership=exclusive_graph(graph)
+            publishers={action:[dict(name=info.node_name,namespace=info.node_namespace)
+              for info in node.get_publishers_info_by_topic(action+'/_action/status')]
+              for action in ['/navigate_to_pose','/follow_waypoints']}
+            ownership.update(checked_unix_ns=time.time_ns(),status_publishers=publishers,
+              status_publishers_match=publishers['/navigate_to_pose']==[dict(name='bt_navigator',namespace='/')] and
+                publishers['/follow_waypoints']==[dict(name='waypoint_follower',namespace='/')],
+              navigate_to_pose_active=action_status.get('/navigate_to_pose',{}).get('active',[]),
+              follow_waypoints_active=action_status.get('/follow_waypoints',{}).get('active',[]),
+              observed_status=copy.deepcopy(action_status),
+              latest_child_feedback=copy.deepcopy(child_feedback),
+              status_boundary='Reliable transient-local subscription created before new owned servers. No sample means no accepted transition observed; status is not a periodic health heartbeat. Child UUID is observed, parent association is contextual under exclusive client ownership.')
+            return ownership
     def source_health():
         now=node.get_clock().now().nanoseconds/1e9
         for topic,limit in [(args.odom_topic,.3),(args.scan_topic,.3),('/lightning/loc_status',.2),('/lightning/pose_valid',.2),(args.camera_topic,.5)]:
@@ -310,14 +381,17 @@ def run(args,out,selected_install,manifest,deadline_guard):
         manifest['gate_source_sha256']=sha(gate);write(out/'runtime_manifest.json',manifest)
         common=['--ros-args','--params-file',str(out/'params.yaml')]
         launch('nav_safety_gate',['/usr/bin/python3',str(gate)]+common)
-        for package,exe,name,remaps in [('nav2_map_server','map_server','map_server',[]),('nav2_planner','planner_server','planner_server',[]),
+        servers=[('nav2_map_server','map_server','map_server',[]),('nav2_planner','planner_server','planner_server',[]),
           ('nav2_controller','controller_server','controller_server',['-r','cmd_vel:=cmd_vel_nav']),
           ('nav2_velocity_smoother','velocity_smoother','velocity_smoother',['-r','cmd_vel:=cmd_vel_nav','-r','cmd_vel_smoothed:=cmd_vel']),
-          ('nav2_bt_navigator','bt_navigator','bt_navigator',[]),('nav2_lifecycle_manager','lifecycle_manager','lifecycle_manager',[])]:
+          ('nav2_bt_navigator','bt_navigator','bt_navigator',[])]
+        if args.with_waypoints:servers.append(('nav2_waypoint_follower','waypoint_follower','waypoint_follower',[]))
+        servers.append(('nav2_lifecycle_manager','lifecycle_manager','lifecycle_manager',[]))
+        for package,exe,name,remaps in servers:
             exe_path=str(runtime/'lib/robot_feasible_navigation/segment_controller_server') if name=='controller_server' and args.variant=='segmented' else '/opt/ros/jazzy/lib/'+package+'/'+exe
             launch(name,[exe_path]+common+remaps)
         write(out/'processes.json',{name:p.pid for name,p in procs})
-        for name in ['map_server','planner_server','controller_server','velocity_smoother','bt_navigator']:
+        for name in ['map_server','planner_server','controller_server','velocity_smoother','bt_navigator']+(['waypoint_follower'] if args.with_waypoints else []):
             service='/'+name+'/get_state';client=node.create_client(GetState,service);deadline=time.monotonic()+90;attempts=0
             while time.monotonic()<deadline and not stopped and rclpy.ok():
                 pump(min(.1,max(0.,deadline-time.monotonic())))
@@ -335,12 +409,20 @@ def run(args,out,selected_install,manifest,deadline_guard):
                 if not stopped and rclpy.ok() and time.monotonic()<deadline and state.current_state.id==3:break
             else:raise RuntimeError(name+' did not activate')
         params={}
-        for name in ['map_server','planner_server','controller_server','local_costmap/local_costmap','global_costmap/global_costmap','velocity_smoother','bt_navigator','nav_safety_gate']:
+        for name in ['map_server','planner_server','controller_server','local_costmap/local_costmap','global_costmap/global_costmap','velocity_smoother','bt_navigator','nav_safety_gate']+(['waypoint_follower'] if args.with_waypoints else []):
             lc=node.create_client(ListParameters,'/'+name+'/list_parameters');gc=node.create_client(GetParameters,'/'+name+'/get_parameters')
             if not lc.wait_for_service(timeout_sec=2.):raise RuntimeError('parameter service unavailable '+name)
             names=wait(lc.call_async(ListParameters.Request()),timeout=10.,operation='/'+name+'/list_parameters').result.names;req=GetParameters.Request();req.names=names
             params[name]={n:message_to_ordereddict(v) for n,v in zip(names,wait(gc.call_async(req),timeout=10.,operation='/'+name+'/get_parameters').values)}
         write(out/'runtime_parameters.json',params)
+        if args.with_waypoints:
+            expected=manifest['waypoint_contract']['parameters']
+            fields={1:'bool_value',2:'integer_value',3:'double_value',4:'string_value'}
+            for key,value in expected.items():
+                observed=params['waypoint_follower'].get(key,{})
+                expected_type=1 if type(value) is bool else 2 if type(value) is int else 3 if type(value) is float else 4
+                if observed.get('type')!=expected_type or observed.get(fields[expected_type])!=value:
+                    raise RuntimeError('Native waypoint effective parameter mismatch: '+key)
         static_snapshots=capture_static_layers(node,out,recorder_name,pump,lambda:stopped)
         actual_maps={}
         for name,size in [('global_costmap',2000),('local_costmap',600)]:
@@ -385,9 +467,21 @@ def run(args,out,selected_install,manifest,deadline_guard):
         decoded=cv2.imdecode(np.frombuffer(bytes(camera.data),np.uint8),cv2.IMREAD_COLOR)
         if decoded is None or decoded.shape[1]!=info.width or decoded.shape[0]!=info.height:raise RuntimeError('Front camera invalid before ready')
         source_health()
+        if args.with_waypoints:
+            ownership=waypoint_ownership()
+            if not ownership['exclusive_nav_client'] or not ownership['status_publishers_match']:
+                raise RuntimeError('Native waypoint exclusive action graph not established: '+repr(ownership))
+            if ownership['navigate_to_pose_active'] or ownership['follow_waypoints_active']:
+                raise RuntimeError('Unexpected action goal already active before native batch readiness')
+            write(out/'waypoint_ownership_initial.json',ownership)
         readiness=dict(ready=True,time_ns=node.get_clock().now().nanoseconds,variant=args.variant,actual_costmaps=actual_maps,
           params_sha256=sha(out/'params.yaml'),build_receipt_sha256=manifest['build_receipt_sha256'],source_counts=counts,
           action_server='/navigate_to_pose',goal_tolerances=manifest['goal_tolerances'],goal_client_authorization='Wait for root instruction; this file alone does not dispatch navigation')
+        if args.with_waypoints:
+            readiness.update(waypoint_action_server='/follow_waypoints',waypoint_contract=manifest['waypoint_contract'],
+              waypoint_ownership=ownership,mission_deadline=dict(run_id=deadline_guard.manifest['run_id'],
+              manifest_sha256=deadline_guard.digest,launcher_boot_id=deadline_guard.manifest['launcher']['boot_id'],
+              deadline_boottime_sec=deadline_guard.manifest['deadline_boottime_sec']))
         readiness['valid_until_ns']=node.get_clock().now().nanoseconds+500_000_000
         write(out/'ready.json',readiness)
         event('navigation_ready');print(str(out/'ready.json'),flush=True)
@@ -396,7 +490,13 @@ def run(args,out,selected_install,manifest,deadline_guard):
             dead=[(n,p.returncode) for n,p in procs if p.poll() is not None]
             if dead:raise RuntimeError('owned process exited '+repr(dead))
             previous=readiness['ready']
-            try:source_health();readiness.update(ready=True,reason=None)
+            try:
+                source_health()
+                if args.with_waypoints:
+                    readiness['waypoint_ownership']=waypoint_ownership()
+                    if not readiness['waypoint_ownership']['exclusive_nav_client'] or not readiness['waypoint_ownership']['status_publishers_match']:
+                        raise RuntimeError('Native waypoint action ownership changed; shared NavigateToPose is unsupported')
+                readiness.update(ready=True,reason=None)
             except Exception as e:readiness.update(ready=False,reason=str(e))
             readiness.update(time_ns=node.get_clock().now().nanoseconds,valid_until_ns=node.get_clock().now().nanoseconds+500_000_000)
             write(out/'ready.json',readiness)
@@ -411,7 +511,7 @@ def run(args,out,selected_install,manifest,deadline_guard):
         write(out/'ready.json',readiness)
         # Stop command-producing servers first; keep smoother/gate/recorder alive for the zero tail.
         for name,p in procs:
-            if name in ['bt_navigator','controller_server'] and p.poll() is None:os.killpg(p.pid,signal.SIGINT)
+            if name in ['waypoint_follower','bt_navigator','controller_server'] and p.poll() is None:os.killpg(p.pid,signal.SIGINT)
         event('command_producers_stop_requested')
         pump(1.)
         for name,p in reversed(procs):
@@ -453,6 +553,7 @@ def main():
     p.add_argument('--xy-tolerance',type=float,default=.15);p.add_argument('--yaw-tolerance',type=float,default=.08)
     p.add_argument('--build-receipt');p.add_argument('--message-install');p.add_argument('--preflight-timeout',type=float,default=30.);p.add_argument('--run',action='store_true')
     p.add_argument('--max-runtime-sec',type=runtime_seconds,default=600.,help='Fixed deadline from launcher process start, in (0,3600] seconds; default 600')
+    p.add_argument('--with-waypoints',action='store_true',help='Activate the native Jazzy FollowWaypoints server for an independently authorized ordered batch client')
     args=p.parse_args();out,install,manifest=prepare(args)
     if args.run:
         deadline_guard=None
