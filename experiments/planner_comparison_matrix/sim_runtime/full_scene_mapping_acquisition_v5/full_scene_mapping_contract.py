@@ -765,15 +765,69 @@ def claim_once(path,record):
         stream.write(json.dumps(record,indent=2)+'\n');stream.flush();os.fsync(stream.fileno())
 
 
+class UDPInventory(list):
+    """Existing list API plus bounded-to-current-scan closed-process evidence."""
+    def __init__(self,sockets,closed_zombies):
+        super().__init__(sockets);self.closed_zombies=closed_zombies
+
+
+def ownership_proc_stat(directory,proc):
+    text=(directory/'stat').read_text();prefix,rest=text.rsplit(')',1);parts=rest.split()
+    pid=int(directory.name)
+    if int(prefix.split('(',1)[0])!=pid or len(parts)<=19:raise Hold('malformed ownership process stat: '+str(directory))
+    return dict(pid=pid,state=parts[0],threads=int(parts[17]),starttime_ticks=int(parts[19]),
+        boot_id=(proc/'sys/kernel/random/boot_id').read_text().strip() if parts[0]=='Z' else None)
+
+
+def closed_zombie_snapshot(directory,proc,stat=None):
+    stat=ownership_proc_stat(directory,proc) if stat is None else stat
+    status={}
+    for line in (directory/'status').read_text().splitlines():
+        if ':' not in line:continue
+        key,value=line.split(':',1)
+        if key in ('State','Pid','Tgid','Threads'):
+            if key in status:raise Hold('duplicate closed-zombie status key')
+            status[key]=value.split()[0]
+    pid=int(directory.name);tasks=sorted(int(path.name) for path in (directory/'task').iterdir())
+    if (stat['state']!='Z' or stat['threads']!=1 or not stat['boot_id'] or stat['starttime_ticks']<=0
+        or set(status)!={'State','Pid','Tgid','Threads'} or status['State']!='Z'
+        or int(status['Pid'])!=pid or int(status['Tgid'])!=pid or int(status['Threads'])!=1 or tasks!=[pid]):
+        raise Hold('cannot prove fully exited single-thread zombie: '+str(directory))
+    return dict(stat=stat,status=status,task_pids=tasks)
+
+
+def closed_zombie_evidence(directory,proc,first_stat):
+    before=closed_zombie_snapshot(directory,proc,first_stat);entries=[];fd_access='readable_empty'
+    try:
+        for descriptor in (directory/'fd').iterdir():entries.append(descriptor)
+    except PermissionError:
+        if entries:raise Hold('partly readable zombie fd table is nonempty: '+str(directory))
+        fd_access='permission_denied_after_complete_exit_proof'
+    if entries:raise Hold('closed-zombie fd table must be empty: '+str(directory))
+    after=closed_zombie_snapshot(directory,proc)
+    if after!=before:raise Hold('closed-zombie birth/status/tasks changed during ownership scan: '+str(directory))
+    return dict(event='closed_zombie',pid=first_stat['pid'],birth=dict(pid=first_stat['pid'],starttime_ticks=first_stat['starttime_ticks'],boot_id=first_stat['boot_id']),
+        before=before,after=after,fd_access=fd_access,fd_entries_observed=0,
+        boundary='Entire thread group proven exited; not a UDP owner exemption. Every inventoried socket still needs original authorization.')
+
+
 def udp_inventory(proc=Path('/proc')):
     """Inventory every UDP socket in this network namespace; unknown owners HOLD."""
     sockets={}
     for protocol in ['udp','udp6']:
         for line in (proc/'self/net'/protocol).read_text().splitlines()[1:]:
             fields=line.split();sockets[fields[9]]=dict(protocol=protocol,local=fields[1],remote=fields[2],inode=fields[9],owners=[])
-    errors=[]
+    errors=[];closed=[]
     for directory in proc.iterdir():
         if not directory.name.isdecimal():continue
+        try:
+            stat=ownership_proc_stat(directory,proc)
+        except (FileNotFoundError,ProcessLookupError):continue
+        except (OSError,ValueError,IndexError) as exc:raise Hold('cannot read ownership process stat: '+str(directory)) from exc
+        if stat['state']=='Z':
+            try:closed.append(closed_zombie_evidence(directory,proc,stat))
+            except (OSError,ValueError,IndexError) as exc:raise Hold('cannot prove closed zombie: '+str(directory)+': '+str(exc)) from exc
+            continue
         try:
             for fd in (directory/'fd').iterdir():
                 try:target=os.readlink(fd)
@@ -782,7 +836,7 @@ def udp_inventory(proc=Path('/proc')):
         except (FileNotFoundError,ProcessLookupError):continue
         except PermissionError:errors.append(str(directory))
     if errors:raise Hold('cannot prove UDP ownership; unreadable process fd tables: '+repr(errors[:5]))
-    return list(sockets.values())
+    return UDPInventory(sockets.values(),closed)
 
 
 def verify_udp_inventory(inventory,allowed_processes,allowed_external_sockets,reader=process_identity):
