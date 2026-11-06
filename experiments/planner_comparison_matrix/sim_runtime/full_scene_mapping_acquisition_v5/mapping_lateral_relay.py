@@ -46,7 +46,9 @@ def validated_axes(msg,now_ns,fine_forward_profile=None):
         raise ValueError('only exclusive forward+.2/lateral±.4/yaw±.3; no reverse/mixed/micro axes')
     return dict(version=1,action='walk',forward=f,lateral=l,yaw=y)
 
-def run_loop(sock,stream,ready,clock=time,selector=select.select,parent_live=lambda:True,fine_forward_profile=None):
+def run_loop(sock,stream,ready,clock=time,selector=select.select,parent_live=lambda:True,fine_forward_profile=None,endpoint=('127.0.0.1',7447)):
+    if (type(endpoint) is not tuple or len(endpoint)!=2 or type(endpoint[0]) is not str or type(endpoint[1]) is not int
+        or endpoint not in (('127.0.0.1',7447),('192.168.1.219',7447))):raise ValueError('exact SIM endpoint tuple required')
     current=ZERO;issued_ns=None;last_valid=None;accepted=0;rejected=0;expired=0;clock_pair=None
     def clock_check(unix_ns,steady):
         nonlocal clock_pair
@@ -72,11 +74,11 @@ def run_loop(sock,stream,ready,clock=time,selector=select.select,parent_live=lam
             unix_ns,steady=clock.time_ns(),clock.monotonic();clock_check(unix_ns,steady)
             if current!=ZERO and (steady-last_valid>=WATCHDOG_SEC or not 0<=unix_ns-issued_ns<PACKET_AGE_NS):
                 current=ZERO;issued_ns=None;expired+=1
-            sock.sendto(json.dumps(current,separators=(',',':'),allow_nan=False).encode(),('127.0.0.1',7447))
+            sock.sendto(json.dumps(current,separators=(',',':'),allow_nan=False).encode(),endpoint)
     finally:
         # EOF, rejected packet, parent failure and normal SIGINT all retain zero cleanup.
         try:
-            for _ in range(5):sock.sendto(json.dumps(ZERO,separators=(',',':')).encode(),('127.0.0.1',7447));clock.sleep(.02)
+            for _ in range(5):sock.sendto(json.dumps(ZERO,separators=(',',':')).encode(),endpoint);clock.sleep(.02)
         finally:sock.close()
     return dict(accepted=accepted,rejected=rejected,expired_before_send=expired,stopped_with_zero=True)
 
@@ -98,6 +100,9 @@ def admit(path,digest):
     if marker.get('release_sha256')!=a['root_release_sha256'] or marker.get('output_directory')!=str(path.parent) or marker.get('owner_identity')!=a['owner_identity']:
         raise ValueError('same once-admitted exact owner missing')
     if r['sources_sha256']['mapping_lateral_relay.py']!=proof.sha(__file__) or r['sources_sha256']['lateral_capability.py']!=proof.sha(Path(__file__).with_name('lateral_capability.py')):raise ValueError('frozen relay/proof module differs')
+    if r['sources_sha256']['full_scene_mapping_contract.py']!=proof.sha(Path(__file__).with_name('full_scene_mapping_contract.py')):raise ValueError('frozen endpoint contract module differs')
+    import full_scene_mapping_contract as endpoint_contract
+    endpoint_contract.sim_endpoint_from_admission(a,r)
     admitted=proof.validate_proof(r['lateral_calibration_proof'],r['scene_instance_id'],r['sensor_config_sha256'],r['sensor_adapter_process_identity'])
     proof.validate_model_evidence(a['motion_model'],admitted)
     if identity(r['sensor_adapter_process_identity']['pid'])!=r['sensor_adapter_process_identity']:raise ValueError('calibrated adapter changed')
@@ -113,7 +118,9 @@ def main():
     with os.fdopen(descriptor,'w') as stream:
         stream.write(json.dumps(dict(admission_sha256=args.admission_sha256,parent=a['owner_identity']))+'\n');stream.flush();os.fsync(stream.fileno())
     sock=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);sock.settimeout(SOCKET_TIMEOUT_SEC)
-    result=run_loop(sock,sys.stdin,lambda:print(READY,flush=True),parent_live=lambda:identity(os.getppid())==a['owner_identity'],fine_forward_profile=a.get('fine_forward_profile'))
+    endpoint=(a['sim_command_endpoint']['ipv4'],a['sim_command_endpoint']['port'])
+    ready=READY.rsplit(' ',1)[0]+' '+endpoint[0]+':'+str(endpoint[1])
+    result=run_loop(sock,sys.stdin,lambda:print(ready,flush=True),parent_live=lambda:identity(os.getppid())==a['owner_identity'],fine_forward_profile=a.get('fine_forward_profile'),endpoint=endpoint)
     print(json.dumps(result),flush=True);return 0
 
 if __name__=='__main__':raise SystemExit(main())

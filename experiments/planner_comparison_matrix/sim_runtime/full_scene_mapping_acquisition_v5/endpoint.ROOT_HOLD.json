@@ -1,0 +1,25 @@
+{
+  "state": "SOURCE_CANDIDATE_NEW_ROOT_SCENE_AND_NETNS_BINDING_REQUIRED",
+  "root_approved": false,
+  "executable": false,
+  "allow_sim_host_endpoint": false,
+  "sim_command_endpoint": null,
+  "non_executable_structure_example": {
+    "schema": "locnav.exact_sim_command_endpoint.v1",
+    "ipv4": "192.168.1.219",
+    "port": 7447,
+    "scene_identity_proof_sha256": null,
+    "ue_process_identity": null
+  },
+  "allowed_ue_identity_keys": [
+    "pid",
+    "starttime_ticks",
+    "cmdline_sha256",
+    "argv",
+    "boot_id"
+  ],
+  "network_created": false,
+  "source_bootstrap_performed": false,
+  "runtime_capability_approved": false,
+  "boundary": "No Root release/once/UUID. Root must freshly attest same UE identity/host proof, new namespace/route/owner and new source3 identities. Old5237 remains untouched and cannot be impersonated."
+}
