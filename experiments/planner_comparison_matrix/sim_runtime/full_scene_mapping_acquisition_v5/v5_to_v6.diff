@@ -1,0 +1,65 @@
+--- v5/full_scene_mapping.py
++++ v6/full_scene_mapping.py
+@@ -137,14 +137,30 @@
+         self.argv=[sys.executable,'-I',str(self.frozen),'--execute','--admission',str(self.admission_path),'--admission-sha256',contract.sha(self.admission_path)]
+         self.source_sha256=contract.sha(self.frozen)
+         self.log=(output/'relay.stderr').open('w')
+-    def start(self):
++    def start(self,pump=None):
+         env=dict(os.environ,MAPPING_OWNER_RUN_ID=self.run_id,MAPPING_OWNER_OUTPUT=str(self.output))
+         try:
+             self.process=subprocess.Popen(self.argv,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+               stderr=self.log,text=True,bufsize=1,env=env,start_new_session=True)
+             self.pidfd=os.pidfd_open(self.process.pid)
+             os.set_blocking(self.process.stdin.fileno(),False)
+-            if not select.select([self.process.stdout],[],[],3.)[0] or self.process.stdout.readline().strip()!='MAPPING_LATERAL_RELAY_RECT_V5_READY 127.0.0.1:7447':raise contract.Hold('owned relay did not acknowledge readiness')
++            os.set_blocking(self.process.stdout.fileno(),False)
++            until=time.monotonic()+3.;line=b''
++            while True:
++                if time.monotonic()>=until:raise contract.Hold('owned relay did not acknowledge readiness')
++                if pump is not None:pump()
++                remaining=until-time.monotonic()
++                if remaining<=0 or self.process.poll() is not None:raise contract.Hold('owned relay did not acknowledge readiness')
++                readable=select.select([self.process.stdout],[],[],0. if pump is not None else min(.01,remaining))[0]
++                if time.monotonic()>=until:raise contract.Hold('owned relay did not acknowledge readiness')
++                if not readable:continue
++                chunk=os.read(self.process.stdout.fileno(),4096)
++                if not chunk:raise contract.Hold('owned relay closed before readiness')
++                line+=chunk
++                if len(line)>4096:raise contract.Hold('owned relay readiness line exceeded bound')
++                if b'\n' in line:
++                    if line.split(b'\n',1)[0].strip()!=b'MAPPING_LATERAL_RELAY_RECT_V5_READY 127.0.0.1:7447':raise contract.Hold('owned relay did not acknowledge readiness')
++                    break
+             # Immediately retained pidfd binds the Popen child. Wait for the
+             # immutable child's post-exec READY before sampling argv/identity.
+             self.identity=contract.process_identity(self.process.pid)
+@@ -268,9 +284,9 @@
+             receipt_ns,steady_ns=time.time_ns(),time.monotonic_ns()
+             event=raw_imu_gate.inspect(bytes(raw),receipt_ns,steady_ns)
+             if not event['accepted']:
++                if event['fatal']:
++                    if imu_gate_fault is None:imu_gate_fault=event
+                 emit('raw_imu_rejected',event=event)
+-                if event['fatal']:
+-                    imu_gate_fault=event;raise contract.Hold('raw IMU acceptance fault: '+event['reason'])
+                 return
+             sample=imu('raw_imu',deserialize_message(raw,Imu))
+             sample['received_steady']=sample['advanced_steady']=steady_ns/1e9
+@@ -284,7 +300,8 @@
+         truth_deadline=time.monotonic()+10.
+         while 'truth' not in latest and time.monotonic()<truth_deadline:callbacks.spin()
+         contract.standing_before_relay(latest.get('truth'),model,time.time_ns(),time.monotonic())
+-        relay=OwnedRelay(output,release['release_id'],args.root_release,model,own);relay.start();allowed.append(relay.identity)
++        if imu_gate_fault is not None:raise contract.Hold('latched raw IMU fault: '+imu_gate_fault['reason'])
++        relay=OwnedRelay(output,release['release_id'],args.root_release,model,own);relay.start(callbacks.spin);allowed.append(relay.identity)
+         audit=dict(valid=False,checked_steady=0.,reason='not_checked',first_violation=None);audit_stop=threading.Event()
+         def audit_loop():
+             while not audit_stop.is_set():
+@@ -421,6 +438,7 @@
+         while True:
+             try:truth,yaw=tick();break
+             except contract.Hold as exc:
++                if imu_gate_fault is not None:raise
+                 relay.send()
+                 if 'first_warm_hold' not in locals():
+                     first_warm_hold=str(exc);emit('first_warm_hold',reason=first_warm_hold)

@@ -1,3 +1,9 @@
+# Mapping acquisition protocol v5 — source revision v6 / ROOT HOLD
+
+Current implementation is selected by `CURRENT_SOURCE.json`. Revision v6 keeps the v5 scope, calibration capability, full-body geometry, source freshness, ownership and stop thresholds. It services the existing callback executor while waiting for the owned relay READY and latches fatal IMU input without throwing from its callback, allowing independent strict GT cleanup. See `READOUT.txt` and `test_startup_v6.py`.
+
+Original v5 manifests/bundles below remain historical freezes; their main-source digest is not the current implementation. Exact original v5 files and failed rehearsal evidence remain under `analysis_outputs/planner_comparison_20261105`. No full-scene acquisition or native navigation acceptance has been achieved.
+
 # Mapping acquisition owner v5 — SOURCE ONLY / ROOT HOLD
 
 Scope: `MAPPING_ACQUISITION_LATERAL_RECT_V5_ONLY`. This is an offline source candidate for a bounded static-SIM acquisition rehearsal. No model values, route, release, runtime capability or full-warehouse control acceptance are selected by this package. Canonical repositories and all old freezes remain unchanged.
