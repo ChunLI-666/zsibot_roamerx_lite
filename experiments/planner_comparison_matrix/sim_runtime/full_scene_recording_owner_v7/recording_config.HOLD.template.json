@@ -1,0 +1,127 @@
+{
+  "schema_version": 1,
+  "scope": "RAW_RECORDING_ONLY",
+  "executable": false,
+  "recording_run_id": null,
+  "case_id": null,
+  "scene_instance_id": null,
+  "max_runtime_sec": 3600.0,
+  "controller_wait_sec": 120.0,
+  "record_all_including_hidden": true,
+  "original_cdr_no_reencoding": true,
+  "required_recorded_topics": [
+    "/camera/front/camera_info",
+    "/camera/front/image/compressed",
+    "/clock",
+    "/experiment/full_scene_mapping/events",
+    "/front_camera/image/compressed",
+    "/front_lidar",
+    "/front_lidar/imu",
+    "/laser_scan",
+    "/livox/imu",
+    "/livox/lidar",
+    "/odom",
+    "/tf_static"
+  ],
+  "expected_environment": {
+    "ROS_DOMAIN_ID": "185",
+    "RMW_IMPLEMENTATION": "rmw_fastrtps_cpp",
+    "ROS_LOCALHOST_ONLY": "0",
+    "ROS_AUTOMATIC_DISCOVERY_RANGE": "LOCALHOST",
+    "AMENT_PREFIX_PATH": null,
+    "LD_LIBRARY_PATH": null,
+    "PYTHONPATH": null,
+    "FASTRTPS_DEFAULT_PROFILES_FILE": null,
+    "FASTDDS_DEFAULT_PROFILES_FILE": null
+  },
+  "artifact_inventory_complete_root_reviewed": false,
+  "artifacts": {
+    "controller_contract": {
+      "path": null,
+      "sha256": null,
+      "kind": "root_fill_script_elf_scene_mesh_config_oracle_route"
+    },
+    "controller_script": {
+      "path": null,
+      "sha256": null,
+      "kind": "root_fill_script_elf_scene_mesh_config_oracle_route"
+    },
+    "map_coverage": {
+      "path": null,
+      "sha256": null,
+      "kind": "root_fill_script_elf_scene_mesh_config_oracle_route"
+    },
+    "message_environment": {
+      "path": null,
+      "sha256": null,
+      "kind": "root_fill_script_elf_scene_mesh_config_oracle_route"
+    },
+    "network_environment": {
+      "path": null,
+      "sha256": null,
+      "kind": "root_fill_script_elf_scene_mesh_config_oracle_route"
+    },
+    "oracle": {
+      "path": null,
+      "sha256": null,
+      "kind": "root_fill_script_elf_scene_mesh_config_oracle_route"
+    },
+    "relay_script": {
+      "path": null,
+      "sha256": null,
+      "kind": "root_fill_script_elf_scene_mesh_config_oracle_route"
+    },
+    "route": {
+      "path": null,
+      "sha256": null,
+      "kind": "root_fill_script_elf_scene_mesh_config_oracle_route"
+    },
+    "scene_binding": {
+      "path": null,
+      "sha256": null,
+      "kind": "root_fill_script_elf_scene_mesh_config_oracle_route"
+    },
+    "scene_inventory": {
+      "path": null,
+      "sha256": null,
+      "kind": "root_fill_script_elf_scene_mesh_config_oracle_route"
+    },
+    "sensor_config": {
+      "path": null,
+      "sha256": null,
+      "kind": "root_fill_script_elf_scene_mesh_config_oracle_route"
+    },
+    "waypoint_contract": {
+      "path": null,
+      "sha256": null,
+      "kind": "root_fill_script_elf_scene_mesh_config_oracle_route"
+    },
+    "participating_elf_and_mesh_inventory": {
+      "path": null,
+      "sha256": null,
+      "kind": "elf"
+    }
+  },
+  "source_processes": [],
+  "repositories": [
+    {
+      "path": "/home/charles/project/colcon_ws/src/zsibot/zsibot_roamerx_lite",
+      "expected_head": "8f1b0b457dd86f361a49c827f6bfb16ce67ae58c",
+      "expected_status_porcelain": null,
+      "expected_diff_sha256": null
+    }
+  ],
+  "controller": {
+    "run_id": null,
+    "case_id": null,
+    "recording_run_id": null,
+    "output_directory": "/absolute/unique_recording_run/controller",
+    "root_release_path": "/absolute/new_controller_root_release.json",
+    "max_runtime_sec": 3000.0,
+    "expected_argv": [],
+    "route_sha256": null,
+    "oracle_sha256": null,
+    "sources_sha256": {},
+    "scope": "MAPPING_ACQUISITION_LATERAL_RECT_V5_ONLY"
+  }
+}

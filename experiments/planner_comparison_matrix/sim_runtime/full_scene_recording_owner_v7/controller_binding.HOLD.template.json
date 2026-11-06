@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "scope": "MAPPING_ACQUISITION_ONLY",
+  "run_id": null,
+  "case_id": null,
+  "recording_run_id": null,
+  "output_directory": "/absolute/unique_recording_run/controller",
+  "root_release_path": "/absolute/new_controller_root_release.json",
+  "root_release_sha256": null,
+  "recorder_ready_sha256": null,
+  "identity": {
+    "pid": null,
+    "starttime_ticks": null,
+    "cmdline_sha256": null,
+    "argv": [],
+    "boot_id": null
+  }
+}

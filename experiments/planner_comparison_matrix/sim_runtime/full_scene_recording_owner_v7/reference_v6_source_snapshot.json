@@ -1,0 +1,36 @@
+{
+  "schema_version": 6,
+  "scope": "RECORDING_ONLY_SOURCE_REVIEW",
+  "runtime_release": false,
+  "files_sha256": {
+    "README.md": "dc8816032728e261ab78029351010c278fed80999edeb53d82dcc8cb9369ccfe",
+    "_test_runner.py": "e794abd74f3f71e123f37634d6e9498284407e66bd1791d4bad752afe709f2ce",
+    "_test_standins.py": "6c917586a43b217cf83597941eea2ac8cf670f825969581ee3d379b623e0ea04",
+    "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792",
+    "canonical_git_source_export.HOLD.example.json": "c7045fb476f70b586663ce62021d89d8f38ba1ab0cb10262c58060a8e87bcd7f",
+    "controller_binding.HOLD.template.json": "321a5e09d601608b783538c387fa3f646cd65305c6a48a5dc22c0949429a72d4",
+    "full_scene_recording_owner.py": "0da7ec74795f1c1fac4b6eb6bbb7b68254b63b9fd6c1a23cf7ef8794e6bb5d84",
+    "mapping_result_adapter.py": "2cb4030e0f071017b7b21da6843c13bddd476133bdad777ac1240ec3d1f6397c",
+    "recording_config.HOLD.template.json": "5cb27908d31f73604b8875a7fb280eb867efe4e9ce00c4e7b2c31b0957efc566",
+    "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+    "root_recording_release.HOLD.template.json": "4e43573a78ade237166c838b3d820d93fb3647e50d9c2c236469967459a4b8dc",
+    "source_export_delta_test_result.json": "243a2ad2a1a7e5efed2fc0b54d7d22c3b0b72084c90e413b82de341faf70eb25",
+    "source_export_repository.HOLD.example.json": "fe015ac95ff72645996f5c03cf91c00ebdbb84a20a7ae60265ca40836c9b1016",
+    "source_export_walk_error_test_result.json": "4d711e175bd39b483f3e9f3d1ca967473e70a0ea349880edad5e2b3cc0909901",
+    "test_frozen_source_export.py": "3dd7b9ff06180a868af35df34fc2f250f5610986ac6e14ea366bb7fe6c9f7f52",
+    "test_full_scene_recording_owner.py": "e353be94357821ed23654d6ff49298ab125f7ad392d11694e7c1bc4b9c3f1051"
+  },
+  "parent_source_snapshot_sha256": "dd055f7b4a4309e9f5c26217dc4c53f5c1fbfe8d1588de4dc4767cdc9ec26a46",
+  "parent_driver_sha256": "a4fd53cc577ded89a7827f8b9dd38254ce67ae1400fbd2a694f95dcd8e39bb2a",
+  "changes": [
+    "os.walk onerror callback raises Hold on unreadable export subtree instead of silently skipping",
+    "One pure mocked-scandir PermissionError fixture"
+  ],
+  "tests": "source_export_walk_error_test_result.json",
+  "tests_sha256": "4d711e175bd39b483f3e9f3d1ca967473e70a0ea349880edad5e2b3cc0909901",
+  "inherited_v5_fixture_receipt_sha256": "243a2ad2a1a7e5efed2fc0b54d7d22c3b0b72084c90e413b82de341faf70eb25",
+  "v5_source_freeze_preserved": true,
+  "root_release_required": true,
+  "legacy_git_body_unchanged": true,
+  "recording_owner_deadline_age_3600_tail_gates_unchanged": true
+}
