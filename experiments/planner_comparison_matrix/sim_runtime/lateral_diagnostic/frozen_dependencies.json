@@ -1,0 +1,6 @@
+{
+  "tool_url": "https://raw.githubusercontent.com/zsibot/matrix/55ad3fec77deaf1b589d27fa6cc4bfca4553754e/Tools/matrix_mc_udp_test.py",
+  "tool_sha256": "5a31cd800317f9d280a453424143312584332caf7f38da5144b0730e25284eb3",
+  "helper_sha256": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+  "scope": "PREPARATION_ONLY_ROOT_HOLD"
+}

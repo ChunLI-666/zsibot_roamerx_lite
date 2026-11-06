@@ -1,0 +1,22 @@
+{
+  "complete_patch_cells": 7200,
+  "all_original_class1": true,
+  "patch_xyxy": [
+    -1.5,
+    -3.0,
+    1.5,
+    3.0
+  ],
+  "engineering_swept_envelope_xyxy": [
+    -1.1309066300105255,
+    -2.901683541432635,
+    1.2774824333331964,
+    2.900426738629135
+  ],
+  "body_half_m": 0.74,
+  "padding_m": 0.15,
+  "cell_guard_m": 0.05,
+  "no_grid_erosion": true,
+  "stop_reserve_m": 1.0,
+  "hard_plant_guarantee": false
+}
