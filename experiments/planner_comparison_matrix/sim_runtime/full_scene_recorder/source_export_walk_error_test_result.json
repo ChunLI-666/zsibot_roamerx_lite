@@ -1,0 +1,28 @@
+{
+  "schema": "full_scene_recording_owner.walk_error_delta_tests.v6",
+  "created_utc": "2026-11-06T05:46:45.906640+00:00",
+  "command": "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest test_frozen_source_export.FrozenSourceExportFixtures.test_directory_walk_permission_error_fails_closed -v",
+  "run": 1,
+  "passed": 1,
+  "failures": 0,
+  "errors": 0,
+  "elapsed_sec": 0.002,
+  "test_source_sha256": "3dd7b9ff06180a868af35df34fc2f250f5610986ac6e14ea366bb7fe6c9f7f52",
+  "driver_sha256": "0da7ec74795f1c1fac4b6eb6bbb7b68254b63b9fd6c1a23cf7ef8794e6bb5d84",
+  "test_boundary": "Temporary export with unlisted child file; os.scandir(child) mocked to raise PermissionError; no real subprocess/ROS/remote/recording/motion",
+  "reused_v5_export_fixtures": {
+    "run": 18,
+    "passed": 18,
+    "rereun": false,
+    "all18_test_method_AST_unchanged": true,
+    "receipt_sha256": "243a2ad2a1a7e5efed2fc0b54d7d22c3b0b72084c90e413b82de341faf70eb25"
+  },
+  "AST_delta": {
+    "only_changed_function": "verify_frozen_source_export",
+    "new_callback_and_onerror_keyword_only": true,
+    "all_other_functions_unchanged": true,
+    "legacy_git_and_recording_exit_deadline_paths_unchanged": true
+  },
+  "original_helper18_rerun": false,
+  "codacy": "No active codacy_cli_analyze tool; not run or installed"
+}

@@ -1,0 +1,14 @@
+{
+  "kind": "frozen_source_export",
+  "root_reviewed": false,
+  "export_root": "/ABS/REVIEWED_EXPORT_ROOT",
+  "manifest_path": "/ABS/REVIEWED_EXPORT_ROOT/canonical_git_source_export.json",
+  "manifest_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "expected_origin": {
+    "canonical_repository_path": "/home/charles/project/colcon_ws/src/REPOSITORY",
+    "branch": "FILL_ACTUAL_CANONICAL_BRANCH",
+    "head": "0000000000000000000000000000000000000000",
+    "status_porcelain": "FILL_EXACT_CANONICAL_STATUS_INCLUDING_NEWLINES",
+    "diff_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  }
+}

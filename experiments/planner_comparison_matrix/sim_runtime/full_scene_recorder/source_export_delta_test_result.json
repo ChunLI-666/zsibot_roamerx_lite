@@ -1,0 +1,49 @@
+{
+  "schema": "full_scene_recording_owner.source_export_delta_tests.v5",
+  "created_utc": "2026-11-06T05:40:15.173048+00:00",
+  "command": "python3 -m unittest discover -s analysis_outputs/planner_comparison_20261105/full_scene_recording_owner_v1 -p test_frozen_source_export.py -v",
+  "run": 18,
+  "passed": 18,
+  "failures": 0,
+  "errors": 0,
+  "elapsed_sec": 0.016,
+  "test_source_sha256": "632fcb9030e974740779a738ecd611efcc01452410c123adb411a26313de2a53",
+  "driver_sha256": "a4fd53cc577ded89a7827f8b9dd38254ce67ae1400fbd2a694f95dcd8e39bb2a",
+  "test_boundary": "Pure TemporaryDirectory source exports, mocked Git subprocess and file-only freeze; no ROS/remote/recorder/controller/process launch",
+  "original_helper18_rerun": false,
+  "original_v4_v9_v10_evidence_preserved": true,
+  "AST_delta": {
+    "added_functions": [
+      "export_file",
+      "verify_frozen_source_export"
+    ],
+    "changed_functions": [
+      "validate",
+      "snapshot_repositories"
+    ],
+    "unchanged_functions": [
+      "sha",
+      "read_json",
+      "write",
+      "uuid32",
+      "claim_once",
+      "identity_live",
+      "freeze",
+      "recorder_command",
+      "bind_controller",
+      "run",
+      "main"
+    ],
+    "original_validate_body_exact_after_removing_new_export_loop": true,
+    "original_git_snapshot_body_exact": true
+  },
+  "retained_sources_sha256": {
+    "mapping_result_adapter.py": "2cb4030e0f071017b7b21da6843c13bddd476133bdad777ac1240ec3d1f6397c",
+    "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792",
+    "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+    "test_full_scene_recording_owner.py": "e353be94357821ed23654d6ff49298ab125f7ad392d11694e7c1bc4b9c3f1051",
+    "_test_runner.py": "e794abd74f3f71e123f37634d6e9498284407e66bd1791d4bad752afe709f2ce",
+    "_test_standins.py": "6c917586a43b217cf83597941eea2ac8cf670f825969581ee3d379b623e0ea04"
+  },
+  "codacy": "No active codacy_cli_analyze tool; not run or installed"
+}
