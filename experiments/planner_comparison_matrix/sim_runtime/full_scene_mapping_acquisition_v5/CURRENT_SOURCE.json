@@ -1,17 +1,24 @@
 {
   "protocol_scope": "MAPPING_ACQUISITION_LATERAL_RECT_V5_ONLY",
-  "source_revision": 10,
-  "current_manifest": "source_manifest_v10.json",
-  "source_manifest_sha256": "123d805a794eeada616d7f21526d577df673858583d0337f97880d117811cf01",
-  "source_main_sha256": "d0f9823bbf135173e952962e0de680cadc8c32339d4d8a36f3a7a869889d68fa",
+  "source_revision": 11,
+  "current_manifest": "source_manifest_v11.json",
+  "source_manifest_sha256": "62478528bca39a678585a624087a809c9f240300c221bd02b4d1d7353c8c46b6",
+  "source_main_sha256": "646cd24e69400a499216746a0d0647c6dce213738dc177fd5088175d92c35e57",
   "source_contract_sha256": "57848eac2225b0bcce07c94b3b2838a235c58453318a8c1f44b074b7ff0ae544",
   "runtime_release": false,
   "native_navigation_acceptance": false,
   "original_v5_v6_v7_metadata_historical": true,
-  "source_revision_id": "v10",
-  "canonical_fixture_locator_adjustment": {
-    "path": "canonical_test_locator_v10.json",
-    "sha256": "f87a230aa65d705f04f2ba36b810f424e208fdf81e1ca439429723b443977846",
-    "previously_reviewed_mechanism": true
-  }
+  "source_revision_id": "v11",
+  "canonical_fixture_locator_adjustments": [
+    {
+      "path": "canonical_test_locator_v10.json",
+      "sha256": "f87a230aa65d705f04f2ba36b810f424e208fdf81e1ca439429723b443977846",
+      "previously_reviewed_mechanism": true
+    },
+    {
+      "path": "canonical_test_locator_v11.json",
+      "sha256": "e9ec10d96551e66a79c2c42165ee7bd4c954858e03dc0bb3f0aa89ea28daa999",
+      "previously_reviewed_mechanism": true
+    }
+  ]
 }
