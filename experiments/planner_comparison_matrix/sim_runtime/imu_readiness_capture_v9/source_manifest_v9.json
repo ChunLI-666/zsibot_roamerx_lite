@@ -1,0 +1,48 @@
+{
+  "schema": "locnav.read_only_sensor_readiness.source_freeze.v9",
+  "state": "SOURCE_ONLY_DEFAULT_HOLD",
+  "base_v8_manifest_sha256": "6fa74dc4a0af8e2672f77f9db7f1c92491a264328b72d5b0fbb1d5473d95bf89",
+  "runtime_package_sha256": {
+    "readiness_capture.py": "20f89535bcf376691cd076afdac7ec06703698d54d0c0ae3e803221c31abfadd",
+    "readiness_contract.py": "1492f1220f97ab71a7309b416458e5ba602d3d2af8108257570838091c543fd8",
+    "readiness_observer.py": "8c0d55e3ad49b8b56eef1845a2a7e1cd6e5a527df7e5a604d81a60b4f691f088",
+    "readiness_validator.py": "c19c573f36234c903029a4fb9357811b8f3ec0c8a856a5ff88d105bede21f3b6",
+    "owned_recorder.py": "0ad0678232e2abe8911e96f7dac30a112a2b38a1510e380bbac7f01bec167515",
+    "imu_converter.py": "2a63456718fc69fb404114932ec62c8886e297fc9d8ab5767c461de13b89dcbb",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+    "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792"
+  },
+  "changed_runtime_files": [
+    "readiness_capture.py",
+    "readiness_contract.py",
+    "readiness_validator.py"
+  ],
+  "files_sha256": {
+    "sensor_config.json": "38aab54b3a6ca49570feaaa8e983f4f9bc9ee197060066b186478a70f92ea023",
+    "readiness_observer.py": "8c0d55e3ad49b8b56eef1845a2a7e1cd6e5a527df7e5a604d81a60b4f691f088",
+    "test_clock_admission.py": "090e902780625c5ef01025926e4695a437ecf7a7484543460a61020d18c72b56",
+    "README.txt": "87c359df36baa3f40a5aba536c46ec693fadc60a1a45a84429438dd98fd41ff6",
+    "fixtures_v9.log": "b4c875a72f4684153a47cab3915c0dbd5ed6843e76396f710e9b9e8c8788118c",
+    "imu_converter.py": "2a63456718fc69fb404114932ec62c8886e297fc9d8ab5767c461de13b89dcbb",
+    "runtime_bundle_v9.tar": "0f16540f880d4698cc662c073390a87a0cda6efb1d7c40bc01526d0ae2a509f1",
+    "readiness_capture.py": "20f89535bcf376691cd076afdac7ec06703698d54d0c0ae3e803221c31abfadd",
+    "root_release.HOLD.json": "a16428b12e59a42a6de1f73af0053b826f92f35aca60953d023e0d4257395c47",
+    "config.HOLD.json": "a557c87b40405029ff0109400438709e73f66f2ab6b12291cd620e5a02a001cf",
+    "test_imu_admission.py": "66505f4aa86bd6236c77e639a5ab0c247623026efa14a58a7639fd997390d709",
+    "test_bounded_spin.py": "31321a4c3ee12b0b1170ebbcf95852dec567cf764f6e93a5973a12428d8af91e",
+    "test_readiness.py": "3ab17b3220826c93494e967ff90a5b2c8b33ed7dd681a95c136dbb864fcc4598",
+    "test_executor_fairness.py": "1b46fbbd4dc6a4e147c0090bada3929319f747c31021159ad0a1f2adebb388f7",
+    "owned_recorder.py": "0ad0678232e2abe8911e96f7dac30a112a2b38a1510e380bbac7f01bec167515",
+    "test_padding_v2.py": "9f8520ee09cfe9210384e754aa20848925bb9acf3e8b4a75b31e436ce723efe5",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792",
+    "verification_v9.json": "638bf0a3f3607c8a23f201d21ba6b0afe4fa556c2293461fbd5083faf3cd5012",
+    "readiness_contract.py": "1492f1220f97ab71a7309b416458e5ba602d3d2af8108257570838091c543fd8",
+    "test_iterator_boundary.py": "759e552c810bebe2887876bdab88b31381617543e6dfc41cc83036ece8a3a49d",
+    "readiness_validator.py": "c19c573f36234c903029a4fb9357811b8f3ec0c8a856a5ff88d105bede21f3b6",
+    "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+    "test_discovery_inputs.py": "53808d2d94f0e69b1c12ff8e3fa4ad030b9da2f1b92fcd63917e58af9d43b960"
+  },
+  "no_runtime_actions": true
+}
