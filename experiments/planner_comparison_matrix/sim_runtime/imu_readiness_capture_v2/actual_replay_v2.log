@@ -1,0 +1,49 @@
+{
+  "state": "PASS_OFFLINE_IMU_FIELD_AND_RECORDED_CALLBACK_GATE_REPLAY_ONLY",
+  "bag_sha256": "566887494f0fd6d93397e251a16edf828383b0926943ee5ea53116514b7d630a",
+  "bag_metadata_sha256": "241cdc6cb0cd9423648e995a03e471f3b522acbc8dfc74de78120907a1bde5de",
+  "bag_original_failure_preserved": true,
+  "counts": {
+    "/front_lidar/imu": 2018,
+    "/livox/imu": 1374
+  },
+  "shared_headers": 1374,
+  "v2_padding_normalized_pairs": 1374,
+  "all37_numeric_bits_equal": 1374,
+  "nonfinite_numeric_fields": 0,
+  "local_repeated_expected_serialization_full_CDR_equal": 0,
+  "expected_vs_actual_diff_offsets": {
+    "25": 1374,
+    "26": 1374,
+    "27": 1374
+  },
+  "first_failed_live_derived_header_now_field_equal": true,
+  "recorded_callback_events": 677,
+  "recorded_callback_receipt_sha256": "7fa177abe90eb5c0ffa9176d62858dda79ffbb0f2adce6f201d36a891aecd1a7",
+  "callback_IMU_counts": {
+    "/front_lidar/imu": 549,
+    "/livox/imu": 1
+  },
+  "callback_age_ns": {
+    "/front_lidar/imu": {
+      "min": 563729,
+      "max": 81428134
+    },
+    "/livox/imu": {
+      "min": 153315443,
+      "max": 153315443
+    }
+  },
+  "raw_gate": {
+    "accepted": 549,
+    "rejected": 0
+  },
+  "derived_gate": {
+    "accepted": 1,
+    "rejected": 0
+  },
+  "receipt_basis": "Only original sample_receipts wall/steady values used for gate replay. Bag recordTime is not substituted for callback receipt; complete1374 pairing is field proof only.",
+  "original_live_state": "HOLD_READINESS_FAILED",
+  "new_live_readiness_result": false,
+  "no_ROS_context_Node_or_runtime_action": true
+}

@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_imu_adapter_readiness_v1/source_v2/replay_imu_closure_v2.py", line 61, in <module>
+    if __name__=='__main__':raise SystemExit(main())
+                                             ^^^^^^
+  File "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_imu_adapter_readiness_v1/source_v2/replay_imu_closure_v2.py", line 34, in main
+    v.sample(topic,raw,deserialize_message(raw,Imu),int(record_ns),int(record_ns-first+1_000_000_000),evidence)
+  File "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_imu_adapter_readiness_v1/source_v2/readiness_validator.py", line 72, in sample
+    if topic==IMU or event['fatal']:raise c.Hold('IMU input fault: '+event['reason'])
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+readiness_contract.Hold: IMU input fault: original_header_stale_or_future
