@@ -76,6 +76,7 @@ class FatalCleanup(unittest.TestCase):
         self.assertTrue(namespace['stop_observation']);self.assertGreaterEqual(len(events),17)
     def test_health_and_warm_retry_remain_immediate_HOLD_on_latched_fault(self):
         clock=Clock();namespace=dict(contract=c,time=clock,clock_pair=None,route={'max_runtime_sec':180.},started=clock.monotonic(),
+            callbacks=N(spin=lambda:None),stopped=[],
             writer=N(summary=lambda:dict(dropped=0,worker_error=None)),audit=dict(valid=True,first_violation=None,checked_steady=clock.monotonic()),
             imu_gate_fault={'reason':'accepted_header_gap_exceeded'},cloud_cache=None)
         with self.assertRaisesRegex(c.Hold,'latched raw IMU'):install(actual_function('health'),namespace)()

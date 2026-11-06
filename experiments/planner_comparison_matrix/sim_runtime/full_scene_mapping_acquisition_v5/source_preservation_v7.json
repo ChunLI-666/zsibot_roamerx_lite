@@ -1,0 +1,49 @@
+{
+  "base_manifest_sha256": "3f7b602fa3c4c4c15b516375445d7c7af2f6ada1a78b5f14a942add6d6830710",
+  "runtime_files_changed": [
+    "full_scene_mapping.py"
+  ],
+  "other_six_runtime_files_exact": true,
+  "changed_AST": [
+    "execute",
+    "health"
+  ],
+  "unchanged_AST": [
+    "source_files",
+    "BoundedCallbacks",
+    "validate_release",
+    "atomic_json",
+    "template",
+    "OwnedRelay",
+    "finalize_owned_relay",
+    "main",
+    "__init__",
+    "wrap",
+    "spin",
+    "start",
+    "send",
+    "close",
+    "dispatch",
+    "emit",
+    "stamp",
+    "remember",
+    "odom",
+    "cloud",
+    "scan",
+    "imu",
+    "raw_imu",
+    "audit_loop",
+    "tick",
+    "stable",
+    "rotate_to",
+    "final_guard",
+    "observe_stop"
+  ],
+  "health_after_two_statement_removal_exact": true,
+  "tick_exact": true,
+  "final_guard_exact": true,
+  "scope_unchanged": true,
+  "capability_unchanged": true,
+  "gate_reset_added": false,
+  "last_send_reset_added": false
+}
