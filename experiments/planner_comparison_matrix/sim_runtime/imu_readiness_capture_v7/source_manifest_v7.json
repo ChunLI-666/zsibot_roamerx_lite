@@ -1,0 +1,47 @@
+{
+  "schema": "locnav.read_only_sensor_readiness.source_freeze.v7",
+  "state": "SOURCE_ONLY_DEFAULT_HOLD",
+  "base_v6_manifest_sha256": "81bf0103ec960fe334c30d3c32eae1aa87666b8813dda8658c25dd908fd55934",
+  "runtime_package_sha256": {
+    "readiness_capture.py": "8a0941a4ca9352e381b0dc6d79844fc200b0f2990321c75b244f10e36e0496cd",
+    "readiness_contract.py": "a55ad731c3416d92a5245a48baeab2ddf333b8a89de8e481655246cbeae132f8",
+    "readiness_observer.py": "74d0c456967c0e7dde88736412ee168ff770ea85ef85d0f5f350dabc859975fd",
+    "readiness_validator.py": "4e849f5a1158c8ac3eabc0f9dd0c5aa9a49f6065f35543faf083dbbc64436349",
+    "owned_recorder.py": "0ad0678232e2abe8911e96f7dac30a112a2b38a1510e380bbac7f01bec167515",
+    "imu_converter.py": "2a63456718fc69fb404114932ec62c8886e297fc9d8ab5767c461de13b89dcbb",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+    "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792"
+  },
+  "changed_runtime_files": [
+    "readiness_observer.py"
+  ],
+  "files_sha256": {
+    "runtime_bundle_v7.tar": "fa6800e744f213b48c98171c21f0bbb2410fbda9de383af672edc5c9001523a8",
+    "sensor_config.json": "38aab54b3a6ca49570feaaa8e983f4f9bc9ee197060066b186478a70f92ea023",
+    "readiness_observer.py": "74d0c456967c0e7dde88736412ee168ff770ea85ef85d0f5f350dabc859975fd",
+    "test_clock_admission.py": "090e902780625c5ef01025926e4695a437ecf7a7484543460a61020d18c72b56",
+    "README.txt": "f7d546688401b19e7d4ba4acfe3a84908c14c1865af393d546702e0cacbbab2c",
+    "imu_converter.py": "2a63456718fc69fb404114932ec62c8886e297fc9d8ab5767c461de13b89dcbb",
+    "fixtures_initial_v7.log": "0b2705f9daf7631199db07e86df1728bc6caef35e8d61eb47a272d18adbe309b",
+    "readiness_capture.py": "8a0941a4ca9352e381b0dc6d79844fc200b0f2990321c75b244f10e36e0496cd",
+    "root_release.HOLD.json": "956f04265fe976d3de2c88963c1827973d6c5293a7e5485e65fc8d87a60399a0",
+    "config.HOLD.json": "074011848f3719c4b6b20491c5ce558ed16409bdae97b3264ce6ccf51eb6a83d",
+    "test_imu_admission.py": "66505f4aa86bd6236c77e639a5ab0c247623026efa14a58a7639fd997390d709",
+    "test_bounded_spin.py": "2e5670c00449730935929254af90b32ddc56c90b08bb13e38ea06fc30ee5b7bf",
+    "test_readiness.py": "3ab17b3220826c93494e967ff90a5b2c8b33ed7dd681a95c136dbb864fcc4598",
+    "test_executor_fairness.py": "1b46fbbd4dc6a4e147c0090bada3929319f747c31021159ad0a1f2adebb388f7",
+    "owned_recorder.py": "0ad0678232e2abe8911e96f7dac30a112a2b38a1510e380bbac7f01bec167515",
+    "test_padding_v2.py": "9f8520ee09cfe9210384e754aa20848925bb9acf3e8b4a75b31e436ce723efe5",
+    "installed_executor_evidence.json": "8205c603002342f5d3611b2af943e9c4334e8f84c9adb5c2deb3aa9cdb2b6aea",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792",
+    "verification_v7.json": "b38f9a4d6b6bbe0df96e361d110d17916a82292f4267f441b8a9144913b7091d",
+    "readiness_contract.py": "a55ad731c3416d92a5245a48baeab2ddf333b8a89de8e481655246cbeae132f8",
+    "readiness_validator.py": "4e849f5a1158c8ac3eabc0f9dd0c5aa9a49f6065f35543faf083dbbc64436349",
+    "fixtures_v7.log": "564c82d6338bb19ba2a7815434bcc9588f84c65ce75d2abdc8f7a0c4cbe5991c",
+    "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+    "test_discovery_inputs.py": "9cc49b4995d2c7057bdfd8f7640ce19c98e29e9f98182b325fbd9f8eb086a91c"
+  },
+  "no_runtime_actions": true
+}
