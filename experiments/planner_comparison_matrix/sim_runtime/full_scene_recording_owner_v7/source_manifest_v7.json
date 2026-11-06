@@ -1,0 +1,37 @@
+{
+  "scope": "RAW_RECORDER_SCOPE_COMPATIBILITY_SOURCE_ONLY",
+  "schema_version": 7,
+  "runtime_package_sha256": {
+    "full_scene_recording_owner.py": "ee74d31b3a6da8521391b61aa3ba7e3486654ae89ae79f2bb6135e00dd43fba0",
+    "mapping_result_adapter.py": "c1e08dadf5ee1a4fea9d7ac8881548c5c65e430500328479247ad7e42b7fa870",
+    "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792",
+    "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c"
+  },
+  "files_sha256": {
+    "test_full_scene_recording_owner.py": "e353be94357821ed23654d6ff49298ab125f7ad392d11694e7c1bc4b9c3f1051",
+    "source_export_delta_test_result.json": "243a2ad2a1a7e5efed2fc0b54d7d22c3b0b72084c90e413b82de341faf70eb25",
+    "README_v7.txt": "b614c415d52d46e5f87caf9967c9ca209de9575454e2dd296080e49bd9721d13",
+    "canonical_git_source_export.HOLD.example.json": "c7045fb476f70b586663ce62021d89d8f38ba1ab0cb10262c58060a8e87bcd7f",
+    "mapping_result_adapter.py": "c1e08dadf5ee1a4fea9d7ac8881548c5c65e430500328479247ad7e42b7fa870",
+    "_test_standins.py": "6c917586a43b217cf83597941eea2ac8cf670f825969581ee3d379b623e0ea04",
+    "test_frozen_source_export.py": "3dd7b9ff06180a868af35df34fc2f250f5610986ac6e14ea366bb7fe6c9f7f52",
+    "recording_config.HOLD.template.json": "8ea0ea64ab79b9dc66490203b1c7788c1aeee14f94e3081d69770cd98b27dee7",
+    "full_scene_recording_owner.py": "ee74d31b3a6da8521391b61aa3ba7e3486654ae89ae79f2bb6135e00dd43fba0",
+    "source_export_repository.HOLD.example.json": "fe015ac95ff72645996f5c03cf91c00ebdbb84a20a7ae60265ca40836c9b1016",
+    "reference_v6_source_snapshot.json": "f7a112417d444e9394b24d4a3c2b6e40d77836c23f8243116c33aa0e62026604",
+    "test_controller_scope_v7.py": "af8729628c267f593582f48bc99ca311b7105001b72896b3833b57a3fe8ce677",
+    "_test_runner.py": "e794abd74f3f71e123f37634d6e9498284407e66bd1791d4bad752afe709f2ce",
+    "README.md": "dc8816032728e261ab78029351010c278fed80999edeb53d82dcc8cb9369ccfe",
+    "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792",
+    "root_recording_release.HOLD.template.json": "e924145d3fd9beb75037f760a992085baa089b433080500bb90f40cbddced97a",
+    "source_export_walk_error_test_result.json": "4d711e175bd39b483f3e9f3d1ca967473e70a0ea349880edad5e2b3cc0909901",
+    "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+    "controller_binding.HOLD.template.json": "321a5e09d601608b783538c387fa3f646cd65305c6a48a5dc22c0949429a72d4"
+  },
+  "baseline": "full_scene_recording_owner_v1/review_source_v6",
+  "tests": {
+    "new_pure": 5,
+    "owned_standin": 12
+  },
+  "runtime_started": false
+}
