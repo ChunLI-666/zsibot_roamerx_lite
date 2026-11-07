@@ -306,6 +306,14 @@ CLOCK_BOOTTIME deadline, retained-pidfd ownership, stop order, default timeout,
 planning budget, sensor-age checks and measured stop requirements are unchanged.
 Inputs have their own deadline and must remain available throughout each case.
 
+The official B Matrix profile now explicitly uses `cost_penalty: 0.2`. On the
+separate frozen B3 and B7 published costmaps this retains a positive soft cost
+preference and more search margin than 1.0, including B7 start-yaw perturbations
+of +/-0.08 rad. The original 2 s/1,000,000-iteration limits, body footprint and
+filled sweep checks remain unchanged. Published maps and nearest recorded Native
+poses are offline proxies, not the unrecorded planner-lock inputs; these results
+do not establish full-route or live timing acceptance.
+
 ### Initial Pose-goal region (official variant only)
 
 The official Matrix Pose-goal profile explicitly enables
