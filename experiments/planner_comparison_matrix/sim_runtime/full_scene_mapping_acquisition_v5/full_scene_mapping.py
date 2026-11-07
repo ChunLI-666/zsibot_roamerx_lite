@@ -32,7 +32,7 @@ REQUIRED_RETIRED_ROLES={'old_sim_command_adapter','old_sim_udp_relay','old_navig
 RAW_RECORD_TOPICS={'/front_lidar','/front_lidar/imu','/odom','/front_camera/image/compressed',
   '/livox/lidar','/livox/imu','/laser_scan','/camera/front/image/compressed','/camera/front/camera_info','/tf_static','/clock'}
 GUARDED_SOURCES={'/odom','/front_lidar','/laser_scan','/front_lidar/imu','/livox/imu'}
-MAPPING_CONTROL_PERIOD=.2
+MAPPING_CONTROL_PERIOD=contract.PERIOD
 MAPPING_INPUT_AGE=.3
 MAPPING_SWEEP_COMPUTE_MARGIN=.2
 MAPPING_AUDIT_MAX_AGE=1.
