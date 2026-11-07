@@ -316,3 +316,10 @@ original goal pose stays on the wire while only the checked prefix is executable
 Current original-goal XY/yaw, ordered phases and measured stopping remain required.
 The vendor search and filled footprint checks are unchanged. This configuration
 is an offline-supported candidate; a full Native A run and comparison remain pending.
+
+The request-local obstacle index also stores each row's exact blocked columns.
+SAT checks visit those same cells in the original order, avoiding scans of empty
+cells without changing geometry, unknown classification or the planning budget.
+All package consumers of this header must be rebuilt together. Ownership metadata
+uses the READY 500 ms lease; physical-input freshness and stopped visits retain
+their original contracts. Unknown cells seed inflation as hard obstacles.

@@ -190,3 +190,60 @@ TEST(FilledFootprint, ScopedIndexRebuildsAfterUpdatesAndDoesNotApplyToOtherMaps)
     EXPECT_TRUE(rs::footprintFree(map, body(), 1.0, 1.0, 0.0));
   }
 }
+
+
+TEST(FilledFootprint, SparseRowsExactlyRetainBlockedCellsInOriginalOrder)
+{
+  nav2_costmap_2d::Costmap2D map(43, 39, 0.01, -0.215, -0.195, 0);
+  for (unsigned int y = 0; y < 39; ++y) {
+    for (unsigned int x = 0; x < 43; ++x) {
+      map.setCost(x, y, (x + 3 * y) % 7 == 0 ? 255 :
+        (2 * x + y) % 11 == 0 ? 254 : (x + y) % 2 ? 253 : 252);
+    }
+  }
+  rs::ScopedObstacleIndex index(map);
+  for (unsigned int y = 0; y < 39; ++y) {
+    std::vector<unsigned int> expected;
+    for (unsigned int x = 0; x < 43; ++x) {
+      if (map.getCost(x, y) >= nav2_costmap_2d::LETHAL_OBSTACLE) {expected.push_back(x);}
+    }
+    const auto * actual = rs::ScopedObstacleIndex::activeBlockedColumns(map, y);
+    ASSERT_NE(actual, nullptr);
+    EXPECT_EQ(*actual, expected);
+  }
+  EXPECT_EQ(rs::ScopedObstacleIndex::activeBlockedColumns(map, 39), nullptr);
+  nav2_costmap_2d::Costmap2D foreign(43, 39, 0.01, -0.215, -0.195, 0);
+  EXPECT_EQ(rs::ScopedObstacleIndex::activeBlockedColumns(foreign, 0), nullptr);
+}
+
+TEST(FilledFootprint, SparseSatMatchesUnindexedFilledPoseAndSweepPredicates)
+{
+  nav2_costmap_2d::Costmap2D map(403, 399, 0.01, -2.015, -1.995, 0);
+  auto footprint = body();
+  for (auto & p : footprint) {p.x = std::copysign(0.797, p.x); p.y = std::copysign(0.680, p.y);}
+  struct Query {double x, y, yaw; bool pose, sweep;};
+  for (unsigned int scenario = 0; scenario < 3; ++scenario) {
+    map.resetMap(0, 0, 403, 399);
+    if (scenario > 0) {
+      for (unsigned int y = 7; y < 399; y += scenario == 1 ? 127 : 31) {
+        for (unsigned int x = 3; x < 403; x += scenario == 1 ? 131 : 29) {
+          map.setCost(x, y, (x + y) % 2 ? 254 : 255);
+        }
+      }
+    }
+    std::vector<Query> queries;
+    for (unsigned int i = 0; i < 120; ++i) {
+      const double x = (int((i * 37) % 4001) - 2000) / 1000.0;
+      const double y = (int((i * 61) % 4001) - 2000) / 1000.0;
+      const double yaw = (int((i * 97) % 6284) - 3142) / 1000.0;
+      queries.push_back({x, y, yaw, rs::footprintFree(map, footprint, x, y, yaw),
+        rs::sweepFree(map, footprint, x, y, yaw, x + 0.12, y - 0.08, yaw + 0.393)});
+    }
+    rs::ScopedObstacleIndex index(map);
+    for (const auto & q : queries) {
+      EXPECT_EQ(rs::footprintFree(map, footprint, q.x, q.y, q.yaw), q.pose);
+      EXPECT_EQ(rs::sweepFree(map, footprint, q.x, q.y, q.yaw,
+        q.x + 0.12, q.y - 0.08, q.yaw + 0.393), q.sweep);
+    }
+  }
+}
