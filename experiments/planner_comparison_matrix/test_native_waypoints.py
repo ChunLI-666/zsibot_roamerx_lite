@@ -23,6 +23,7 @@ import uuid
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE/'goal_pilot_source'))
 from waypoint_contract import (AsyncEvidenceWriter, OrderedVisits, OwnedGoalIdentity, ReadyReadCapture, WAYPOINT_PARAMETERS,
+                               simulation_scan_latency_profile, validate_simulation_scan_latency_profile, operational_scan_age_issues, strict_simulation_scan_deviations, producer_scan_signed_age_bounds,
                                evidence_json, exclusive_graph, finite_velocity, mission_budget, strict_stopped,
                                validate_ownership, validate_route, validate_settle_budget, validate_scan_aging_confirmation, waypoint_binding)
 
@@ -45,7 +46,8 @@ def load_method(name):
     cls = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'WaypointPilot')
     method = next(node for node in cls.body if isinstance(node, ast.FunctionDef) and node.name == name)
     namespace = dict(OwnedGoalIdentity=OwnedGoalIdentity, ReadyReadCapture=ReadyReadCapture, ACTION='/follow_waypoints', json=json,
-                     evidence_json=evidence_json, finite_velocity=finite_velocity, strict_stopped=strict_stopped, time=time)
+                     evidence_json=evidence_json, finite_velocity=finite_velocity, strict_stopped=strict_stopped, time=time,
+                     simulation_scan_latency_profile=simulation_scan_latency_profile, validate_simulation_scan_latency_profile=validate_simulation_scan_latency_profile, operational_scan_age_issues=operational_scan_age_issues, strict_simulation_scan_deviations=strict_simulation_scan_deviations, producer_scan_signed_age_bounds=producer_scan_signed_age_bounds)
     exec(compile(ast.Module(body=[method], type_ignores=[]), str(HERE/'goal_pilot_source/waypoint_batch.py'), 'exec'), namespace)
     return namespace[name], namespace
 
@@ -206,7 +208,8 @@ class RawPoseTests(unittest.TestCase):
                 self.assertTrue(math.isfinite(value['yaw']))
                 self.assertEqual(value['raw_pose_values_finite'], expected)
                 checked, check_namespace = load_method('execution_ready')
-                node = SimpleNamespace(check_interruption=lambda: None,
+                node = SimpleNamespace(simulation_scan_max_age_sec=.3, simulation_scan_sequence_fault=None,
+                    check_interruption=lambda: None,
                     input_ready=lambda **kwargs: (True, [], dict(last=dict(pose=value,**{'/cmd_vel_safe':dict(vx=0.,vy=0.,wz=0.)}))), args=SimpleNamespace(execute=False, scan_aging_confirm_sec=0.),
                     scan_timing_record_check=lambda *args: None)
                 valid, issues, snapshot = checked(node)
@@ -223,7 +226,8 @@ class RawPoseTests(unittest.TestCase):
             sample['last']['pose']['raw_pose_values_finite']=True
             sample['last']['/cmd_vel_safe'].update(velocity)
             if 'wz' not in velocity:sample['last']['/cmd_vel_safe'].pop('wz')
-            node=SimpleNamespace(check_interruption=lambda:None,input_ready=lambda **kwargs:(True,[],sample),
+            node=SimpleNamespace(simulation_scan_max_age_sec=.3,simulation_scan_sequence_fault=None,
+                                 check_interruption=lambda:None,input_ready=lambda **kwargs:(True,[],sample),
                                  args=SimpleNamespace(execute=False, scan_aging_confirm_sec=0.),scan_timing_record_check=lambda *args:None)
             self.assertEqual(checked(node,require_stopped=False)[0],expected)
 
@@ -338,6 +342,7 @@ class ExitFlowTests(unittest.TestCase):
             error_function=next(node for node in original.body if isinstance(node,ast.FunctionDef) and node.name=='error')
             exec(compile(ast.Module(body=[error_function],type_ignores=[]),'unchanged_goal_error','exec'),pure)
             namespace = dict(argparse=argparse, Path=Path, hashlib=hashlib, json=json, math=math, os=os, sys=sys, time=time,
+                simulation_scan_latency_profile=simulation_scan_latency_profile, validate_simulation_scan_latency_profile=validate_simulation_scan_latency_profile, operational_scan_age_issues=operational_scan_age_issues, strict_simulation_scan_deviations=strict_simulation_scan_deviations, producer_scan_signed_age_bounds=producer_scan_signed_age_bounds,
                 ReadyReadCapture=ReadyReadCapture,
                 uuid=uuid, HERE=root, rclpy=fake_ros, SignalHandlerOptions=SimpleNamespace(NO='NO'),
                 signal=SimpleNamespace(SIGINT=2, SIGTERM=15, signal=lambda number, handler: 'previous'),
@@ -347,7 +352,7 @@ class ExitFlowTests(unittest.TestCase):
                 validate_scan_aging_confirmation=validate_scan_aging_confirmation,
                 evidence_json=evidence_json, mission_budget=mission_budget,
                 strict_stopped=strict_stopped,finite_velocity=finite_velocity, OwnedGoalIdentity=OwnedGoalIdentity, ACTION='/follow_waypoints',
-                freeze_sources=lambda destination: dict(sources_sha256={'waypoint_batch.py':'a'*64}),
+                freeze_sources=lambda destination, simulation_scan_max_age_sec=.3: dict(sources_sha256={'waypoint_batch.py':'a'*64}),
                 UUID=lambda uuid: SimpleNamespace(uuid=uuid),
                 CancelGoal=SimpleNamespace(Request=lambda: SimpleNamespace(goal_info=SimpleNamespace(
                     goal_id=None, stamp=SimpleNamespace(sec=0, nanosec=0)))),
@@ -385,6 +390,13 @@ class ExitFlowTests(unittest.TestCase):
                     self.cancel_requested = self.finalizing = False
                     self.cancel_reason = self.stop_evidence = None
                     self.artifact_invalid_reasons = []
+                    self.simulation_scan_max_age_sec = .3
+                    self.scan_latency_profile = simulation_scan_latency_profile(.3)
+                    self.strict_scan_latency_first_fault = None
+                    self.strict_scan_latency_count = 0
+                    self.strict_scan_latency_seen = set()
+                    self.simulation_scan_last_stamp_ns = None
+                    self.simulation_scan_sequence_fault = None
                     self.scan_aging_episodes = []
                     self.scan_timing_capture_errors = 0
                     self.first_ready_read_failure = None

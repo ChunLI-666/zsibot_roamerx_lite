@@ -33,6 +33,8 @@ from waypoint_contract import (ACTION, AsyncEvidenceWriter, OrderedVisits, Owned
                                evidence_json, finite_velocity, mission_budget, strict_stopped, validate_ownership, validate_route, waypoint_binding)
 from waypoint_contract import (ReadyReadCapture, ownership_metadata_lease_deviation, validate_settle_budget,
                                producer_scan_confirmation_failure, producer_scan_confirmation_outcome)
+from waypoint_contract import (simulation_scan_latency_profile, validate_simulation_scan_latency_profile,
+    operational_scan_age_issues, strict_simulation_scan_deviations, producer_scan_signed_age_bounds)
 from waypoint_contract import (scan_aging_confirmation_eligible, scan_aging_confirmation_outcome,
                                scan_confirmation_payload_valid, validate_scan_aging_confirmation)
 
@@ -45,7 +47,7 @@ def file_sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def freeze_sources(output):
+def freeze_sources(output, simulation_scan_max_age_sec=.3):
     if file_sha(frozen.__file__) != FROZEN_PILOT_SHA256:
         raise ValueError('The historical safety observer bytes differ from the reviewed a63b snapshot')
     sources = [Path(__file__), Path(frozen.__file__), Path(message_info_contract.__file__), HERE/'waypoint_contract.py']
@@ -69,6 +71,7 @@ def freeze_sources(output):
     manifest['stop_cleanup']='Every possibly sent goal reaches finally own-UUID cancellation and a fresh finite measured/commanded stop observation, including response timeout, signal and exception. Default rclpy shutdown-on-SIGINT is disabled until cleanup completes.'
     manifest['producer_scan_confirmation']='Opt-in same-scan producer-only not_ready may use the existing <=50ms window only after current raw metadata/bindings/UUID revalidation. New strict READY with a later original producer scan stamp and all own original guards is required; every episode permanently fails strict timing. Preflight/runtime failed reads are separate.'
     manifest['scan_aging_confirmation']='Default 0 preserves strict behavior. Opt-in <=.05s drains existing callbacks only after sole scan-header aging; a newer original stamp must restore every original guard. Every episode permanently fails strict timing acceptance; no header-age threshold changes.'
+    manifest['simulation_scan_latency_profile']=simulation_scan_latency_profile(simulation_scan_max_age_sec)
     (output/'instrumentation_manifest.json').write_text(json.dumps(manifest, indent=2)+'\n')
     return manifest
 
@@ -118,6 +121,10 @@ def path_cdr_endpoint(raw):
 
 class WaypointPilot(frozen.Pilot):
     def __init__(self, args, output, route, source_manifest):
+        self.simulation_scan_max_age_sec=getattr(args,'simulation_scan_max_age_sec',.3)
+        self.scan_latency_profile=simulation_scan_latency_profile(self.simulation_scan_max_age_sec)
+        self.strict_scan_latency_first_fault=None;self.strict_scan_latency_count=0;self.strict_scan_latency_seen=set()
+        self.simulation_scan_last_stamp_ns=None;self.simulation_scan_sequence_fault=None
         self.route = route
         self.loaded_sources = {'experiments/planner_comparison_matrix/goal_pilot_source/'+name: digest
                                for name,digest in source_manifest['sources_sha256'].items()}
@@ -159,6 +166,8 @@ class WaypointPilot(frozen.Pilot):
             self.event_pub.publish(message)
 
     def emit(self, kind, **fields):
+        if getattr(self,'simulation_scan_max_age_sec',.3)>.3:
+            fields.setdefault('simulation_scan_latency_profile',self.scan_latency_profile)
         event = dict(kind=kind, case_uuid=self.case_uuid, case_id=self.args.case_id,
                      variant=self.args.variant, unix_ns=time.time_ns(), steady_ns=time.monotonic_ns(), **fields)
         self.writer.submit('events', event)
@@ -173,8 +182,13 @@ class WaypointPilot(frozen.Pilot):
         enter_unix_ns, enter_steady_ns = time.time_ns(), time.monotonic_ns()
         value = dict(stamp_ns=frozen.stamp_ns(msg.header.stamp),
                      frame_id=msg.header.frame_id, ranges=len(msg.ranges))
-        if self.args.scan_aging_confirm_sec > 0.:
+        if self.args.scan_aging_confirm_sec > 0. or self.simulation_scan_max_age_sec>.3:
             value['confirmation_payload_valid'] = scan_confirmation_payload_valid(msg)
+        if self.simulation_scan_max_age_sec>.3:
+            stamp=value['stamp_ns'];prior=self.simulation_scan_last_stamp_ns
+            if prior is not None and stamp<=prior:
+                self.simulation_scan_sequence_fault=dict(previous_original_header_ns=prior,original_header_ns=stamp,callback_unix_ns=enter_unix_ns)
+            self.simulation_scan_last_stamp_ns=stamp if prior is None else max(prior,stamp)
         remembered = self.remember('scan', value)
         remember_end = time.monotonic_ns()
         try:
@@ -209,20 +223,31 @@ class WaypointPilot(frozen.Pilot):
             issues.append('pose:raw_position_or_quaternion_nonfinite_or_missing')
         if not finite_velocity(snapshot['last'].get('/cmd_vel_safe', {})):
             issues.append('/cmd_vel_safe:nonfinite_or_missing_velocity')
-        if (self.args.scan_aging_confirm_sec > 0.
+        if ((self.args.scan_aging_confirm_sec > 0. or self.simulation_scan_max_age_sec>.3)
                 and snapshot['last'].get('scan', {}).get('confirmation_payload_valid') is not True):
             issues.append('scan:confirmation_payload_nonfinite_or_invalid_or_missing')
         if require_stopped:
             stopped, stop_issues = strict_stopped(snapshot)
             if not stopped:
                 issues.extend(stop_issues)
+        if self.simulation_scan_sequence_fault is not None:
+            issues.append('scan:source_stamp_not_strictly_increasing')
         self.current_ready_read_failure=None
+        validated_ready=None
         if self.args.execute:
             readiness_stage, ownership_checked_now_ns = 'read_ready', None
             ready_capture = ReadyReadCapture(self.args.ready)
             ready_call_bounds = dict(call_begin_unix_ns=time.time_ns(), call_begin_steady_ns=time.monotonic_ns())
             try:
                 self.latest_ready, binding, self.latest_ready_sha = frozen.read_ready(ready_capture, self.args.variant, self.runtime_binding)
+                readiness_stage='simulation_scan_latency_profile'
+                validate_simulation_scan_latency_profile(self.latest_ready,self.simulation_scan_max_age_sec)
+                if self.simulation_scan_max_age_sec>.3:
+                    bounds=producer_scan_signed_age_bounds(self.latest_ready)
+                    if (min(bounds['header_age_bounds_s'])<-.05 or min(bounds['receive_age_bounds_s'])<0
+                            or min(bounds['header_age_bounds_s'])>.5 or min(bounds['receive_age_bounds_s'])>.5):
+                        raise ValueError('scan:producer_observation_outside_simulation_bound')
+
                 readiness_stage = 'waypoint_binding'
                 native = waypoint_binding(self.latest_ready, self.native_binding)
                 readiness_stage, ownership_checked_now_ns = 'validate_ownership', time.time_ns()
@@ -241,6 +266,7 @@ class WaypointPilot(frozen.Pilot):
                     self.runtime_binding, self.native_binding = binding, native
                 if native['waypoint_contract']['client_sources_sha256'] != self.loaded_sources:
                     raise ValueError('Loaded batch client sources differ from the launcher source binding')
+                validated_ready=self.latest_ready
             except Exception as exc:
                 call_end_unix_ns, call_end_steady_ns = time.time_ns(), time.monotonic_ns()
                 captured_first_failure = False
@@ -266,8 +292,42 @@ class WaypointPilot(frozen.Pilot):
                     latest_ready=getattr(self, 'latest_ready', None))
             if self.event_pub.get_subscription_count() == 0:
                 issues.append('goal_event_subscriber_disappeared')
-        self.scan_timing_record_check(require_stopped, issues, snapshot, entered_unix_ns, entered_steady_ns)
-        return not issues, issues, snapshot
+        strict_issues=list(issues)
+        deviations=[]
+        producer_evidence_ready=validated_ready
+        producer_evidence_context='current_fully_validated_READY' if validated_ready is not None else None
+        if self.simulation_scan_max_age_sec>.3:
+            if producer_evidence_ready is None and self.current_ready_read_failure is not None:
+                try:
+                    candidate=json.loads(self.current_ready_read_failure['raw_bytes'])
+                    validate_simulation_scan_latency_profile(candidate,self.simulation_scan_max_age_sec)
+                    producer_scan_signed_age_bounds(candidate)
+                    producer_evidence_ready=candidate
+                    producer_evidence_context='failed_original_READY_raw_strict_evidence_only_never_health'
+                except (ValueError,TypeError,KeyError):pass
+            deviations=strict_simulation_scan_deviations(snapshot,producer_evidence_ready)
+            if any(d['source']=='producer_original_scan_bounds' for d in deviations):
+                strict_issues.append('scan:producer_strict_300ms_age_exceeded')
+        # The immutable original .3 check and original snapshot feed strict evidence.
+        self.scan_timing_record_check(require_stopped,strict_issues,snapshot,entered_unix_ns,entered_steady_ns)
+        if deviations:
+            if self.strict_scan_latency_first_fault is None:
+                self.strict_scan_latency_first_fault=dict(checked_unix_ns=entered_unix_ns,checked_steady_ns=entered_steady_ns,
+                    original_strict_issues=list(strict_issues),original_snapshot=snapshot,deviations=deviations,
+                    producer_evidence_context=producer_evidence_context,
+                    failed_READY_raw_sha256=None if self.current_ready_read_failure is None else self.current_ready_read_failure['metadata']['sha256'],
+                    latest_validated_READY_sha256=getattr(self,'latest_ready_sha',None),strict_timing_status='FAIL')
+            self.invalidate_artifact(['scan:strict_300ms_latency_violation'])
+            for deviation in deviations:
+                stamp=(deviation.get('original_scan',{}).get('stamp_ns') if deviation['source']=='consumer_original_scan'
+                    else deviation['original_observation'].get('header_ns'))
+                key=(deviation['source'],stamp)
+                if key not in self.strict_scan_latency_seen:
+                    self.strict_scan_latency_seen.add(key);self.strict_scan_latency_count+=1
+                    self.emit('strict_scan_latency_deviation',strict_timing_status='FAIL',strict_timing_accepted=False,
+                        deviation=deviation,original_check_unix_ns=entered_unix_ns)
+        operational_issues=operational_scan_age_issues(strict_issues,snapshot,self.simulation_scan_max_age_sec)
+        return not operational_issues,operational_issues,snapshot
 
     def producer_scan_confirmation_failure(self,issues,snapshot):
         topic=getattr(self.args,'scan_topic','/laser_scan_leveled')
@@ -654,7 +714,8 @@ class WaypointPilot(frozen.Pilot):
         final_within = (final_error is not None and final_error['xy_m'] <= .15 and final_error['yaw_rad'] <= .08
                         and final_error['pose'].get('receive_age_s', math.inf) <= .3
                         and -.05 <= final_error['pose'].get('header_age_s', math.inf) <= .3)
-        passed = (fields['status'] == 4 and fields['error_code'] == 0 and fields['missed_waypoints'] == []
+        passed = (valid and not self.cancel_requested and self.cancel_reason is None
+                  and fields['status'] == 4 and fields['error_code'] == 0 and fields['missed_waypoints'] == []
                   and ordered['all_visited'] and ordered['violation'] is None and settled and final_within)
         plans = {}
         for index, item in self.first_plans.items():
@@ -666,6 +727,8 @@ class WaypointPilot(frozen.Pilot):
                     'completed_native_batch_and_all_original_visits_pass' if passed else
                     'native_action_success_but_independent_acceptance_failed' if fields['status'] == 4 else
                     'canceled_by_pilot' if self.cancel_reason else 'completed_action_failure_or_missing_result',
+                    functional_status='PASS' if passed else 'FAIL',simulation_scan_latency_profile=self.scan_latency_profile,
+                    strict_scan_timing_status='FAIL' if (self.strict_scan_latency_first_fault or self.scan_aging_episodes) else 'NO_STRICT_SCAN_FAULT_RECORDED',
                     action_uuid=str(requested_uuid), cancel_reason=self.cancel_reason, ordered=ordered, first_plans=plans,
                     settled_measured_and_commanded_stop=settled, settled_original_goal_error=final_error,
                     settled_within_original_tolerance=final_within, final_snapshot=final_snapshot,
@@ -717,6 +780,8 @@ def main():
     parser.add_argument('--cancel-after', type=float)
     parser.add_argument('--odom-topic', default='/odom/current_pose')
     parser.add_argument('--scan-topic', default='/laser_scan')
+    parser.add_argument('--simulation-scan-max-age-sec',type=float,choices=[.3,.5],default=.3,
+                        help='Explicit simulation-only scan header/receive operational cap; strict original .3 evidence remains FAIL')
     parser.add_argument('--scan-aging-confirm-sec', type=float, default=0.,
                         help='Opt-in existing-callback confirmation in [0,.05]s; every episode fails strict timing')
     parser.add_argument('--camera-topic', default='/camera/front/image/compressed')
@@ -746,7 +811,7 @@ def main():
     args.output.mkdir(parents=True)
     attempt_uuid, created_ns = str(uuid.uuid4()), time.time_ns()
     (args.output/'route_original.json').write_bytes(route_raw)
-    instrumentation = freeze_sources(args.output)
+    instrumentation = freeze_sources(args.output,args.simulation_scan_max_age_sec)
     invocation = {key: str(value) if isinstance(value, Path) else value for key, value in vars(args).items()}
     (args.output/'invocation.json').write_text(json.dumps(dict(attempt_uuid=attempt_uuid, created_ns=created_ns,
         args=invocation, route_sha256=hashlib.sha256(route_raw).hexdigest(), instrumentation=instrumentation), indent=2)+'\n')
@@ -777,6 +842,10 @@ def main():
                 result['stable_preflight'] = node.stable_preflight_evidence
             result['ordered'] = node.ordered.summary()
             result['artifact_invalid_reasons'] = node.artifact_invalid_reasons
+            result['simulation_scan_latency_profile']=node.scan_latency_profile
+            result['functional_status']=result.get('functional_status','FAIL_OR_NOT_EXECUTED')
+            result['strict_scan_latency_evidence']=dict(first_fault=node.strict_scan_latency_first_fault,unique_source_stamp_deviations=node.strict_scan_latency_count,strict_timing_status='FAIL' if (node.strict_scan_latency_first_fault or node.scan_aging_episodes) else 'NO_STRICT_SCAN_FAULT_RECORDED')
+            if node.strict_scan_latency_first_fault is not None or node.scan_aging_episodes:result['strict_scan_timing_status']='FAIL'
             result['scan_aging_confirmation'] = dict(configured_sec=args.scan_aging_confirm_sec,
                 episodes=node.scan_aging_episodes, strict_timing_status='FAIL' if node.scan_aging_episodes
                 else 'NO_CONFIRMATION_VIOLATION_RECORDED',

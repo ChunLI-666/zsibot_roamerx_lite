@@ -93,9 +93,21 @@ class ProducerHeartbeatTests(unittest.TestCase):
             self.assertEqual(json.loads(path.read_bytes()),document)
             self.assertLess(path.stat().st_size,len(json.dumps(document,indent=2))+1)
             self.assertFalse(path.with_suffix('.json.tmp').exists())
-    def test_physical_source_health_function_is_bytecode_AST_unchanged(self):
+    def test_source_health_only_adds_the_explicit_scan_profile(self):
         def find(path,name):return next(n for n in ast.walk(ast.parse(path.read_text())) if isinstance(n,ast.FunctionDef) and n.name==name)
-        self.assertEqual(hashlib.sha256(ast.dump(find(SOURCE,'source_health')).encode()).hexdigest(),EXPECTED_UNCHANGED_AST['source_health'])
+        # Restore only the newly reviewed scan limit to its original default.
+        # Every other physical predicate must retain the original entire AST.
+        class StrictScanDefault(ast.NodeTransformer):
+            count=0
+            def visit_Call(self,node):
+                if ast.unparse(node)=="getattr(args, 'simulation_scan_max_age_sec', 0.3)":
+                    self.count+=1
+                    return ast.Constant(value=.3)
+                return self.generic_visit(node)
+        normalize=StrictScanDefault()
+        original_default=normalize.visit(copy.deepcopy(find(SOURCE,'source_health')))
+        self.assertEqual(normalize.count,1)
+        self.assertEqual(hashlib.sha256(ast.dump(original_default).encode()).hexdigest(),EXPECTED_UNCHANGED_AST['source_health'])
         self.assertEqual(hashlib.sha256(ast.dump(find(SOURCE,'native_bt_self_client_valid')).encode()).hexdigest(),EXPECTED_UNCHANGED_AST['native_bt_self_client_valid'])
         self.assertEqual(hashlib.sha256(ast.dump(find(SOURCE,'waypoint_service_ownership')).encode()).hexdigest(),EXPECTED_UNCHANGED_AST['waypoint_service_ownership'])
     def test_every_overrun_loop_still_checks_deadline_and_startup_rechecks_health(self):

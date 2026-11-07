@@ -137,8 +137,10 @@ class ReceiverCaptureTests(unittest.TestCase):
                        finite_velocity=contract.finite_velocity, strict_stopped=contract.strict_stopped,
                        ownership_metadata_lease_deviation=contract.ownership_metadata_lease_deviation,
                        validate_ownership=contract.validate_ownership, waypoint_binding=contract.waypoint_binding)
+        namespace.update({name:getattr(contract,name) for name in ['simulation_scan_latency_profile', 'validate_simulation_scan_latency_profile', 'operational_scan_age_issues', 'strict_simulation_scan_deviations', 'producer_scan_signed_age_bounds']})
         execution=extracted(CODE/'waypoint_batch.py','execution_ready', namespace, 'WaypointPilot')
-        pilot=SimpleNamespace(check_interruption=lambda:None,
+        pilot=SimpleNamespace(simulation_scan_max_age_sec=.3,simulation_scan_sequence_fault=None,
+            check_interruption=lambda:None,
             input_ready=lambda **kw:(True,[],snapshot), args=SimpleNamespace(scan_aging_confirm_sec=0.,execute=True,ready=self.path,variant='official'),
             runtime_binding=None,native_binding=None,owned_identity=None,goal_sent_ns=None,
             ownership_metadata_reported_check_ns=set(), first_ready_read_failure=None,

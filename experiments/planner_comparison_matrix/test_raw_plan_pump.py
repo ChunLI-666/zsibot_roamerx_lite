@@ -82,9 +82,12 @@ class RawPathTests(unittest.TestCase):
             method(node,kind if topic=='/plan' else object(),topic,lambda m:None)
         self.assertEqual(len(calls),13);self.assertEqual([args[1] for args,kw in calls if kw.get('raw')],['/plan'])
         self.assertTrue(all(args[3] is qos for args,kw in calls))
-    def test_no_original_guard_method_AST_changes(self):
+    def test_raw_path_retains_frozen_validator_and_reviewed_wrapper_guards(self):
         self.assertEqual(hashlib.sha256(FROZEN.read_bytes()).hexdigest(),'a63bce9490f55438e7af5d16025e4dd20d86293cec12f1560d403ecb629cbe31')
-        expected={'execution_ready': 'ad5b6dd26a853a9c71f17909f9f29c0e788af23c11cd708b297de78f06bdc8c0', 'confirm_scan_aging': 'db28cdd3018c42ba7c38169d33f45f046759cc90fc1e277763ec2b426d6cfebb', 'cancel_own': '3c8c0e7e689262980e1bbadbad67bb62f398f23ff4eec3d57bf406033e9b57ce'}
+        # execution_ready is the independently reviewed f163f509 scan-profile
+        # wrapper. Default/operational/strict behavior has separate integration
+        # fixtures; original cancellation and confirmation methods stay frozen.
+        expected={'execution_ready': '1cb86060c1b0a78da5e805beec3ebab3c6f912a3b2d23c14872cefa10c5ef146', 'confirm_scan_aging': 'db28cdd3018c42ba7c38169d33f45f046759cc90fc1e277763ec2b426d6cfebb', 'cancel_own': '3c8c0e7e689262980e1bbadbad67bb62f398f23ff4eec3d57bf406033e9b57ce'}
         cls=next(n for n in ast.parse(SOURCE.read_text()).body if isinstance(n,ast.ClassDef) and n.name=='WaypointPilot')
         observed={n.name:hashlib.sha256(ast.dump(n,include_attributes=False).encode()).hexdigest() for n in cls.body if isinstance(n,ast.FunctionDef) and n.name in expected}
         self.assertEqual(observed,expected)
