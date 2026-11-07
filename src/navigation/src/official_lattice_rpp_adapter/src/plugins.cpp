@@ -18,6 +18,7 @@
 #include "official_lattice_rpp_adapter/feasible_path_handler.hpp"
 #include "official_lattice_rpp_adapter/planner_goal_contract.hpp"
 #include "official_lattice_rpp_adapter/terminal_goal_binding.hpp"
+#include "official_lattice_rpp_adapter/initial_goal_rotation.hpp"
 #include "robot_feasible_navigation/footprint_sweep.hpp"
 
 namespace official_lattice_rpp_adapter {
@@ -222,6 +223,9 @@ public:
     require(std::isfinite(remaining_length_)&&remaining_length_>0.&&remaining_length_<=0.2,
       "invalid remaining path completion tolerance");
     terminal_binding_=parameter(node,name+".terminal_goal_binding",false);
+    initial_goal_region_shortcut_=parameter(node,name+".initial_goal_region_shortcut",false);
+    require(!initial_goal_region_shortcut_||terminal_binding_,
+      "initial goal-region shortcut requires explicit original Pose-goal binding");
     terminal_resolution_=parameter(node,name+".terminal_global_resolution",0.01);
     terminal_extent_=parameter(node,name+".terminal_global_extent",20.);
     if (terminal_binding_) {
@@ -252,6 +256,7 @@ public:
   void setPlan(const nav_msgs::msg::Path & path) override {
     const auto plan_generation=completion_->bindPlan();has_plan_=false;
     terminal_armed_=terminal_cancelled_=false;binding_.reset();
+    initial_goal_rotation_pending_=initial_goal_region_shortcut_;
     require(!path.poses.empty()&&!path.header.frame_id.empty(),"empty path/frame");
     for (const auto & p:path.poses) {
       require(finite(p.pose)&&
@@ -296,8 +301,8 @@ public:
     handler_->setPlan(dense);rpp_.reset();has_plan_=true;
     if (binding_) {completion_->installBinding(binding_);}
   }
-  void reset() override {completion_->clearPlan();rpp_.reset();has_plan_=false;binding_.reset();terminal_armed_=false;}
-  bool cancel() override {completion_->invalidate();terminal_cancelled_=true;return rpp_.cancel();}
+  void reset() override {completion_->clearPlan();rpp_.reset();has_plan_=false;binding_.reset();terminal_armed_=false;initial_goal_rotation_pending_=false;}
+  bool cancel() override {completion_->invalidate();terminal_cancelled_=true;initial_goal_rotation_pending_=false;return rpp_.cancel();}
   void setSpeedLimit(const double & limit,const bool & percentage) override {rpp_.setSpeedLimit(limit,percentage);}
   geometry_msgs::msg::TwistStamped computeVelocityCommands(const geometry_msgs::msg::PoseStamped & pose,
     const geometry_msgs::msg::Twist & velocity, nav2_core::GoalChecker * checker) override {
@@ -353,6 +358,33 @@ public:
         path_pose.pose.position.y-binding_->original_goal.pose.position.y)<=tolerance.position.x;
       if (terminal_armed_&&!in_original_region) {
         throw nav2_core::NoValidControl("Actual body left original goal region during terminal rotation");
+      }
+    }
+    // One initial Pose-goal opportunity, never a later proximity-based jump over
+    // an active path constraint. The immutable binding and real-time checker
+    // still refer to the original goal. Every checkpoint is swept at the actual
+    // body origin in the local map, then retained in the path frame.
+    if (initial_goal_rotation_pending_) {
+      initial_goal_rotation_pending_=false;
+      if (terminal_binding_&&!terminal_cancelled_&&in_original_region) {
+        auto local_goal=pose.pose;
+        const double frame_yaw=yaw(pose.pose)-yaw(path_pose.pose);
+        const double dx=binding_->original_goal.pose.position.x-path_pose.pose.position.x;
+        const double dy=binding_->original_goal.pose.position.y-path_pose.pose.position.y;
+        local_goal.position.x+=std::cos(frame_yaw)*dx-std::sin(frame_yaw)*dy;
+        local_goal.position.y+=std::sin(frame_yaw)*dx+std::cos(frame_yaw)*dy;
+        const double target=yaw(pose.pose)+angle(yaw(path_pose.pose),yaw(binding_->original_goal.pose));
+        local_goal.orientation.x=local_goal.orientation.y=0.;
+        local_goal.orientation.z=std::sin(target/2.);local_goal.orientation.w=std::cos(target/2.);
+        auto headings=goal_region::initialGoalRotation(*map,fp,pose.pose,local_goal,tolerance.position.x);
+        if (headings) {
+          const double local_start=yaw(pose.pose),path_start=yaw(path_pose.pose);
+          for (auto & heading:*headings) {heading=path_start+angle(local_start,heading);}
+          terminal_headings_.reset(std::move(*headings));terminal_armed_=true;
+          if (auto node=node_.lock()) {
+            RCLCPP_INFO(node->get_logger(),"Initial Pose-goal region: checked shortest actual-origin rotation; ordered prefix not started");
+          }
+        }
       }
     }
     if (!terminal_armed_) {
@@ -451,6 +483,7 @@ private:
   std::shared_ptr<CompletionState> completion_;
   double remaining_length_=0.08;
   bool terminal_binding_=false,terminal_armed_=false,terminal_cancelled_=false;
+  bool initial_goal_region_shortcut_=false,initial_goal_rotation_pending_=false;
   double terminal_resolution_=0.01,terminal_extent_=20.;
   std::shared_ptr<const goal_region::Binding> binding_;
   goal_region::HeadingCursor terminal_headings_;

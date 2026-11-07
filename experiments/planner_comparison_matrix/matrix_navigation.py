@@ -235,7 +235,7 @@ def prepare(args):
         else:
             planner['lattice_filepath']=str(selected_install/'share/official_lattice_rpp_adapter/params/stop_turn_1cm_h16_small_radius.json')
             planner.update(terminal_goal_binding=True,terminal_global_resolution=.01)
-            controller['FollowPath'].update(terminal_goal_binding=True,terminal_global_resolution=.01,terminal_global_extent=20.)
+            controller['FollowPath'].update(terminal_goal_binding=True,terminal_global_resolution=.01,terminal_global_extent=20.,initial_goal_region_shortcut=True)
             manifest['terminal_goal_binding']=dict(enabled=True,global_resolution=.01,global_extent=20.,
                 semantics='Original path.back goal is retained for server acceptance; RPP executes checked prefix and ordered actual-origin terminal headings, never an artificial quantization tail.')
     # Freeze the actual primitive input instead of depending on subsequent canonical branch switches.

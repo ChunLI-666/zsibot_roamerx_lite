@@ -305,3 +305,28 @@ This changes only the recording supervisor's finite upper limit. The absolute
 CLOCK_BOOTTIME deadline, retained-pidfd ownership, stop order, default timeout,
 planning budget, sensor-age checks and measured stop requirements are unchanged.
 Inputs have their own deadline and must remain available throughout each case.
+
+### Initial Pose-goal region (official variant only)
+
+The official Matrix Pose-goal profile explicitly enables
+`FollowPath.initial_goal_region_shortcut`; the controller plugin defaults it to
+false. After fresh TF/odometry and current filled-body checks, the first control
+cycle of each plan may select a complete collision-checked shortest rotation at
+the actual body origin when the body already lies inside the original goal XY
+region. Dense signed heading checkpoints retain the selected half-turn direction.
+The same original goal, live geometry checks, original tolerances, ordered
+terminal cursor and command/body sweeps govern completion. The independent
+waypoint client still requires a measured and commanded stop.
+
+That one opportunity is consumed even if the body is outside the region or the
+rotation is blocked; normal ordered prefix execution then proceeds. Cancellation
+and reset clear the opportunity. This opt-in defines Pose-goal semantics: it may
+replace an entire unstarted prefix when its destination region is already
+occupied by the actual body. Use ordered-prefix semantics for tasks that require
+executing an arbitrary supplied FollowPath loop or every intermediate constraint.
+
+Recorded B3 N000 was already within 8.94 cm of its original goal (15 cm XY
+tolerance); its path required 3.424 radians of rotation for an original yaw
+difference of 0.141 radians. The new option targets that extra motion. Pure
+geometry/state tests and builds are reported separately from actual Matrix
+closed-loop acceptance, which still requires full-route recordings.
