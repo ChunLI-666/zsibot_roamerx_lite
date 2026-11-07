@@ -1,0 +1,19 @@
+{
+  "schema": "locnav.mapping.relaxed_survey.source23.v1",
+  "scope": "MAPPING_ACQUISITION_LATERAL_RECT_V5_ONLY",
+  "runtime_package_sha256": {
+    "lateral_capability.py": "e291c29d62f23f049f2e1aa1bd7180cabd087b903a3b4bd32055e7883c279f6a",
+    "full_scene_mapping_contract.py": "7d4a3b7cb3b3e18966226bc22da555b3c9126adc6692798a0b814ca37664e5b2",
+    "mapping_lateral_relay.py": "604a7b3882d353b0e9f4b75c4a0c1f41009382309c875286e4943e8f56885f5b",
+    "full_scene_mapping.py": "6167f292b5712ba0f1880069bfcda4864ee3a99c4d1e82e36667fcb0e4e50aa9",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "dependencies/waypoint_contract.py": "7258d6c9f5f56bf08930356187505628b446cfd74d02ec41b4c1851faacb4624",
+    "dependencies/map_coverage.py": "bd5f8b855e10d1cb6ad19955fc8b8c5283d31cb543e98dc988c78d9eb1e9f80b"
+  },
+  "source_review_sha256": "1a56d6ba638623ef95a916aa23a7b702ef11eb96ef46cd32df038eec0f5ae807",
+  "new_tests_PASS": 11,
+  "independent_critical_tests_PASS": 11,
+  "mapping_only_flag_default": false,
+  "user_authorization": "Mapping acquisition control limits are diagnostic; retain actual collision, owner, recording and original data",
+  "runtime_or_map_acceptance": false
+}
