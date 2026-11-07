@@ -365,11 +365,12 @@ class RecordingDeadlineTests(unittest.TestCase):
         self.assertFalse(self.observed(other_output, 'sigint', 'dummy_events.jsonl'))
 
     def test_runtime_validation_rejects_unbounded_or_over_budget_values(self):
-        for value in ['0', '-1', 'nan', 'inf', '3601']:
+        for value in ['0', '-1', 'nan', 'inf', '7201']:
             with self.subTest(value=value), self.assertRaises(argparse.ArgumentTypeError):
                 deadline.runtime_seconds(value)
         self.assertEqual(deadline.runtime_seconds('600'), 600.)
         self.assertEqual(deadline.runtime_seconds('3600'), 3600.)
+        self.assertEqual(deadline.runtime_seconds('7200'), 7200.)
         self.assertEqual(deadline.runtime_seconds('.25'), .25)
 
     def test_launcher_ast_preserves_close_order_and_marks_closed_before_audit(self):

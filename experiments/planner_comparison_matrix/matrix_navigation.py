@@ -711,7 +711,7 @@ def main():
     p.add_argument('--build-receipt');p.add_argument('--message-install');p.add_argument('--preflight-timeout',type=float,default=30.);p.add_argument('--run',action='store_true')
     p.add_argument('--lifecycle-install',help='Optional isolated lifecycle executable/core pair, shared by all variants')
     p.add_argument('--lifecycle-build-receipt',help='Exact lifecycle artifact receipt; required with --lifecycle-install')
-    p.add_argument('--max-runtime-sec',type=runtime_seconds,default=600.,help='Fixed deadline from launcher process start, in (0,3600] seconds; default 600')
+    p.add_argument('--max-runtime-sec',type=runtime_seconds,default=600.,help='Fixed deadline from launcher process start, in (0,7200] seconds; default 600')
     p.add_argument('--with-waypoints',action='store_true',help='Activate the native Jazzy FollowWaypoints server for an independently authorized ordered batch client')
     args=p.parse_args();out,install,manifest=prepare(args)
     if args.run:
