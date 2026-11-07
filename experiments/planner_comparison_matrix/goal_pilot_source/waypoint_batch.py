@@ -31,6 +31,8 @@ import message_info_contract
 from waypoint_contract import (ACTION, AsyncEvidenceWriter, OrderedVisits, OwnedGoalIdentity,
                                evidence_json, finite_velocity, mission_budget, strict_stopped, validate_ownership, validate_route, waypoint_binding)
 from waypoint_contract import validate_settle_budget
+from waypoint_contract import (scan_aging_confirmation_eligible, scan_aging_confirmation_outcome,
+                               scan_confirmation_payload_valid, validate_scan_aging_confirmation)
 
 
 HERE = Path(__file__).resolve().parent
@@ -59,6 +61,7 @@ def freeze_sources(output):
         timing_boundary='Native source pose sample stamps are retained. /plan receipt latency is transport/BT/observer latency, not planner computation time. Child NavigateToPose UUID is unavailable to this client.')
     manifest['nonfinite_evidence_encoding']='Writer/final serialization only: {nonfinite_float: NaN/+Infinity/-Infinity}; original caches, first-invalid references and decision values remain unchanged.'
     manifest['stop_cleanup']='Every possibly sent goal reaches finally own-UUID cancellation and a fresh finite measured/commanded stop observation, including response timeout, signal and exception. Default rclpy shutdown-on-SIGINT is disabled until cleanup completes.'
+    manifest['scan_aging_confirmation']='Default 0 preserves strict behavior. Opt-in <=.05s drains existing callbacks only after sole scan-header aging; a newer original stamp must restore every original guard. Every episode permanently fails strict timing acceptance; no header-age threshold changes.'
     (output/'instrumentation_manifest.json').write_text(json.dumps(manifest, indent=2)+'\n')
     return manifest
 
@@ -80,6 +83,7 @@ class WaypointPilot(frozen.Pilot):
         self.cancel_reason = None
         self.finalizing = False
         self.stop_evidence = None
+        self.scan_aging_episodes = []
         super().__init__(args, output)
         # Base opens this handle but all batch events use the asynchronous writer.
         self.events.close()
@@ -104,8 +108,11 @@ class WaypointPilot(frozen.Pilot):
 
     def scan_info_cb(self, msg, info):
         enter_unix_ns, enter_steady_ns = time.time_ns(), time.monotonic_ns()
-        remembered = self.remember('scan', dict(stamp_ns=frozen.stamp_ns(msg.header.stamp),
-                                   frame_id=msg.header.frame_id, ranges=len(msg.ranges)))
+        value = dict(stamp_ns=frozen.stamp_ns(msg.header.stamp),
+                     frame_id=msg.header.frame_id, ranges=len(msg.ranges))
+        if self.args.scan_aging_confirm_sec > 0.:
+            value['confirmation_payload_valid'] = scan_confirmation_payload_valid(msg)
+        remembered = self.remember('scan', value)
         remember_end = time.monotonic_ns()
         try:
             sample = dict(header_ns=remembered['stamp_ns'], frame_id=remembered['frame_id'], ranges=remembered['ranges'],
@@ -139,16 +146,23 @@ class WaypointPilot(frozen.Pilot):
             issues.append('pose:raw_position_or_quaternion_nonfinite_or_missing')
         if not finite_velocity(snapshot['last'].get('/cmd_vel_safe', {})):
             issues.append('/cmd_vel_safe:nonfinite_or_missing_velocity')
+        if (self.args.scan_aging_confirm_sec > 0.
+                and snapshot['last'].get('scan', {}).get('confirmation_payload_valid') is not True):
+            issues.append('scan:confirmation_payload_nonfinite_or_invalid_or_missing')
         if require_stopped:
             stopped, stop_issues = strict_stopped(snapshot)
             if not stopped:
                 issues.extend(stop_issues)
         if self.args.execute:
+            readiness_stage, ownership_checked_now_ns = 'read_ready', None
             try:
                 self.latest_ready, binding, self.latest_ready_sha = frozen.read_ready(self.args.ready, self.args.variant, self.runtime_binding)
+                readiness_stage = 'waypoint_binding'
                 native = waypoint_binding(self.latest_ready, self.native_binding)
-                validate_ownership(self.latest_ready.get('waypoint_ownership',{}),time.time_ns(),
+                readiness_stage, ownership_checked_now_ns = 'validate_ownership', time.time_ns()
+                validate_ownership(self.latest_ready.get('waypoint_ownership',{}),ownership_checked_now_ns,
                     None if self.owned_identity is None else self.owned_identity.value.hex(),self.goal_sent_ns)
+                readiness_stage = 'tolerances_and_source_binding'
                 tolerance = binding['goal_tolerances']
                 if tolerance != dict(xy=.15, yaw=.08, stateful=False):
                     raise ValueError('Reviewed batch requires .15m/.08rad nonstateful original-goal tolerances')
@@ -158,10 +172,73 @@ class WaypointPilot(frozen.Pilot):
                     raise ValueError('Loaded batch client sources differ from the launcher source binding')
             except Exception as exc:
                 issues.append('readiness:'+str(exc))
+                self.emit('readiness_validation_failed', stage=readiness_stage, message=str(exc),
+                    ownership_validation_unix_ns=ownership_checked_now_ns,
+                    latest_ready_sha256=getattr(self, 'latest_ready_sha', None),
+                    latest_ready_is_failing_read=readiness_stage != 'read_ready',
+                    latest_ready=getattr(self, 'latest_ready', None))
             if self.event_pub.get_subscription_count() == 0:
                 issues.append('goal_event_subscriber_disappeared')
         self.scan_timing_record_check(require_stopped, issues, snapshot, entered_unix_ns, entered_steady_ns)
         return not issues, issues, snapshot
+
+    def confirm_scan_aging(self, issues, snapshot, terminal):
+        """Drain callbacks for <=50ms; any recovered run remains strict-timing FAIL."""
+        seconds = self.args.scan_aging_confirm_sec
+        if (seconds == 0. or terminal.done() or self.cancel_requested
+                or not scan_aging_confirmation_eligible(issues, snapshot)):
+            return False, issues, snapshot
+        started_ns = self.scan_timing_latest_check['check_enter_steady_ns']
+        budget_ns = int(seconds*1e9)
+        original_stamp = snapshot['last']['scan']['stamp_ns']
+        episode = dict(index=len(self.scan_aging_episodes), original_stamp_ns=original_stamp,
+            started_steady_ns=started_ns, deadline_steady_ns=started_ns+budget_ns,
+            confirmation_budget_sec=seconds, original_issues=list(issues), original_snapshot=snapshot,
+            strict_timing_status='FAIL', strict_timing_accepted=False, outcome='pending')
+        self.scan_aging_episodes.append(episode)
+        self.invalidate_artifact(issues)
+        self.emit('performance_violation', violation='scan_header_age', **episode)
+        # Do not bridge an unhealthy interval into a continuous stopped visit.
+        self.observe_ordered(False, snapshot)
+        outcome = 'pending'
+        while rclpy.ok():
+            self.check_interruption()
+            now_ns = time.monotonic_ns()
+            elapsed = time.monotonic()-self.goal_sent_steady
+            if (terminal.done() or self.cancel_requested or self.ordered.violation or self.feedback_overflow
+                    or elapsed >= self.args.timeout
+                    or (self.args.cancel_after is not None and elapsed >= self.args.cancel_after)):
+                outcome = 'interrupted_by_existing_terminal_or_cancel_guard'
+                break
+            remaining_ns = started_ns+budget_ns-now_ns
+            if remaining_ns <= 0:
+                outcome = 'expired'
+                break
+            rclpy.spin_once(self, timeout_sec=min(.005, remaining_ns/1e9))
+            _, current_issues, current_snapshot = self.execution_ready()
+            checked_ns = time.monotonic_ns()
+            outcome = scan_aging_confirmation_outcome(current_issues, current_snapshot, original_stamp,
+                                                       checked_ns-started_ns, budget_ns)
+            self.emit('scan_aging_confirmation_check', episode_index=episode['index'], outcome=outcome,
+                checked_steady_ns=checked_ns, elapsed_ns=checked_ns-started_ns,
+                issues=list(current_issues), snapshot=current_snapshot)
+            if outcome == 'recovered':
+                episode.update(outcome=outcome, completed_steady_ns=checked_ns,
+                    recovered_stamp_ns=current_snapshot['last']['scan']['stamp_ns'],
+                    recovery_snapshot=current_snapshot)
+                self.emit('scan_aging_confirmation_finished', **episode)
+                return True, current_issues, current_snapshot
+            if outcome != 'pending':
+                issues = list(current_issues) or ['scan:aging_confirmation_not_recovered']
+                snapshot = current_snapshot
+                break
+            issues, snapshot = list(current_issues), current_snapshot
+        if outcome == 'pending':
+            outcome = 'ros_context_stopped'
+        episode.update(outcome=outcome, completed_steady_ns=time.monotonic_ns(),
+                       final_issues=list(issues), final_snapshot=snapshot)
+        self.emit('scan_aging_confirmation_finished', **episode)
+        return False, issues, snapshot
 
     def check_interruption(self):
         if self.args.stop_signals and not self.finalizing:
@@ -350,6 +427,9 @@ class WaypointPilot(frozen.Pilot):
             rclpy.spin_once(self, timeout_sec=.02)
             elapsed = time.monotonic()-self.goal_sent_steady
             valid, issues, snapshot = self.execution_ready()
+            if not valid and self.args.scan_aging_confirm_sec > 0.:
+                valid, issues, snapshot = self.confirm_scan_aging(issues, snapshot, terminal)
+                elapsed = time.monotonic()-self.goal_sent_steady
             if not valid:
                 self.invalidate_artifact(issues)
             self.observe_ordered(valid, snapshot)
@@ -443,6 +523,8 @@ def main():
     parser.add_argument('--cancel-after', type=float)
     parser.add_argument('--odom-topic', default='/odom/current_pose')
     parser.add_argument('--scan-topic', default='/laser_scan')
+    parser.add_argument('--scan-aging-confirm-sec', type=float, default=0.,
+                        help='Opt-in existing-callback confirmation in [0,.05]s; every episode fails strict timing')
     parser.add_argument('--camera-topic', default='/camera/front/image/compressed')
     parser.add_argument('--camera-info-topic', default='/camera/front/camera_info')
     args = parser.parse_args()
@@ -457,6 +539,7 @@ def main():
         args.timeout = float(document['mission_budget_sec'])
         frozen.validate_numeric_arguments(args)
         validate_settle_budget(args.settle_seconds)
+        validate_scan_aging_confirmation(args.scan_aging_confirm_sec)
         if args.preflight_seconds > 40. or args.stable_preflight_seconds < 10. or args.timeout <= 0 or args.timeout > 3600.:
             raise ValueError('Batch requires >=10s continuous preflight within <=40s, and timeout in (0,3600]')
         if args.execute and args.ready is None:
@@ -500,6 +583,10 @@ def main():
                 result['stable_preflight'] = node.stable_preflight_evidence
             result['ordered'] = node.ordered.summary()
             result['artifact_invalid_reasons'] = node.artifact_invalid_reasons
+            result['scan_aging_confirmation'] = dict(configured_sec=args.scan_aging_confirm_sec,
+                episodes=node.scan_aging_episodes, strict_timing_status='FAIL' if node.scan_aging_episodes
+                else 'NO_CONFIRMATION_VIOLATION_RECORDED',
+                strict_timing_accepted=False if node.scan_aging_episodes else None)
             try:
                 result['evidence_writer'] = node.finish_evidence()
             except BaseException as exc:

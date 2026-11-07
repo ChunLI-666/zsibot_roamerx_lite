@@ -9,6 +9,56 @@ import time
 
 
 ACTION = '/follow_waypoints'
+
+
+def validate_scan_aging_confirmation(seconds):
+    """Opt-in callback confirmation, never a replacement scan-age threshold."""
+    if (isinstance(seconds, bool) or not isinstance(seconds, (int, float))
+            or not math.isfinite(seconds) or not 0. <= seconds <= .05):
+        raise ValueError('--scan-aging-confirm-sec must be finite in [0,.05]; 0 retains strict cancellation')
+
+
+def scan_confirmation_payload_valid(message):
+    """Additional opt-in evidence; +inf is a normal no-return LaserScan bin."""
+    scalars = [message.angle_min, message.angle_max, message.angle_increment,
+               message.time_increment, message.scan_time, message.range_min, message.range_max]
+    return (all(math.isfinite(value) for value in scalars)
+            and message.angle_increment > 0. and message.angle_max >= message.angle_min
+            and message.time_increment >= 0. and message.scan_time >= 0.
+            and 0. <= message.range_min < message.range_max
+            and bool(message.ranges)
+            and all(math.isfinite(value) or value == math.inf for value in message.ranges))
+
+
+def scan_aging_confirmation_eligible(issues, snapshot):
+    """Only one old-header issue may wait; every other original guard stays fatal."""
+    if set(issues) != {'scan:invalid_header_age'}:
+        return False
+    scan = snapshot.get('last', {}).get('scan', {})
+    age, received = scan.get('header_age_s'), scan.get('receive_age_s')
+    return (scan.get('frame_id') == 'base_link' and type(scan.get('stamp_ns')) is int
+            and scan['stamp_ns'] > 0 and scan.get('ranges', 0) > 0
+            and scan.get('confirmation_payload_valid') is True
+            and isinstance(age, (int, float)) and math.isfinite(age) and age > .3
+            and isinstance(received, (int, float)) and math.isfinite(received) and 0. <= received <= .3)
+
+
+def scan_aging_confirmation_outcome(issues, snapshot, original_stamp_ns, elapsed_ns, budget_ns):
+    """Use the original header; a late callback or a nonadvancing stamp cannot recover."""
+    if not 0 <= elapsed_ns <= budget_ns:
+        return 'expired'
+    scan = snapshot.get('last', {}).get('scan', {})
+    if issues:
+        return 'pending' if scan_aging_confirmation_eligible(issues, snapshot) else 'fatal'
+    age, received = scan.get('header_age_s'), scan.get('receive_age_s')
+    fresh = (type(scan.get('stamp_ns')) is int and scan['stamp_ns'] > original_stamp_ns
+             and scan.get('frame_id') == 'base_link' and scan.get('ranges', 0) > 0
+             and scan.get('confirmation_payload_valid') is True
+             and isinstance(age, (int, float)) and math.isfinite(age) and -.05 <= age <= .3
+             and isinstance(received, (int, float)) and math.isfinite(received) and 0. <= received <= .3)
+    return 'recovered' if fresh else 'fatal'
+
+
 WAYPOINT_PARAMETERS = {
     'use_sim_time': False,
     'stop_on_failure': True,

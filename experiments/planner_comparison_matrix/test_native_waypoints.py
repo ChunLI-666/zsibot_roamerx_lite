@@ -24,7 +24,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE/'goal_pilot_source'))
 from waypoint_contract import (AsyncEvidenceWriter, OrderedVisits, OwnedGoalIdentity, WAYPOINT_PARAMETERS,
                                evidence_json, exclusive_graph, finite_velocity, mission_budget, strict_stopped,
-                               validate_ownership, validate_route, validate_settle_budget, waypoint_binding)
+                               validate_ownership, validate_route, validate_settle_budget, validate_scan_aging_confirmation, waypoint_binding)
 
 
 def route_document():
@@ -207,7 +207,7 @@ class RawPoseTests(unittest.TestCase):
                 self.assertEqual(value['raw_pose_values_finite'], expected)
                 checked, check_namespace = load_method('execution_ready')
                 node = SimpleNamespace(check_interruption=lambda: None,
-                    input_ready=lambda **kwargs: (True, [], dict(last=dict(pose=value,**{'/cmd_vel_safe':dict(vx=0.,vy=0.,wz=0.)}))), args=SimpleNamespace(execute=False),
+                    input_ready=lambda **kwargs: (True, [], dict(last=dict(pose=value,**{'/cmd_vel_safe':dict(vx=0.,vy=0.,wz=0.)}))), args=SimpleNamespace(execute=False, scan_aging_confirm_sec=0.),
                     scan_timing_record_check=lambda *args: None)
                 valid, issues, snapshot = checked(node)
                 self.assertEqual(valid, expected)
@@ -224,7 +224,7 @@ class RawPoseTests(unittest.TestCase):
             sample['last']['/cmd_vel_safe'].update(velocity)
             if 'wz' not in velocity:sample['last']['/cmd_vel_safe'].pop('wz')
             node=SimpleNamespace(check_interruption=lambda:None,input_ready=lambda **kwargs:(True,[],sample),
-                                 args=SimpleNamespace(execute=False),scan_timing_record_check=lambda *args:None)
+                                 args=SimpleNamespace(execute=False, scan_aging_confirm_sec=0.),scan_timing_record_check=lambda *args:None)
             self.assertEqual(checked(node,require_stopped=False)[0],expected)
 
 
@@ -342,6 +342,7 @@ class ExitFlowTests(unittest.TestCase):
                 frozen=SimpleNamespace(validate_numeric_arguments=lambda args: None,
                                        stamp_ns=lambda stamp: stamp.sec*1_000_000_000+stamp.nanosec,error=pure['error']),
                 validate_route=validate_route, validate_settle_budget=validate_settle_budget,
+                validate_scan_aging_confirmation=validate_scan_aging_confirmation,
                 evidence_json=evidence_json, mission_budget=mission_budget,
                 strict_stopped=strict_stopped,finite_velocity=finite_velocity, OwnedGoalIdentity=OwnedGoalIdentity, ACTION='/follow_waypoints',
                 freeze_sources=lambda destination: dict(sources_sha256={'waypoint_batch.py':'a'*64}),
@@ -382,6 +383,7 @@ class ExitFlowTests(unittest.TestCase):
                     self.cancel_requested = self.finalizing = False
                     self.cancel_reason = self.stop_evidence = None
                     self.artifact_invalid_reasons = []
+                    self.scan_aging_episodes = []
                     self.scan_timing_capture_errors = 0
                     self.ordered = OrderedVisits(route)
                     self.first_plans={}
