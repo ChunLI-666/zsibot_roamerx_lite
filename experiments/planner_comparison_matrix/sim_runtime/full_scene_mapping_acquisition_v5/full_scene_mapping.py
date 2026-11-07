@@ -32,6 +32,11 @@ REQUIRED_RETIRED_ROLES={'old_sim_command_adapter','old_sim_udp_relay','old_navig
 RAW_RECORD_TOPICS={'/front_lidar','/front_lidar/imu','/odom','/front_camera/image/compressed',
   '/livox/lidar','/livox/imu','/laser_scan','/camera/front/image/compressed','/camera/front/camera_info','/tf_static','/clock'}
 GUARDED_SOURCES={'/odom','/front_lidar','/laser_scan','/front_lidar/imu','/livox/imu'}
+MAPPING_CONTROL_PERIOD=.2
+MAPPING_INPUT_AGE=.3
+MAPPING_SWEEP_COMPUTE_MARGIN=.2
+MAPPING_AUDIT_MAX_AGE=1.
+MAPPING_GRAPH_REFRESH=1.
 
 
 def source_files():
@@ -441,7 +446,7 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
         def diagnostic(reason,**fields):
             if time.monotonic()-diagnostic_times.get(reason,-math.inf)>=1.:
                 diagnostic_times[reason]=time.monotonic();emit('mapping_diagnostic',reason=reason,**fields)
-        def health():
+        def health(skip_graph_refresh=False):
             nonlocal cloud_cache,clock_pair
             callbacks.spin()
             if stopped:raise InterruptedError('mapping stop requested')
@@ -451,7 +456,7 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
             evidence=writer.summary()
             if evidence['dropped'] or evidence['worker_error'] is not None:raise contract.Hold('bounded writer evidence gap')
             if audit['first_violation'] is not None:raise contract.Hold('velocity-owner audit violated: '+str(audit['reason']))
-            if not audit['valid'] or steady-audit['checked_steady']>.3:
+            if not audit['valid'] or steady-audit['checked_steady']>(MAPPING_AUDIT_MAX_AGE if mapping_ready else .3):
                 if mapping_ready:raise contract.InputUnavailable('velocity-owner audit refresh pending')
                 raise contract.Hold('velocity-owner audit missing/stale/violated: '+str(audit['reason']))
             if imu_gate_fault is not None:
@@ -460,7 +465,8 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
             if not raw_imu_gate.fresh(now_ns,round(steady*1e9)):
                 if mapping_ready:diagnostic('raw IMU consumer progress unavailable')
                 else:raise contract.Hold('no fresh accepted original IMU progress')
-            truth=latest.get('truth');contract.fresh(truth,now_ns,steady,limit=contract.truth_age_limit(model))
+            if mapping_ready and contract.process_identity(recorded['pid'])!=recorded:raise contract.Hold('recorder identity changed')
+            truth=latest.get('truth');contract.fresh(truth,now_ns,steady,limit=MAPPING_INPUT_AGE if mapping_ready else contract.truth_age_limit(model))
             if truth['frame_id']!=contract.TRUTH_FRAME or truth['child_frame_id']!=contract.TRUTH_CHILD or not contract.finite([*truth['xyz'],*truth['twist']]):
                 if mapping_ready:raise contract.InputUnavailable('invalid original GT frames/values')
                 raise contract.Hold('invalid original GT frames/values')
@@ -502,6 +508,8 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
                 break
             if cloud_cache is None:raise contract.InputUnavailable('no fresh original-stamp raw/derived lidar+GT association')
             contract.fresh(dict(stamp_ns=cloud_cache['stamp_ns'],received_steady=cloud_cache['raw_received_steady']),now_ns,steady)
+            if mapping_ready and (skip_graph_refresh or steady-getattr(relay,'mapping_graph_checked_steady',-math.inf)<MAPPING_GRAPH_REFRESH):
+                return truth,yaw,cloud_cache,(now_ns-truth['stamp_ns'])/1e9
             graph=dict(source_publishers=[],guarded_nodes=[],recorder_subscriptions=[],unresolved_publishers=[])
             missing=[]
             def graph_hold(reason,missing_only=False,unresolved_identity=False):
@@ -558,6 +566,11 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
                 elif count!=1:graph_hold('duplicate raw recorder subscription: '+topic)
             if graph['unresolved_publishers']:graph_hold('startup publisher identity unresolved',unresolved_identity=True)
             if missing:graph_hold('startup graph discovery incomplete',missing_only=True)
+            if mapping_ready:
+                relay.mapping_graph_checked_steady=time.monotonic()
+                # DDS graph queries are not part of the pose/geometry critical path.
+                # Drain new callbacks and re-read original GT/LiDAR after them.
+                return health(skip_graph_refresh=True)
             return truth,yaw,cloud_cache,(now_ns-truth['stamp_ns'])/1e9
         def tick(vx=0.,wz=0.,bridge=None,lateral_raw=0.,terminal_deadline_steady=None,fine_phase=False):
             nonlocal last_send,last_request,active_lateral
@@ -570,16 +583,19 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
                 contract.primitive_packet(vx,wz,time.time_ns(),lateral_raw,fine_forward_profile=fine_profile,fine_phase=True)
             else:contract.primitive_packet(vx,wz,time.time_ns(),lateral_raw)
             last_request=dict(vx=vx,wz=wz,lateral_raw=lateral_raw,requested_unix_ns=time.time_ns())
-            until=time.monotonic()+contract.PERIOD
+            until=time.monotonic()+(MAPPING_CONTROL_PERIOD if mapping_ready else contract.PERIOD)
             while time.monotonic()<until:callbacks.spin()
             if stopped:raise InterruptedError('mapping stop requested')
             if qualification is not None:
                 reset=qualification.reanchor_zero(last_send,(vx,wz,lateral_raw),relay.command)
                 if reset is not None:
                     emit('prearm_zero_reanchor',snapshot=reset);last_send=None
-            if last_send is not None and time.monotonic()-last_send>contract.CONTROL_RENEWAL_LIMIT:raise (contract.InputUnavailable if mapping_ready else contract.Hold)('control-loop gap; no stale positive command is renewed')
+            if not mapping_ready and last_send is not None and time.monotonic()-last_send>contract.CONTROL_RENEWAL_LIMIT:raise contract.Hold('control-loop gap; no stale positive command is renewed')
             guard_started=time.monotonic();truth,yaw,cloud,age=health()
-            age_cap=contract.truth_age_limit(model);age_upper=contract.command_age_upper(age,age_cap)
+            if mapping_ready:
+                guard_started=time.monotonic();age_cap=MAPPING_INPUT_AGE
+                age_upper=min(age_cap,max(0.,age)+MAPPING_SWEEP_COMPUTE_MARGIN)
+            else:age_cap=contract.truth_age_limit(model);age_upper=contract.command_age_upper(age,age_cap)
             if mapping_ready:
                 active_lateral=None;lateral_context=None;checked_bridge=None;policy=None
                 kind='lateral' if lateral_raw else 'forward' if vx else 'turn' if wz else 'zero'
@@ -618,7 +634,11 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
                 if terminal_deadline_steady is not None and steady>=terminal_deadline_steady:raise contract.Hold('forward terminal deadline reached before packet send')
                 contract.check_clock(clock_pair,issued_ns,steady)
                 final_facts['issued_steady_sec']=steady
-                final_facts['pose']=contract.command_time_pose_guard(truth,issued_ns,steady,guard_started,age_upper,age_cap)
+                if mapping_ready:
+                    final_facts['pose']=contract.fresh(truth,issued_ns,steady,limit=age_cap)
+                    if final_facts['pose']['header_age_s']>age_upper+1e-9:raise contract.InputUnavailable('mapping command pose age exceeds expanded sweep')
+                    final_facts['pose'].update(guard_elapsed_s=steady-guard_started,swept_pose_age_upper_s=age_upper)
+                else:final_facts['pose']=contract.command_time_pose_guard(truth,issued_ns,steady,guard_started,age_upper,age_cap)
                 if checked_bridge is not None:
                     start,target,leg_policy=checked_bridge
                     check=contract.lateral_leg_state if leg_policy.get('kind')=='lateral_fixed_body_heading' else contract.straight_leg_state
@@ -630,12 +650,12 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
                 guarded_inputs={key:value for key,value in latest.items() if not mapping_ready or key in ('truth','raw_lidar','scan')}
                 final_facts['inputs']={key:contract.fresh(value,issued_ns,steady,limit=age_cap if key=='truth' else contract.MAX_INPUT_AGE) for key,value in guarded_inputs.items()}
                 final_facts['cloud']=contract.fresh(dict(stamp_ns=cloud['stamp_ns'],received_steady=cloud['raw_received_steady']),issued_ns,steady)
-                if last_send is not None and steady-last_send>contract.CONTROL_RENEWAL_LIMIT:raise (contract.InputUnavailable if mapping_ready else contract.Hold)('guard computation exceeded command renewal bound')
+                if not mapping_ready and last_send is not None and steady-last_send>contract.CONTROL_RENEWAL_LIMIT:raise contract.Hold('guard computation exceeded command renewal bound')
                 if audit['first_violation'] is not None:raise contract.Hold('owner audit violated during guard computation')
-                if not audit['valid'] or steady-audit['checked_steady']>.3:raise (contract.InputUnavailable if mapping_ready else contract.Hold)('owner audit expired during guard computation')
+                if not audit['valid'] or steady-audit['checked_steady']>(MAPPING_AUDIT_MAX_AGE if mapping_ready else .3):raise (contract.InputUnavailable if mapping_ready else contract.Hold)('owner audit expired during guard computation')
             packet=(relay.send(vx,wz,preflight=final_guard,lateral_raw=lateral_raw,fine_phase=True) if fine_phase is True else relay.send(vx,wz,preflight=final_guard,lateral_raw=lateral_raw));last_send=final_facts['issued_steady_sec']
             if lateral_raw:active_lateral=lateral_context
-            if time.monotonic()-last_send>contract.CONTROL_RENEWAL_LIMIT:raise (contract.InputUnavailable if mapping_ready else contract.Hold)('command write/dispatch exceeded renewal bound; issued anchor retained')
+            if not mapping_ready and time.monotonic()-last_send>contract.CONTROL_RENEWAL_LIMIT:raise contract.Hold('command write/dispatch exceeded renewal bound; issued anchor retained')
             accepted=writer.submit('state_trace',dict(unix_ns=time.time_ns(),scope=contract.SCOPE,truth=truth,lidar_stamp_ns=cloud['stamp_ns'],
               lidar_gt_association=cloud['pose'],command=packet,policy_vx=vx,policy_wz=wz,policy_lateral_raw=lateral_raw,primitive=kind,
               input_qualification_epoch=getattr(qualification,'epoch',None),input_qualification_armed=getattr(qualification,'armed',None),
@@ -711,7 +731,7 @@ def execute(args,route,oracle_manifest,release,output,lateral_admission):
             emit('mapping_relaxed_survey_started',purpose='mapping_only_relaxed_survey',formal_navigation_acceptance=False)
             def mapping_zero(reason):
                 nonlocal last_send,active_lateral
-                packet=relay.send();last_send=time.monotonic();active_lateral=None
+                packet=relay.send();last_send=None;active_lateral=None
                 diagnostic('mapping_zero: '+reason,packet=packet)
             truth,yaw,survey=mapping_survey(route,health,tick,mapping_zero,emit)
             result=dict(classification='controlled_static_sim_raw_acquisition_completed',points=len(route['waypoints']),
