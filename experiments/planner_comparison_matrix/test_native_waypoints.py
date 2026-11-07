@@ -327,7 +327,7 @@ class ExitFlowTests(unittest.TestCase):
             main = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'main')
             cls = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'WaypointPilot')
             methods = [node for node in cls.body if isinstance(node, ast.FunctionDef) and node.name in
-                       ['run_batch', 'finalize_own_goal', 'cancel_own', 'record_stop', 'check_interruption','execution_ready']]
+                       ['run_batch', 'finalize_own_goal', 'cancel_own', 'record_stop', 'check_interruption','execution_ready','pump_runtime_inputs']]
             future = SimpleNamespace(done=lambda: True,
                                      result=lambda: SimpleNamespace(return_code=0, goals_canceling=[]))
             fake_ros = SimpleNamespace(ok=lambda: True,
@@ -391,12 +391,13 @@ class ExitFlowTests(unittest.TestCase):
                     self.ordered = OrderedVisits(route)
                     self.first_plans={}
                     self.feedback_overflow=0
+                    self.counts={};self.runtime_last_pump=None;self.runtime_last_ready_check_ns=None
                     self.event_pub = SimpleNamespace(get_subscription_count=lambda: 1)
                     self.latest_ready = dict(mission_deadline=dict(deadline_boottime_sec=time.clock_gettime(time.CLOCK_BOOTTIME)+1000.,
                         launcher_boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip()))
                     self.latest_ready_sha = 'b'*64
                     self.native_feedback = lambda message: None
-                    for name in ['finalize_own_goal', 'cancel_own', 'record_stop', 'check_interruption']:
+                    for name in ['finalize_own_goal', 'cancel_own', 'record_stop', 'check_interruption','pump_runtime_inputs']:
                         setattr(self, name, MethodType(namespace[name], self))
                 def emit(self, kind, **fields):
                     events.append((kind, fields))

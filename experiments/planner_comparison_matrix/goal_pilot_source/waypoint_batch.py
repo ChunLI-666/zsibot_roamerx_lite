@@ -14,6 +14,7 @@ import math
 import os
 from pathlib import Path
 import signal
+import struct
 import time
 import uuid
 
@@ -61,11 +62,56 @@ def freeze_sources(output):
         timing_boundary='Native source pose sample stamps are retained. /plan receipt latency is transport/BT/observer latency, not planner computation time. Child NavigateToPose UUID is unavailable to this client.')
     manifest['nonfinite_evidence_encoding']='Writer/final serialization only: {nonfinite_float: NaN/+Infinity/-Infinity}; original caches, first-invalid references and decision values remain unchanged.'
     manifest['ownership_metadata_lease']='NavigateToPose ownership metadata uses the same 500ms old/50ms future lease as READY. Each checked_unix_ns exceeding the historical 300ms metadata boundary is recorded once with original validation time and READY; this is separate metadata latency evidence and never changes physical-input classification.'
+    manifest['raw_plan_observer']='Only inherited /plan subscription uses raw=True with identical Path type/QoS. Plain CDR1 endian-aware observer scans headers/count/last pose only; full original Path remains recorded by MCAP. Decode failures are explicit observer gaps, never fresh input replacements.'
+    manifest['runtime_callback_pump']='Runtime batches callbacks within 20ms before unchanged guards; interruption/terminal/own-cancel/existing deadlines checked per callback. Single-callback overruns, original topic-count deltas and check intervals are recorded; no 300ms/500ms/QoS changes.'
     manifest['ready_read_failure_capture']='Unchanged a63b validator receives one path-like single-file read with fd stat and wall/steady bounds. Only the first read_ready exception retains exact raw bytes in memory, persisted after own-goal cleanup; internal validator now remains unknown. Last-passing READY cache is labelled separately.'
     manifest['stop_cleanup']='Every possibly sent goal reaches finally own-UUID cancellation and a fresh finite measured/commanded stop observation, including response timeout, signal and exception. Default rclpy shutdown-on-SIGINT is disabled until cleanup completes.'
     manifest['scan_aging_confirmation']='Default 0 preserves strict behavior. Opt-in <=.05s drains existing callbacks only after sole scan-header aging; a newer original stamp must restore every original guard. Every episode permanently fails strict timing acceptance; no header-age threshold changes.'
     (output/'instrumentation_manifest.json').write_text(json.dumps(manifest, indent=2)+'\n')
     return manifest
+
+
+def path_cdr_endpoint(raw):
+    """Read only Path header/count/last pose from plain CDR1 (both endians).
+
+    Alignment is relative to the four-byte encapsulation header. PoseStamped
+    frame strings may have different byte lengths; every skipped body is bounded.
+    This is observation only; the recorder retains the complete original Path.
+    """
+    data=memoryview(raw)
+    if len(data)<4:raise ValueError('Truncated Path CDR encapsulation')
+    representation=bytes(data[:2])
+    if representation not in (b'\x00\x00',b'\x00\x01'):
+        raise ValueError('Unsupported Path CDR encapsulation')
+    endian='<' if representation==b'\x00\x01' else '>'
+    offset=4
+    def align(size):
+        nonlocal offset
+        offset+=(-(offset-4))%size
+        if offset>len(data):raise ValueError('Truncated Path CDR alignment')
+    def header(observe=False):
+        nonlocal offset
+        align(4)
+        if offset+12>len(data):raise ValueError('Truncated Path CDR header')
+        sec,nanosec,size=struct.unpack_from(endian+'iII',data,offset);offset+=12
+        if size<1 or offset+size>len(data) or data[offset+size-1]!=0:
+            raise ValueError('Invalid Path CDR frame string')
+        frame=bytes(data[offset:offset+size-1]).decode('utf-8') if observe else None
+        offset+=size
+        return (frame,sec*1_000_000_000+nanosec) if observe else None
+    frame,stamp=header(True);align(4)
+    if offset+4>len(data):raise ValueError('Truncated Path CDR sequence count')
+    count=struct.unpack_from(endian+'I',data,offset)[0];offset+=4
+    if count>(len(data)-offset)//69:raise ValueError('Path CDR pose count exceeds available bytes')
+    endpoint=None
+    for index in range(count):
+        header();align(8)
+        if offset+56>len(data):raise ValueError('Truncated Path CDR pose')
+        if index+1==count:
+            x,y,z,qx,qy,qz,qw=struct.unpack_from(endian+'7d',data,offset)
+            endpoint=dict(x=x,y=y,yaw=math.atan2(2*(qw*qz+qx*qy),1-2*(qy*qy+qz*qz)))
+        offset+=56
+    return dict(frame_id=frame,stamp_ns=stamp,poses=count,endpoint=endpoint)
 
 
 class WaypointPilot(frozen.Pilot):
@@ -88,10 +134,19 @@ class WaypointPilot(frozen.Pilot):
         self.scan_aging_episodes = []
         self.ownership_metadata_reported_check_ns = set()
         self.first_ready_read_failure = None
+        self.plan_raw_parse_errors=0;self.plan_raw_last_error=None
+        self.runtime_last_pump=None;self.runtime_last_ready_check_ns=None
         super().__init__(args, output)
         # Base opens this handle but all batch events use the asynchronous writer.
         self.events.close()
         self.writer = AsyncEvidenceWriter(output, publish_event=self.publish_serialized_event)
+
+    def sub(self, cls, topic, callback):
+        if cls is frozen.NavPath and topic=='/plan':
+            self.subscriptions_kept.append(self.create_subscription(
+                cls,topic,callback,frozen.qos_profile_sensor_data,raw=True))
+        else:
+            frozen.Pilot.sub(self,cls,topic,callback)
 
     def publish_serialized_event(self, line):
         if self.event_pub is not None:
@@ -318,15 +373,25 @@ class WaypointPilot(frozen.Pilot):
 
     def plan_cb(self, message):
         self.counts['plan'] += 1
-        if not self.args.execute or self.goal_sent_ns is None or not message.poses:
+        if not self.args.execute or self.goal_sent_ns is None:return
+        entered=time.monotonic_ns();cpu=time.thread_time_ns()
+        try:observed=path_cdr_endpoint(message)
+        except Exception as exc:
+            self.plan_raw_parse_errors+=1
+            self.plan_raw_last_error=dict(type=type(exc).__name__,message=str(exc),cdr_bytes=len(message),
+                cdr_sha256=hashlib.sha256(message).hexdigest(),callback_wall_ns=time.monotonic_ns()-entered,
+                callback_thread_cpu_ns=time.thread_time_ns()-cpu)
+            self.emit('plan_observation_parse_error',**self.plan_raw_last_error)
             return
-        pose = message.poses[-1].pose
-        endpoint = dict(x=pose.position.x, y=pose.position.y, yaw=frozen.yaw(pose.orientation))
-        matches = [entry['index'] for entry in self.route if message.header.frame_id == 'map'
+        if not observed['poses']:return
+        endpoint=observed['endpoint']
+        matches = [entry['index'] for entry in self.route if observed['frame_id'] == 'map'
                    and math.hypot(endpoint['x']-entry['pose'][0], endpoint['y']-entry['pose'][1]) <= .02
                    and abs(math.atan2(math.sin(endpoint['yaw']-entry['pose'][2]), math.cos(endpoint['yaw']-entry['pose'][2]))) <= .10]
         received = time.monotonic_ns()
-        item = dict(frame_id=message.header.frame_id, stamp_ns=frozen.stamp_ns(message.header.stamp), poses=len(message.poses),
+        item = dict(frame_id=observed['frame_id'], stamp_ns=observed['stamp_ns'], poses=observed['poses'],
+                    raw_cdr_bytes=len(message),observer_parse_wall_ns=received-entered,
+                    observer_parse_thread_cpu_ns=time.thread_time_ns()-cpu,
                     endpoint=endpoint, matching_original_indices=matches, parent_action_uuid=self.owned_identity.value.hex(),
                     child_action_uuid=None, native_feedback_index=self.ordered.active, received_steady_ns=received,
                     association='Endpoint/time inference only; /plan contains no Action UUID or route index.')
@@ -382,6 +447,43 @@ class WaypointPilot(frozen.Pilot):
         except Exception as exc:
             self.emit('cancel_dispatch_error',action_uuid=self.owned_identity.value.hex(),type=type(exc).__name__,message=str(exc))
         return self.cancel_future
+
+    def pump_runtime_inputs(self, terminal):
+        """Bound callback work before the unchanged original guards, not their ages.
+
+        spin_once does not report whether a callback ran. spin_calls and original
+        per-topic counter deltas are distinct evidence, not invented callback counts.
+        A single callback can exceed the window; that overrun is recorded explicitly.
+        """
+        started=time.monotonic_ns();cpu=time.thread_time_ns();before=dict(self.counts)
+        calls=0;reason='window_elapsed';budget_ns=20_000_000
+        try:
+            while rclpy.ok():
+                self.check_interruption()
+                if terminal.done():reason='terminal';break
+                if self.cancel_requested and calls:reason='cancel_pending';break
+                now=time.monotonic_ns();elapsed=time.monotonic()-self.goal_sent_steady
+                if not self.cancel_requested and (elapsed>=self.args.timeout or
+                    (self.args.cancel_after is not None and elapsed>=self.args.cancel_after)):
+                    reason='existing_deadline';break
+                remaining_ns=budget_ns-(now-started)
+                if remaining_ns<=0:break
+                wait=min(.005,remaining_ns/1e9)
+                if not self.cancel_requested:
+                    wait=min(wait,max(0.,self.args.timeout-elapsed))
+                    if self.args.cancel_after is not None:wait=min(wait,max(0.,self.args.cancel_after-elapsed))
+                rclpy.spin_once(self,timeout_sec=wait);calls+=1
+            else:reason='context_not_ok'
+        except BaseException:
+            reason='interruption_or_callback_exception';raise
+        finally:
+            finished=time.monotonic_ns()
+            self.runtime_last_pump=dict(started_steady_ns=started,finished_steady_ns=finished,
+                budget_ns=budget_ns,wall_ns=finished-started,thread_cpu_ns=time.thread_time_ns()-cpu,
+                spin_calls=calls,stop_reason=reason,overrun_ns=max(0,finished-started-budget_ns),
+                observed_count_deltas={key:self.counts.get(key,0)-before.get(key,0)
+                    for key in set(before)|set(self.counts) if self.counts.get(key,0)!=before.get(key,0)})
+        return self.runtime_last_pump
 
     def run_batch(self):
         self.emit('case_created', requested_route_map=self.route,
@@ -443,9 +545,16 @@ class WaypointPilot(frozen.Pilot):
         terminal = self.action_goal_handle.get_result_async()
         cancel_logged = False
         while rclpy.ok() and not terminal.done():
-            rclpy.spin_once(self, timeout_sec=.02)
+            pumped=self.pump_runtime_inputs(terminal)
             elapsed = time.monotonic()-self.goal_sent_steady
+            check_started=time.monotonic_ns();check_cpu=time.thread_time_ns()
             valid, issues, snapshot = self.execution_ready()
+            self.emit('runtime_input_pump',**pumped,
+                execution_check_interval_ns=None if self.runtime_last_ready_check_ns is None else
+                    check_started-self.runtime_last_ready_check_ns,
+                execution_check_wall_ns=time.monotonic_ns()-check_started,
+                execution_check_thread_cpu_ns=time.thread_time_ns()-check_cpu)
+            self.runtime_last_ready_check_ns=check_started
             if not valid and self.args.scan_aging_confirm_sec > 0.:
                 valid, issues, snapshot = self.confirm_scan_aging(issues, snapshot, terminal)
                 elapsed = time.monotonic()-self.goal_sent_steady
@@ -526,6 +635,8 @@ class WaypointPilot(frozen.Pilot):
                 stream.write(evidence_json(failure['metadata'], indent=2)+'\n')
             writer['first_ready_read_failure'] = failure['metadata']
         evidence = dict(schema='matrix_native_follow_waypoints_scan_timing_v1', scan_ring_limit=50,
+            plan_raw_parse_errors=getattr(self,'plan_raw_parse_errors',0),plan_raw_last_error=getattr(self,'plan_raw_last_error',None),
+            runtime_last_pump=getattr(self,'runtime_last_pump',None),
             scan_capture_errors=self.scan_timing_capture_errors, scan_last_capture_error=self.scan_timing_last_capture_error,
             first_runtime_invalid=self.scan_timing_firstbad, latest_readiness_check=self.scan_timing_latest_check,
             last_good_readiness_check=self.scan_timing_last_good_check, scan_ring=list(self.scan_timing_ring), writer=writer)
