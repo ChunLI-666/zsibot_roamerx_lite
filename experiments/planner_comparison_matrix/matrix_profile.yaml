@@ -66,7 +66,7 @@ controller_server:
         approach_velocity_scaling_dist: 0.3
         regulated_linear_scaling_min_speed: 0.4
         use_rotate_to_heading: true
-        rotate_to_heading_angular_vel: 0.3
+        rotate_to_heading_angular_vel: 0.15
         rotate_to_heading_min_angle: 0.5
         max_angular_accel: 6.0
         use_collision_detection: true
