@@ -38,12 +38,13 @@ public:
     }
     stride_ = columns + 1;
     prefix_.assign(stride_ * (rows + 1), 0);
+    blocked_columns_.resize(height_);
     for (std::size_t ty = 0; ty < rows; ++ty) {
       std::uint32_t row_count = 0;
       for (std::size_t tx = 0; tx < columns; ++tx) {
         bool occupied = false;
         for (std::size_t y = ty * tile_size;
-          y < std::min((ty + 1) * tile_size, static_cast<std::size_t>(height_)) && !occupied;
+          y < std::min((ty + 1) * tile_size, static_cast<std::size_t>(height_));
           ++y)
         {
           for (std::size_t x = tx * tile_size;
@@ -51,7 +52,7 @@ public:
           {
             if (cells_[y * width_ + x] >= nav2_costmap_2d::LETHAL_OBSTACLE) {
               occupied = true;
-              break;
+              blocked_columns_[y].push_back(static_cast<unsigned int>(x));
             }
           }
         }
@@ -92,6 +93,23 @@ public:
            static_cast<std::uint64_t>(p[y0 * s + x1]) + p[y1 * s + x0];
   }
 
+  // Exact sparse view of the same >=LETHAL cells the SAT fallback scans.
+  // Rows remain sorted in original x order; map/geometry identity must match
+  // the locked immutable request. A missing view retains the original loop.
+  static const std::vector<unsigned int> * activeBlockedColumns(
+    nav2_costmap_2d::Costmap2D & map, unsigned int row)
+  {
+    const auto * index = active();
+    if (!index || index->map_ != &map || index->cells_ != map.getCharMap() ||
+      index->width_ != map.getSizeInCellsX() || index->height_ != map.getSizeInCellsY() ||
+      index->resolution_ != map.getResolution() || index->origin_x_ != map.getOriginX() ||
+      index->origin_y_ != map.getOriginY() || row >= index->blocked_columns_.size())
+    {
+      return nullptr;
+    }
+    return &index->blocked_columns_[row];
+  }
+
 private:
   static const ScopedObstacleIndex * & active()
   {
@@ -106,6 +124,7 @@ private:
   const ScopedObstacleIndex * previous_;
   std::size_t stride_{0};
   std::vector<std::uint32_t> prefix_;
+  std::vector<std::vector<unsigned int>> blocked_columns_;
 };
 
 inline bool validFootprint(const Footprint & footprint)
@@ -199,7 +218,14 @@ inline bool footprintFree(
   const auto * cells = map.getCharMap();
   for (unsigned int row = lower_y; row <= upper_y; ++row) {
     const double cy = origin_y + (row + 0.5) * resolution;
+    const auto * blocked = ScopedObstacleIndex::activeBlockedColumns(map, row);
+    auto next = blocked ? std::lower_bound(blocked->begin(), blocked->end(), lower_x) :
+      std::vector<unsigned int>::const_iterator{};
     for (unsigned int col = lower_x; col <= upper_x; ++col) {
+      if (blocked) {
+        if (next == blocked->end() || *next > upper_x) {break;}
+        col = *next++;
+      }
       if (cells[static_cast<std::size_t>(row) * map.getSizeInCellsX() + col] <
         nav2_costmap_2d::LETHAL_OBSTACLE)
       {
