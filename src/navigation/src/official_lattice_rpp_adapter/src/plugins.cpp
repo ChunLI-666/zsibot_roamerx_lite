@@ -89,9 +89,9 @@ public:
     require(std::isfinite(odom_timeout_)&&odom_timeout_>0.&&odom_timeout_<=0.5,"invalid goal-checker TF timeout");
     state_->invalidate();
     require(parameter(node,name+".trans_stopped_velocity",goal_region::kTerminalTransStoppedVelocity)==
-      goal_region::kTerminalTransStoppedVelocity,"goal checker translation stop threshold must be .01");
+      goal_region::kTerminalTransStoppedVelocity,"goal checker measured translation stop threshold must be .03");
     require(parameter(node,name+".rot_stopped_velocity",goal_region::kTerminalRotStoppedVelocity)==
-      goal_region::kTerminalRotStoppedVelocity,"goal checker rotation stop threshold must be .01");
+      goal_region::kTerminalRotStoppedVelocity,"goal checker measured rotation stop threshold must be .05");
     inner_=loader_.createSharedInstance("nav2_controller::StoppedGoalChecker");
     inner_->initialize(parent,name,map);
     guard_=freeze(node,name);
@@ -247,6 +247,8 @@ public:
     rpp_.configure(parent,name+".rpp",tf,map);
     segment_pub_=node->create_publisher<nav_msgs::msg::Path>(name+"/feasible_segment",rclcpp::QoS(1).reliable().transient_local());
     odom_timeout_=parameter(node,name+".odom_timeout",0.3);
+    require(parameter(node,name+".terminal_stop_dwell_sec",0.3)==
+      goal_region::kTerminalStopDwellNs/1.e9,"terminal stop dwell must be .3 seconds");
     require(std::isfinite(odom_timeout_)&&odom_timeout_>0.&&odom_timeout_<=0.5,"invalid odom timeout");
     const auto odom_topic=parameter<std::string>(node,"odom_topic","odom");
     odom_sub_=node->create_subscription<nav_msgs::msg::Odometry>(odom_topic,rclcpp::SensorDataQoS(),
@@ -451,7 +453,9 @@ public:
         (!terminal_correction_active_||terminal_correction_headings_.complete());
       const bool in_original_yaw=std::abs(angle(yaw(path_pose.pose),yaw(binding_->original_goal.pose)))<=yaw_tolerance;
       const auto action=terminal_stop_.observe(binding_->generation,mandatory_complete,in_original_region,
-        in_original_yaw,measured_stopped,measured_odom_stamp);
+        in_original_yaw,measured_stopped,measured_odom_stamp,
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now().time_since_epoch()).count());
       if (action==goal_region::TerminalStopHold::Action::Outside) {
         throw nav2_core::NoValidControl("Actual body left original goal region during terminal stop");
       }

@@ -436,16 +436,20 @@ def prepare(args):
             raytrace_max_range=8.5,raytrace_min_range=.0,obstacle_max_range=8.,obstacle_min_range=.1))
     planner=d['planner_server']['ros__parameters']['GridBased'];planner.update(plugin=required_plugin,tolerance=0.,max_planning_time=2.,rotation_penalty=1.)
     controller=d['controller_server']['ros__parameters'];controller['Checker'].update(stateful=False,xy_goal_tolerance=args.xy_tolerance,yaw_goal_tolerance=args.yaw_tolerance,controller_name='FollowPath')
-    controller['Checker'].update(trans_stopped_velocity=.01,rot_stopped_velocity=.01)
+    controller['Checker'].update(trans_stopped_velocity=.03,rot_stopped_velocity=.05)
+    manifest['measured_stop_contract']=dict(schema='matrix.measured_stop.v1',
+      measured_linear_mps=.03,measured_angular_radps=.05,commanded_linear_mps=.01,
+      commanded_angular_radps=.01,continuous_final_stop_sec=.3,
+      boundary='Measured limits match the existing independent waypoint contract; measured values and original geometry remain unchanged. Native final completion also requires continuous stopped geometry after a checked zero.')
     if args.variant=='segmented':
         planner['lattice_filepath']=str(selected_install/'share/robot_feasible_navigation/params/stop_turn_1cm_h16.json')
         controller['Checker']['plugin']='nav2_controller::StoppedGoalChecker'
         controller['FollowPath']=dict(rpp,plugin='nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController')
-        controller['segments']=dict(xy_tolerance=args.xy_tolerance,yaw_tolerance=args.yaw_tolerance,stopped_linear_velocity=.01,stopped_angular_velocity=.01,
+        controller['segments']=dict(xy_tolerance=args.xy_tolerance,yaw_tolerance=args.yaw_tolerance,stopped_linear_velocity=.03,stopped_angular_velocity=.05,
           same_xy_epsilon=.0001,progress_search_distance=.25,odom_timeout=.3,rotation_anchor_wait_timeout=15.,command_sweep_horizon=1.)
     else:
         controller['Checker']['plugin']='official_lattice_rpp_adapter::FeasibleGoalChecker'
-        controller['FollowPath']=dict(plugin='official_lattice_rpp_adapter::FeasibleRPP',rpp=rpp,odom_timeout=.3,sweep_horizon=1.,
+        controller['FollowPath']=dict(plugin='official_lattice_rpp_adapter::FeasibleRPP',rpp=rpp,odom_timeout=.3,sweep_horizon=1.,terminal_stop_dwell_sec=.3,
           completion_path_length=max(.08,args.xy_tolerance),allow_static_path_transform=False,handler=dict(enforce_path_rotation=True,enforce_path_inversion=True,
           inversion_xy_tolerance=args.xy_tolerance,inversion_yaw_tolerance=args.yaw_tolerance,minimum_rotation_angle=.05,prune_distance=2.,max_robot_pose_search_dist=3.))
         if args.variant=='hybrid':
