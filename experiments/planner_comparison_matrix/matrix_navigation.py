@@ -65,6 +65,21 @@ class OwnershipAuditWorker:
     def join(self,timeout=1.):
         self.thread.join(timeout);return not self.thread.is_alive()
 
+
+def scan_observation(latest,topic,begin,end,reason):
+    """Read-only source cache and clock bounds, not a new health predicate."""
+    item=latest.get(topic)
+    if item is None:return None
+    received,message=item
+    stamp=message.header.stamp.sec*1_000_000_000+message.header.stamp.nanosec
+    return dict(topic=topic,header_ns=stamp,frame_id=message.header.frame_id,ranges=len(message.ranges),
+      receive_steady_seconds=received,validation_clock_begin_ns=begin[0],validation_clock_end_ns=end[0],
+      validation_steady_begin_ns=begin[1],validation_steady_end_ns=end[1],
+      signed_header_age_ns_bounds=[begin[0]-stamp,end[0]-stamp],
+      signed_receive_age_sec_bounds=[begin[1]/1e9-received,end[1]/1e9-received],failure_reason=reason,
+      boundary='Call bounds only, not exact internal validation now. source_health stops at first error; later producer guards may not have been evaluated.')
+
+
 def source_snapshot(path,template,with_waypoints=False):
     """Validate a deployment source manifest without inspecting a Git checkout."""
     def unique_object(pairs):
@@ -518,7 +533,11 @@ def run(args,out,selected_install,manifest,deadline_guard):
         end=time.monotonic()+seconds
         while time.monotonic()<end and rclpy.ok():
             if not shutdown_started and not stopped:deadline_guard.check_live()
-            rclpy.spin_once(node,timeout_sec=min(.02,max(0.,end-time.monotonic())))
+            # Jazzy caches ready callbacks by timeout kwargs. A changing tail timeout
+            # restarts at the first subscription and can starve later sources.
+            # Fixed 2ms may exceed this wall window by one idle wait; callbacks
+            # can still overrun. Original health/deadline checks run afterwards.
+            rclpy.spin_once(node,timeout_sec=.002)
     def wait(future,timeout=3.,operation=None):
         started=time.monotonic();end=started+timeout;outcome=None
         def rpc_event(kind,**kw):
@@ -763,9 +782,13 @@ def run(args,out,selected_install,manifest,deadline_guard):
         manifest['ready_producer']=dict(heartbeat_period_sec=.05,ownership_audit_period_sec=.2,
           ready_lease_ns=500_000_000,ownership_lease_ns=500_000_000,
           policy='Absolute heartbeat; complete worker audit retains checked timestamp; READY expiry never exceeds that original audit expiry; source_health last before publication',
-          timing='Wall/thread CPU per phase; callback-pump, audit, health and atomic-write timings; no physical input limits changed')
+          timing='Wall/thread CPU per phase; callback-pump, audit, health and atomic-write timings; no physical input limits changed',
+          callback_wait_policy='Fixed .002s per spin, including overrun cycles, preserves Jazzy ready iterator fairness; at most one extra idle wait beyond a window, single callbacks remain nonpreemptible')
         write(out/'runtime_manifest.json',manifest)
+        health_started=(node.get_clock().now().nanoseconds,time.monotonic_ns())
         pump(.02);source_health()
+        readiness['producer_scan_observation']=scan_observation(latest,args.scan_topic,health_started,
+          (node.get_clock().now().nanoseconds,time.monotonic_ns()),None)
         readiness['time_ns']=node.get_clock().now().nanoseconds
         readiness['valid_until_ns']=readiness['time_ns']+500_000_000
         if args.with_waypoints:readiness['valid_until_ns']=min(readiness['valid_until_ns'],ownership['checked_unix_ns']+500_000_000)
@@ -778,11 +801,12 @@ def run(args,out,selected_install,manifest,deadline_guard):
             cycle_started=(time.monotonic_ns(),time.thread_time_ns());phase=cycle_started;timing={}
             remaining=heartbeat_deadline-time.monotonic()
             if remaining>0.:pump(remaining)
-            else:rclpy.spin_once(node,timeout_sec=0.)
+            else:rclpy.spin_once(node,timeout_sec=.002)
             phase=phase_mark(timing,'callback_pump',phase)
             dead=[(n,p.returncode) for n,p in procs if p.poll() is not None]
             if dead:raise RuntimeError('owned process exited '+repr(dead))
-            previous=readiness['ready'];audit_sequence=None
+            previous=readiness['ready'];audit_sequence=None;health_started=None
+            readiness['producer_scan_observation']=None
             try:
                 if args.with_waypoints:
                     observed,audit_sequence=ownership_worker.snapshot(node.get_clock().now().nanoseconds)
@@ -796,9 +820,13 @@ def run(args,out,selected_install,manifest,deadline_guard):
                         raise RuntimeError('Native waypoint action ownership changed; shared NavigateToPose is unsupported')
                 phase=phase_mark(timing,'ownership_snapshot',phase)
                 # This recheck is AFTER graph work, immediately before publication.
+                health_started=(node.get_clock().now().nanoseconds,time.monotonic_ns())
                 source_health();phase=phase_mark(timing,'source_health',phase)
                 readiness.update(ready=True,reason=None)
             except Exception as e:readiness.update(ready=False,reason=str(e))
+            if health_started is not None:
+                readiness['producer_scan_observation']=scan_observation(latest,args.scan_topic,health_started,
+                  (node.get_clock().now().nanoseconds,time.monotonic_ns()),readiness.get('reason'))
             issued=node.get_clock().now().nanoseconds
             expiry=issued+500_000_000
             if args.with_waypoints and readiness['ready']:

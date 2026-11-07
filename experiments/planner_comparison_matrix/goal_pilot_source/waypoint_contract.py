@@ -65,6 +65,73 @@ class ReadyReadCapture:
             cache_boundary='These are the first failed call bytes; latest_ready remains a separate last-passing cache. No lease, ownership or physical-input predicate is changed.'))
 
 
+
+def producer_scan_confirmation_failure(raw, variant, binding, native_binding, loaded_sources,
+        own_uuid, parent_sent_ns, now_ns, scan_topic):
+    """Read-only revalidation of a current strict not-ready scan failure.
+
+    Frozen read_ready rejects not_ready before metadata. Never alter that document
+    or feed a fabricated ready=True to it. Recheck the original metadata/bindings
+    before the opt-in bounded confirmation may wait for a NEW strict READY.
+    """
+    ready=json.loads(raw)
+    reason=ready.get('reason')
+    if ready.get('ready') is not False or reason not in (
+            'Stale/future stamp '+scan_topic,'Stale receive '+scan_topic):
+        raise ValueError('Not a sole producer same-scan aging failure')
+    if binding is None or native_binding is None or own_uuid is None or parent_sent_ns is None:
+        raise ValueError('Producer scan confirmation requires the original dispatched binding/UUID')
+    issued,expiry=ready.get('time_ns',0),ready.get('valid_until_ns',0)
+    if not isinstance(issued,int) or not isinstance(expiry,int) or not 0<expiry-now_ns<=550_000_000 or not -50_000_000<=now_ns-issued<=500_000_000:
+        raise ValueError('launcher_lease_missing_expired_or_future')
+    immutable={k:ready.get(k) for k in ['variant','action_server','goal_tolerances','params_sha256','build_receipt_sha256']}
+    if ready.get('variant')!=variant or ready.get('action_server')!='/navigate_to_pose' or immutable!=binding:
+        raise ValueError('launcher_runtime_binding_changed')
+    if ready.get('goal_tolerances')!=dict(xy=.15,yaw=.08,stateful=False):
+        raise ValueError('Original reviewed goal tolerances changed')
+    for key in ['params_sha256','build_receipt_sha256']:
+        value=ready.get(key)
+        if not isinstance(value,str) or len(value)!=64 or any(c not in '0123456789abcdef' for c in value):
+            raise ValueError('missing_runtime_binding:'+key)
+    native=waypoint_binding(ready,native_binding)
+    if native['waypoint_contract']['client_sources_sha256']!=loaded_sources:
+        raise ValueError('Loaded batch client source binding changed')
+    validate_ownership(ready.get('waypoint_ownership',{}),now_ns,own_uuid,parent_sent_ns)
+    observed=ready.get('producer_scan_observation',{})
+    if not isinstance(observed,dict) or observed.get('topic')!=scan_topic or observed.get('frame_id')!='base_link' or observed.get('ranges',0)<=0 or observed.get('failure_reason')!=reason:
+        raise ValueError('Producer failed scan context missing or mismatched')
+    stamp=observed.get('header_ns');begin=observed.get('validation_clock_begin_ns');end=observed.get('validation_clock_end_ns')
+    steady_begin=observed.get('validation_steady_begin_ns');steady_end=observed.get('validation_steady_end_ns');received=observed.get('receive_steady_seconds')
+    if any(type(value) is not int or value<=0 for value in [stamp,begin,end,steady_begin,steady_end]) or begin>end or steady_begin>steady_end or not -50_000_000<=now_ns-end<=500_000_000:
+        raise ValueError('Producer failed scan clock bounds invalid or stale')
+    if stamp>begin+50_000_000:
+        raise ValueError('Producer future scan is never eligible for aging confirmation')
+    if type(received) not in (int,float) or not math.isfinite(received) or received<=0 or received>steady_end/1e9:
+        raise ValueError('Producer scan receive time invalid')
+    if reason=='Stale/future stamp '+scan_topic and begin-stamp<=300_000_000:
+        raise ValueError('Producer old header is not established by its clock bounds')
+    if reason=='Stale receive '+scan_topic and steady_begin/1e9-received<=.3:
+        raise ValueError('Producer stale receive is not established by its clock bounds')
+    return dict(ready=ready,sha256=hashlib.sha256(raw).hexdigest(),original_stamp_ns=stamp,
+                issued_ns=issued,producer_scan_observation=observed)
+
+
+def producer_scan_confirmation_outcome(issues,snapshot,original,ready,elapsed_ns,budget_ns,pending_valid):
+    if not 0<=elapsed_ns<=budget_ns:return 'expired'
+    if issues:return 'pending' if pending_valid else 'fatal'
+    observation=ready.get('producer_scan_observation',{})
+    own=snapshot.get('last',{}).get('scan',{})
+    stamp=observation.get('header_ns',0);begin=observation.get('validation_clock_begin_ns',0);end=observation.get('validation_clock_end_ns',0)
+    if (any(type(value) is not int or value<=0 for value in [stamp,begin,end]) or begin>end
+            or not -50_000_000<=begin-stamp or end-stamp>300_000_000):return 'fatal'
+    if (ready.get('ready') is True and ready.get('time_ns',0)>original['issued_ns']
+            and observation.get('topic')==original['producer_scan_observation']['topic']
+            and observation.get('frame_id')=='base_link' and observation.get('ranges',0)>0
+            and stamp>original['original_stamp_ns'] and own.get('stamp_ns',0)>original['original_stamp_ns']):
+        return 'recovered'
+    return 'pending'
+
+
 def validate_scan_aging_confirmation(seconds):
     """Opt-in callback confirmation, never a replacement scan-age threshold."""
     if (isinstance(seconds, bool) or not isinstance(seconds, (int, float))
