@@ -234,10 +234,12 @@ class ConfirmationTests(unittest.TestCase):
                 check_interruption=lambda:None,input_ready=lambda **kw:(True,[],current),
                 runtime_binding=None,native_binding=None,owned_identity=None,goal_sent_ns=None,
                 ownership_metadata_reported_check_ns=set(),
+                first_ready_read_failure=None,
                 event_pub=SimpleNamespace(get_subscription_count=lambda:1),
                 emit=lambda kind,**fields:captured.append(dict(kind=kind,**fields)),
                 scan_timing_record_check=lambda *args:None)
             namespace=dict(time=SimpleNamespace(time_ns=lambda:1_300_000_001,monotonic_ns=lambda:500),
+                ReadyReadCapture=contract.ReadyReadCapture,
                 frozen=SimpleNamespace(read_ready=lambda *args:(ready,{},'abc')),
                 finite_velocity=contract.finite_velocity,waypoint_binding=lambda *args:{},
                 validate_ownership=contract.validate_ownership,

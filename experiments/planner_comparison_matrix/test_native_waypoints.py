@@ -22,7 +22,7 @@ import uuid
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE/'goal_pilot_source'))
-from waypoint_contract import (AsyncEvidenceWriter, OrderedVisits, OwnedGoalIdentity, WAYPOINT_PARAMETERS,
+from waypoint_contract import (AsyncEvidenceWriter, OrderedVisits, OwnedGoalIdentity, ReadyReadCapture, WAYPOINT_PARAMETERS,
                                evidence_json, exclusive_graph, finite_velocity, mission_budget, strict_stopped,
                                validate_ownership, validate_route, validate_settle_budget, validate_scan_aging_confirmation, waypoint_binding)
 
@@ -44,7 +44,7 @@ def load_method(name):
     tree = ast.parse((HERE/'goal_pilot_source/waypoint_batch.py').read_bytes())
     cls = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'WaypointPilot')
     method = next(node for node in cls.body if isinstance(node, ast.FunctionDef) and node.name == name)
-    namespace = dict(OwnedGoalIdentity=OwnedGoalIdentity, ACTION='/follow_waypoints', json=json,
+    namespace = dict(OwnedGoalIdentity=OwnedGoalIdentity, ReadyReadCapture=ReadyReadCapture, ACTION='/follow_waypoints', json=json,
                      evidence_json=evidence_json, finite_velocity=finite_velocity, strict_stopped=strict_stopped, time=time)
     exec(compile(ast.Module(body=[method], type_ignores=[]), str(HERE/'goal_pilot_source/waypoint_batch.py'), 'exec'), namespace)
     return namespace[name], namespace
@@ -298,6 +298,7 @@ class WriterAndCancellationTests(unittest.TestCase):
             self.assertEqual(sent, ['own_handle'])
             node.writer, node.output = writer, Path(temporary)
             node.scan_timing_capture_errors, node.scan_timing_last_capture_error = 0, None
+            node.first_ready_read_failure = None
             node.scan_timing_firstbad = dict(issues=['scan:invalid_header_age'], scan_ring=[dict(header_ns=10)])
             node.scan_timing_latest_check = node.scan_timing_last_good_check = None
             node.scan_timing_ring = [dict(header_ns=10)]
@@ -337,6 +338,7 @@ class ExitFlowTests(unittest.TestCase):
             error_function=next(node for node in original.body if isinstance(node,ast.FunctionDef) and node.name=='error')
             exec(compile(ast.Module(body=[error_function],type_ignores=[]),'unchanged_goal_error','exec'),pure)
             namespace = dict(argparse=argparse, Path=Path, hashlib=hashlib, json=json, math=math, os=os, sys=sys, time=time,
+                ReadyReadCapture=ReadyReadCapture,
                 uuid=uuid, HERE=root, rclpy=fake_ros, SignalHandlerOptions=SimpleNamespace(NO='NO'),
                 signal=SimpleNamespace(SIGINT=2, SIGTERM=15, signal=lambda number, handler: 'previous'),
                 frozen=SimpleNamespace(validate_numeric_arguments=lambda args: None,
@@ -385,6 +387,7 @@ class ExitFlowTests(unittest.TestCase):
                     self.artifact_invalid_reasons = []
                     self.scan_aging_episodes = []
                     self.scan_timing_capture_errors = 0
+                    self.first_ready_read_failure = None
                     self.ordered = OrderedVisits(route)
                     self.first_plans={}
                     self.feedback_overflow=0

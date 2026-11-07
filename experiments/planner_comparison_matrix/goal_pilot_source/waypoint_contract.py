@@ -1,7 +1,9 @@
 """Non-ROS contracts for one ordered native FollowWaypoints experiment."""
 from collections import Counter
+import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import queue
 import threading
@@ -9,6 +11,58 @@ import time
 
 
 ACTION = '/follow_waypoints'
+
+
+class ReadyReadCapture:
+    """Path-like single read for the unchanged frozen READY validator.
+
+    The bytes and fd identity describe the same open file even across rename.
+    Call bounds contain the frozen validator's unknown internal wall-time read;
+    they are never presented as that exact timestamp or used in decisions.
+    """
+    def __init__(self, path):
+        self.path = path
+        self.raw = None
+        self.reads = 0
+        self.timing = {}
+        self.fd_identity = {}
+        self.capture_errors = []
+
+    def _identity(self, stream, stage):
+        try:
+            value = os.fstat(stream.fileno())
+            self.fd_identity[stage] = dict(dev=value.st_dev, ino=value.st_ino,
+                size=value.st_size, mtime_ns=value.st_mtime_ns, ctime_ns=value.st_ctime_ns)
+        except Exception as exc:
+            # Optional metadata must never replace read/validation behavior.
+            self.capture_errors.append(dict(stage=stage, type=type(exc).__name__, message=str(exc)))
+
+    def read_bytes(self):
+        self.reads += 1
+        self.timing.update(read_begin_unix_ns=time.time_ns(), read_begin_steady_ns=time.monotonic_ns())
+        try:
+            # Path.read_bytes() uses this same open/read operation. No second read.
+            with self.path.open('rb') as stream:
+                self._identity(stream, 'before_read')
+                self.raw = stream.read()
+                self._identity(stream, 'after_read')
+            return self.raw
+        finally:
+            self.timing.update(read_end_unix_ns=time.time_ns(), read_end_steady_ns=time.monotonic_ns())
+
+    def failure(self, exc, call_bounds):
+        return dict(raw_bytes=self.raw, metadata=dict(
+            schema='matrix_native_ready_first_failed_read_v1',
+            exact_failed_read_bytes_retained=self.raw is not None,
+            byte_count=None if self.raw is None else len(self.raw),
+            sha256=None if self.raw is None else hashlib.sha256(self.raw).hexdigest(),
+            raw_file=None if self.raw is None else 'ready_read_failure.raw',
+            exception_type=type(exc).__name__, exception_message=str(exc),
+            read_calls=self.reads, fd_identity=self.fd_identity, read_timing=self.timing,
+            frozen_call_bounds=call_bounds, capture_errors=self.capture_errors,
+            frozen_internal_now_ns=None,
+            timing_boundary='Original frozen read_ready clock is unchanged. Call begin/end bound its internal now only when decode reached that check; exact internal now and decode end are unavailable.',
+            cache_boundary='These are the first failed call bytes; latest_ready remains a separate last-passing cache. No lease, ownership or physical-input predicate is changed.'))
 
 
 def validate_scan_aging_confirmation(seconds):
