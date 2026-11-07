@@ -30,7 +30,7 @@ import pilot_scan_timing as frozen
 import message_info_contract
 from waypoint_contract import (ACTION, AsyncEvidenceWriter, OrderedVisits, OwnedGoalIdentity,
                                evidence_json, finite_velocity, mission_budget, strict_stopped, validate_ownership, validate_route, waypoint_binding)
-from waypoint_contract import ownership_metadata_lease_deviation, validate_settle_budget
+from waypoint_contract import ReadyReadCapture, ownership_metadata_lease_deviation, validate_settle_budget
 from waypoint_contract import (scan_aging_confirmation_eligible, scan_aging_confirmation_outcome,
                                scan_confirmation_payload_valid, validate_scan_aging_confirmation)
 
@@ -61,6 +61,7 @@ def freeze_sources(output):
         timing_boundary='Native source pose sample stamps are retained. /plan receipt latency is transport/BT/observer latency, not planner computation time. Child NavigateToPose UUID is unavailable to this client.')
     manifest['nonfinite_evidence_encoding']='Writer/final serialization only: {nonfinite_float: NaN/+Infinity/-Infinity}; original caches, first-invalid references and decision values remain unchanged.'
     manifest['ownership_metadata_lease']='NavigateToPose ownership metadata uses the same 500ms old/50ms future lease as READY. Each checked_unix_ns exceeding the historical 300ms metadata boundary is recorded once with original validation time and READY; this is separate metadata latency evidence and never changes physical-input classification.'
+    manifest['ready_read_failure_capture']='Unchanged a63b validator receives one path-like single-file read with fd stat and wall/steady bounds. Only the first read_ready exception retains exact raw bytes in memory, persisted after own-goal cleanup; internal validator now remains unknown. Last-passing READY cache is labelled separately.'
     manifest['stop_cleanup']='Every possibly sent goal reaches finally own-UUID cancellation and a fresh finite measured/commanded stop observation, including response timeout, signal and exception. Default rclpy shutdown-on-SIGINT is disabled until cleanup completes.'
     manifest['scan_aging_confirmation']='Default 0 preserves strict behavior. Opt-in <=.05s drains existing callbacks only after sole scan-header aging; a newer original stamp must restore every original guard. Every episode permanently fails strict timing acceptance; no header-age threshold changes.'
     (output/'instrumentation_manifest.json').write_text(json.dumps(manifest, indent=2)+'\n')
@@ -86,6 +87,7 @@ class WaypointPilot(frozen.Pilot):
         self.stop_evidence = None
         self.scan_aging_episodes = []
         self.ownership_metadata_reported_check_ns = set()
+        self.first_ready_read_failure = None
         super().__init__(args, output)
         # Base opens this handle but all batch events use the asynchronous writer.
         self.events.close()
@@ -157,8 +159,10 @@ class WaypointPilot(frozen.Pilot):
                 issues.extend(stop_issues)
         if self.args.execute:
             readiness_stage, ownership_checked_now_ns = 'read_ready', None
+            ready_capture = ReadyReadCapture(self.args.ready)
+            ready_call_bounds = dict(call_begin_unix_ns=time.time_ns(), call_begin_steady_ns=time.monotonic_ns())
             try:
-                self.latest_ready, binding, self.latest_ready_sha = frozen.read_ready(self.args.ready, self.args.variant, self.runtime_binding)
+                self.latest_ready, binding, self.latest_ready_sha = frozen.read_ready(ready_capture, self.args.variant, self.runtime_binding)
                 readiness_stage = 'waypoint_binding'
                 native = waypoint_binding(self.latest_ready, self.native_binding)
                 readiness_stage, ownership_checked_now_ns = 'validate_ownership', time.time_ns()
@@ -178,9 +182,17 @@ class WaypointPilot(frozen.Pilot):
                 if native['waypoint_contract']['client_sources_sha256'] != self.loaded_sources:
                     raise ValueError('Loaded batch client sources differ from the launcher source binding')
             except Exception as exc:
+                call_end_unix_ns, call_end_steady_ns = time.time_ns(), time.monotonic_ns()
+                captured_first_failure = False
+                if readiness_stage == 'read_ready' and self.first_ready_read_failure is None:
+                    ready_call_bounds.update(call_end_unix_ns=call_end_unix_ns, call_end_steady_ns=call_end_steady_ns)
+                    self.first_ready_read_failure = ready_capture.failure(exc, ready_call_bounds)
+                    captured_first_failure = True
                 issues.append('readiness:'+str(exc))
                 self.emit('readiness_validation_failed', stage=readiness_stage, message=str(exc),
                     ownership_validation_unix_ns=ownership_checked_now_ns,
+                    first_failed_read_capture=captured_first_failure,
+                    first_failed_read_metadata_file='ready_read_failure.json' if self.first_ready_read_failure is not None else None,
                     latest_ready_sha256=getattr(self, 'latest_ready_sha', None),
                     latest_ready_is_failing_read=readiness_stage != 'read_ready',
                     latest_ready=getattr(self, 'latest_ready', None))
@@ -505,6 +517,14 @@ class WaypointPilot(frozen.Pilot):
 
     def finish_evidence(self):
         writer = self.writer.close()
+        if self.first_ready_read_failure is not None:
+            failure = self.first_ready_read_failure
+            if failure['raw_bytes'] is not None:
+                with (self.output/'ready_read_failure.raw').open('xb') as stream:
+                    stream.write(failure['raw_bytes'])
+            with (self.output/'ready_read_failure.json').open('x') as stream:
+                stream.write(evidence_json(failure['metadata'], indent=2)+'\n')
+            writer['first_ready_read_failure'] = failure['metadata']
         evidence = dict(schema='matrix_native_follow_waypoints_scan_timing_v1', scan_ring_limit=50,
             scan_capture_errors=self.scan_timing_capture_errors, scan_last_capture_error=self.scan_timing_last_capture_error,
             first_runtime_invalid=self.scan_timing_firstbad, latest_readiness_check=self.scan_timing_latest_check,

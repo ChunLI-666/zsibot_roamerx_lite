@@ -3,7 +3,7 @@
 
 No fake plant, localization status publisher, TF publisher, sensor bridge, SDK adapter or goal client.
 """
-import argparse,copy,hashlib,json,math,os,pathlib,shutil,signal,subprocess,sys,time
+import argparse,copy,hashlib,json,math,os,pathlib,shutil,signal,subprocess,sys,time,threading
 import yaml
 from static_layer_snapshot import EXCLUDED_LAYERS,capture as capture_static_layers,audit_recorded as audit_static_layers
 from recording_deadline import arm as arm_deadline,runtime_seconds,process_identity
@@ -11,9 +11,59 @@ BASE=pathlib.Path(__file__).resolve().parent
 NAV=BASE.parents[1]
 def sha(path):
     with pathlib.Path(path).open('rb') as stream:return hashlib.file_digest(stream,'sha256').hexdigest()
-def write(path,value):
+def write(path,value,compact=False):
     path=pathlib.Path(path);temporary=path.with_suffix(path.suffix+'.tmp')
-    temporary.write_text(json.dumps(value,indent=2)+'\n');temporary.replace(path)
+    temporary.write_text(json.dumps(value,separators=(',',':'))+'\n' if compact else json.dumps(value,indent=2)+'\n');temporary.replace(path)
+
+
+def phase_mark(timing,name,started):
+    finished=(time.monotonic_ns(),time.thread_time_ns())
+    timing[name]=dict(wall_ns=finished[0]-started[0],thread_cpu_ns=finished[1]-started[1])
+    return finished
+
+def next_heartbeat_deadline(previous,now,period=.05):
+    """Absolute cadence; skip missed slots, never stack another fixed sleep."""
+    deadline=previous+period
+    if deadline<=now:deadline+=(int((now-deadline)//period)+1)*period
+    return deadline
+
+class OwnershipAuditWorker:
+    """One full audit at a time; one immutable latest result, no queued backlog.
+
+    The worker never writes READY, pumps ROS callbacks, or changes checked_unix_ns.
+    Every consumer still enforces the original 500ms/50ms metadata age bounds.
+    """
+    def __init__(self,audit,seed,period=.2):
+        self.audit=audit;self.period=period;self.lock=threading.Lock();self.stop_event=threading.Event()
+        self.result=seed;self.error=None;self.sequence=0;self.running=False;self.timing={}
+        self.thread=threading.Thread(target=self._work,name='matrix-ownership-audit',daemon=True)
+        self.thread.start()
+    def _work(self):
+        deadline=time.monotonic()
+        while not self.stop_event.is_set():
+            started=(time.monotonic_ns(),time.thread_time_ns());started_unix=time.time_ns()
+            with self.lock:self.running=True
+            try:result=self.audit();error=None
+            except Exception as exc:result=None;error=type(exc).__name__+': '+str(exc)
+            completed=time.time_ns();timing={};phase_mark(timing,'full_audit',started)
+            with self.lock:
+                self.sequence+=1;self.running=False;self.error=error
+                self.timing=dict(started_unix_ns=started_unix,completed_unix_ns=completed,**timing)
+                if result is not None:self.result=result
+            deadline=next_heartbeat_deadline(deadline,time.monotonic(),self.period)
+            self.stop_event.wait(max(0.,deadline-time.monotonic()))
+    def state(self):
+        with self.lock:return dict(sequence=self.sequence,running=self.running,error=self.error,timing=dict(self.timing))
+    def snapshot(self,now_ns):
+        with self.lock:result=self.result;error=self.error;sequence=self.sequence
+        if error is not None:raise RuntimeError('Ownership audit failed: '+error)
+        checked=result.get('checked_unix_ns',0)
+        if type(checked) is not int or not -50_000_000<=now_ns-checked<=500_000_000:
+            raise RuntimeError('Ownership metadata observation stale or future; original audit lease not renewed')
+        return result,sequence
+    def request_stop(self):self.stop_event.set()
+    def join(self,timeout=1.):
+        self.thread.join(timeout);return not self.thread.is_alive()
 
 def source_snapshot(path,template,with_waypoints=False):
     """Validate a deployment source manifest without inspecting a Git checkout."""
@@ -341,6 +391,7 @@ def run(args,out,selected_install,manifest,deadline_guard):
     from rclpy.qos import qos_profile_sensor_data,QoSProfile,ReliabilityPolicy,DurabilityPolicy
     import cv2,numpy as np
     stopped=False;shutdown_started=False;static_snapshots=[];stop_signals=[]
+    ownership_worker=None;producer_timing_stream=None
     def request_stop(signum,*unused):
         nonlocal stopped;stopped=True;stop_signals.append(signum)
     rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
@@ -350,14 +401,18 @@ def run(args,out,selected_install,manifest,deadline_guard):
     def event(kind,**kw):
         event_stream.write(json.dumps(dict(time_ns=node.get_clock().now().nanoseconds,steady=time.monotonic(),kind=kind,**kw))+'\n');event_stream.flush()
     def receive(topic,msg):latest[topic]=(time.monotonic(),msg);counts[topic]=counts.get(topic,0)+1
-    subscriptions=[]
+    subscriptions=[];startup_costmap_observers={}
     costmap_evidence_qos=QoSProfile(depth=1,reliability=ReliabilityPolicy.RELIABLE,durability=DurabilityPolicy.TRANSIENT_LOCAL)
     for topic,kind in [(args.odom_topic,Odometry),('/lightning/loc_status',UInt8),('/lightning/pose_valid',Bool),(args.scan_topic,LaserScan),(args.camera_topic,CompressedImage),(args.camera_info_topic,CameraInfo),
                        ('/global_costmap/costmap_raw',Costmap),('/local_costmap/costmap_raw',Costmap)]:
         qos=costmap_evidence_qos if topic in ('/global_costmap/costmap_raw','/local_costmap/costmap_raw') else qos_profile_sensor_data
-        subscriptions.append(node.create_subscription(kind,topic,lambda m,t=topic:receive(t,m),qos))
+        subscription=node.create_subscription(kind,topic,lambda m,t=topic:receive(t,m),qos)
+        subscriptions.append(subscription)
+        if topic in ('/global_costmap/costmap_raw','/local_costmap/costmap_raw'):
+            startup_costmap_observers[topic]=subscription
     tf=Buffer();listener=TransformListener(tf,node)
     action_status={};bt_binding=None;bt_launch_steady_ns=None;private_goal_messages=0;first_private_goal=None;first_private_publisher_violation=None
+    ownership_observation_lock=threading.Lock()
     if args.with_waypoints:
         from action_msgs.msg import GoalStatusArray
         from nav2_msgs.action import NavigateToPose
@@ -368,9 +423,10 @@ def run(args,out,selected_install,manifest,deadline_guard):
         private_goal_topic='/experiment/native_waypoint_private/run_'+deadline_guard.manifest['run_id']+'/goal_pose'
         def private_goal_received(message):
             nonlocal private_goal_messages,first_private_goal
-            private_goal_messages+=1
-            if first_private_goal is None:
-                first_private_goal=dict(received_steady_ns=time.monotonic_ns(),message=message_to_ordereddict(message))
+            with ownership_observation_lock:
+                private_goal_messages+=1
+                if first_private_goal is None:
+                    first_private_goal=dict(received_steady_ns=time.monotonic_ns(),message=message_to_ordereddict(message))
         subscriptions.append(node.create_subscription(PoseStamped,private_goal_topic,private_goal_received,QoSProfile(depth=10)))
         private_subscription_steady_ns=time.monotonic_ns()
         manifest['native_bt_self_client_ingress']=dict(run_id=deadline_guard.manifest['run_id'],private_goal_topic=private_goal_topic,
@@ -380,56 +436,69 @@ def run(args,out,selected_install,manifest,deadline_guard):
             value=pathlib.Path(path).stat()
             return dict(dev=value.st_dev,ino=value.st_ino,size=value.st_size,mtime_ns=value.st_mtime_ns,ctime_ns=value.st_ctime_ns)
         def status_receive(action,message):
-            action_status[action]=dict(received_unix_ns=time.time_ns(),
+            observed=dict(received_unix_ns=time.time_ns(),
               active=[dict(uuid=bytes(status.goal_info.goal_id.uuid).hex(),status=int(status.status),
                 accepted_stamp_ns=status.goal_info.stamp.sec*1_000_000_000+status.goal_info.stamp.nanosec)
                 for status in message.status_list if status.status in (0,1,2,3)],
               all_statuses=[dict(uuid=bytes(status.goal_info.goal_id.uuid).hex(),status=int(status.status)) for status in message.status_list])
+            with ownership_observation_lock:action_status[action]=observed
         for action in ['/navigate_to_pose','/follow_waypoints']:
             subscriptions.append(node.create_subscription(GoalStatusArray,action+'/_action/status',
               lambda message,a=action:status_receive(a,message),qos_profile_action_status_default))
         child_feedback={}
         def child_feedback_receive(message):
-            child_feedback.update(received_unix_ns=time.time_ns(),goal_uuid=bytes(message.goal_id.uuid).hex(),
+            observed=dict(received_unix_ns=time.time_ns(),goal_uuid=bytes(message.goal_id.uuid).hex(),
               feedback=message_to_ordereddict(message.feedback))
+            with ownership_observation_lock:child_feedback.update(observed)
         subscriptions.append(node.create_subscription(NavigateToPose.Impl.FeedbackMessage,
           '/navigate_to_pose/_action/feedback',child_feedback_receive,QoSProfile(depth=10)))
         def waypoint_ownership():
             nonlocal first_private_publisher_violation
+            timing={};phase=(time.monotonic_ns(),time.thread_time_ns())
             graph=[]
             for name,namespace in node.get_node_names_and_namespaces():
                 graph.append(dict(name=name,namespace=namespace,
                   clients=get_action_client_names_and_types_by_node(node,name,namespace),
                   servers=get_action_server_names_and_types_by_node(node,name,namespace),
                   service_clients=node.get_client_names_and_types_by_node(name,namespace)))
+            phase=phase_mark(timing,'all_node_graph_queries',phase)
             bt=dict(bt_binding) if bt_binding is not None else {}
             if bt_binding is not None:
                 pid=bt_binding['owned_process_plan']['pid']
                 mapped=pathlib.Path(f'/proc/{pid}/maps').read_text()
                 private_publishers=[dict(name=info.node_name,namespace=info.node_namespace,type=info.topic_type)
                     for info in node.get_publishers_info_by_topic(private_goal_topic)]
-                if private_publishers and first_private_publisher_violation is None:
-                    first_private_publisher_violation=dict(observed_unix_ns=time.time_ns(),publishers=private_publishers)
+                with ownership_observation_lock:
+                    if private_publishers and first_private_publisher_violation is None:
+                        first_private_publisher_violation=dict(observed_unix_ns=time.time_ns(),publishers=private_publishers)
+                    observed_private_messages=private_goal_messages;observed_first_private=copy.deepcopy(first_private_goal)
+                    observed_publisher_violation=copy.deepcopy(first_private_publisher_violation)
                 bt.update(current_process_identity=process_identity(pid),
                   current_mapped_files=sorted({line.split()[-1] for line in mapped.splitlines() if len(line.split())>=6}),
                   artifacts=[dict(item,current_stat=artifact_stat(item['path'])) for item in bt_binding['artifacts']],
                   bt_subscriptions=node.get_subscriber_names_and_types_by_node('bt_navigator','/'),
-                  private_goal_publishers=private_publishers,first_private_goal_publisher_violation=first_private_publisher_violation,
+                  private_goal_publishers=private_publishers,first_private_goal_publisher_violation=observed_publisher_violation,
                   private_goal_subscribers=[dict(name=info.node_name,namespace=info.node_namespace,type=info.topic_type)
                     for info in node.get_subscriptions_info_by_topic(private_goal_topic)],
-                  received_private_goal_messages=private_goal_messages,first_received_private_goal=first_private_goal)
+                  received_private_goal_messages=observed_private_messages,first_received_private_goal=observed_first_private)
+            phase=phase_mark(timing,'native_process_maps_stat_and_ingress',phase)
             ownership=waypoint_service_ownership(graph,exclusive_graph,bt)
+            phase=phase_mark(timing,'ownership_classification',phase)
             publishers={action:[dict(name=info.node_name,namespace=info.node_namespace)
               for info in node.get_publishers_info_by_topic(action+'/_action/status')]
               for action in ['/navigate_to_pose','/follow_waypoints']}
+            with ownership_observation_lock:
+                observed_action_status=copy.deepcopy(action_status);observed_child_feedback=copy.deepcopy(child_feedback)
             ownership.update(checked_unix_ns=time.time_ns(),status_publishers=publishers,
               status_publishers_match=publishers['/navigate_to_pose']==[dict(name='bt_navigator',namespace='/')] and
                 publishers['/follow_waypoints']==[dict(name='waypoint_follower',namespace='/')],
-              navigate_to_pose_active=action_status.get('/navigate_to_pose',{}).get('active',[]),
-              follow_waypoints_active=action_status.get('/follow_waypoints',{}).get('active',[]),
-              observed_status=copy.deepcopy(action_status),
-              latest_child_feedback=copy.deepcopy(child_feedback),
+              navigate_to_pose_active=observed_action_status.get('/navigate_to_pose',{}).get('active',[]),
+              follow_waypoints_active=observed_action_status.get('/follow_waypoints',{}).get('active',[]),
+              observed_status=observed_action_status,
+              latest_child_feedback=observed_child_feedback,
               status_boundary='Reliable transient-local subscription created before new owned servers. No sample means no accepted transition observed; status is not a periodic health heartbeat. Child UUID is observed, parent association is contextual under exclusive client ownership.')
+            phase_mark(timing,'status_observation_snapshot',phase)
+            ownership['producer_audit_timing']=timing
             return ownership
     def source_health():
         now=node.get_clock().now().nanoseconds/1e9
@@ -449,7 +518,7 @@ def run(args,out,selected_install,manifest,deadline_guard):
         end=time.monotonic()+seconds
         while time.monotonic()<end and rclpy.ok():
             if not shutdown_started and not stopped:deadline_guard.check_live()
-            rclpy.spin_once(node,timeout_sec=.02)
+            rclpy.spin_once(node,timeout_sec=min(.02,max(0.,end-time.monotonic())))
     def wait(future,timeout=3.,operation=None):
         started=time.monotonic();end=started+timeout;outcome=None
         def rpc_event(kind,**kw):
@@ -619,6 +688,15 @@ def run(args,out,selected_install,manifest,deadline_guard):
         deadline=time.monotonic()+6.
         while time.monotonic()<deadline and any(counts.get('/'+n+'/costmap_raw',0)==0 for n in ['global_costmap','local_costmap']):pump(.1)
         if any(counts.get('/'+n+'/costmap_raw',0)==0 for n in ['global_costmap','local_costmap']):raise RuntimeError('full raw costmap publication not observed')
+        # These observer payloads were used only to prove startup publication.
+        # GetCostmap already saved exact initial CDR; the recorder remains subscribed.
+        startup_raw_counts={topic:counts[topic] for topic in startup_costmap_observers}
+        for topic,subscription in startup_costmap_observers.items():
+            node.destroy_subscription(subscription);subscriptions.remove(subscription);latest.pop(topic,None)
+        manifest['costmap_observer_scope']=dict(mode='startup_only',retained_startup_counts=startup_raw_counts,
+          initial_rpc_cdr_preserved=True,recorder_continuous_costmap_topics_unchanged=True)
+        event('startup_costmap_observers_detached',retained_startup_counts=startup_raw_counts,
+          boundary='Only evidence-observer subscriptions removed; recorder and costmap publishers unchanged')
         identities={}
         for name,p in procs:
             maps=pathlib.Path(f'/proc/{p.pid}/maps').read_text()
@@ -678,29 +756,79 @@ def run(args,out,selected_install,manifest,deadline_guard):
               waypoint_ownership=ownership,mission_deadline=dict(run_id=deadline_guard.manifest['run_id'],
               manifest_sha256=deadline_guard.digest,launcher_boot_id=deadline_guard.manifest['launcher']['boot_id'],
               deadline_boottime_sec=deadline_guard.manifest['deadline_boottime_sec']))
-        readiness['valid_until_ns']=node.get_clock().now().nanoseconds+500_000_000
-        write(out/'ready.json',readiness)
+        # Graph/process auditing cannot starve callback pumping or the READY heartbeat.
+        # Every audit is still complete; its original checked timestamp is authoritative.
+        if args.with_waypoints:ownership_worker=OwnershipAuditWorker(waypoint_ownership,ownership)
+        producer_timing_stream=(out/'ready_producer_timing.jsonl').open('w',buffering=65536)
+        manifest['ready_producer']=dict(heartbeat_period_sec=.05,ownership_audit_period_sec=.2,
+          ready_lease_ns=500_000_000,ownership_lease_ns=500_000_000,
+          policy='Absolute heartbeat; complete worker audit retains checked timestamp; READY expiry never exceeds that original audit expiry; source_health last before publication',
+          timing='Wall/thread CPU per phase; callback-pump, audit, health and atomic-write timings; no physical input limits changed')
+        write(out/'runtime_manifest.json',manifest)
+        pump(.02);source_health()
+        readiness['time_ns']=node.get_clock().now().nanoseconds
+        readiness['valid_until_ns']=readiness['time_ns']+500_000_000
+        if args.with_waypoints:readiness['valid_until_ns']=min(readiness['valid_until_ns'],ownership['checked_unix_ns']+500_000_000)
+        write(out/'ready.json',readiness,compact=True)
         event('navigation_ready');print(str(out/'ready.json'),flush=True)
+        heartbeat_deadline=time.monotonic();last_write_finished_ns=time.monotonic_ns()
+        previous_write_timing=None;previous_audit_sequence=None;last_timing_flush=time.monotonic()
         while not stopped:
-            pump(.1)
+            if not shutdown_started:deadline_guard.check_live()
+            cycle_started=(time.monotonic_ns(),time.thread_time_ns());phase=cycle_started;timing={}
+            remaining=heartbeat_deadline-time.monotonic()
+            if remaining>0.:pump(remaining)
+            else:rclpy.spin_once(node,timeout_sec=0.)
+            phase=phase_mark(timing,'callback_pump',phase)
             dead=[(n,p.returncode) for n,p in procs if p.poll() is not None]
             if dead:raise RuntimeError('owned process exited '+repr(dead))
-            previous=readiness['ready']
+            previous=readiness['ready'];audit_sequence=None
             try:
-                source_health()
                 if args.with_waypoints:
-                    readiness['waypoint_ownership']=waypoint_ownership()
-                    if not readiness['waypoint_ownership']['exclusive_nav_client'] or not readiness['waypoint_ownership']['status_publishers_match']:
+                    observed,audit_sequence=ownership_worker.snapshot(node.get_clock().now().nanoseconds)
+                    # A current received private goal is fatal immediately, even if
+                    # the latest full worker observation preceded that callback.
+                    with ownership_observation_lock:
+                        ingress_violated=private_goal_messages>0 or first_private_publisher_violation is not None
+                    if ingress_violated:raise RuntimeError('Native BT private goal ingress violated')
+                    readiness['waypoint_ownership']=observed
+                    if not observed['exclusive_nav_client'] or not observed['status_publishers_match']:
                         raise RuntimeError('Native waypoint action ownership changed; shared NavigateToPose is unsupported')
+                phase=phase_mark(timing,'ownership_snapshot',phase)
+                # This recheck is AFTER graph work, immediately before publication.
+                source_health();phase=phase_mark(timing,'source_health',phase)
                 readiness.update(ready=True,reason=None)
             except Exception as e:readiness.update(ready=False,reason=str(e))
-            readiness.update(time_ns=node.get_clock().now().nanoseconds,valid_until_ns=node.get_clock().now().nanoseconds+500_000_000)
-            write(out/'ready.json',readiness)
+            issued=node.get_clock().now().nanoseconds
+            expiry=issued+500_000_000
+            if args.with_waypoints and readiness['ready']:
+                expiry=min(expiry,readiness['waypoint_ownership']['checked_unix_ns']+500_000_000)
+            readiness.update(time_ns=issued,valid_until_ns=expiry)
+            audit_state=ownership_worker.state() if ownership_worker is not None else None
+            readiness['producer_timing']=dict(heartbeat_started_steady_ns=cycle_started[0],phases=timing,
+              previous_atomic_write=previous_write_timing,ownership_audit=audit_state,
+              ownership_audit_sequence_reused=audit_sequence is not None and audit_sequence==previous_audit_sequence,
+              ownership_checked_age_ns=issued-readiness['waypoint_ownership']['checked_unix_ns'] if args.with_waypoints else None)
+            phase=(time.monotonic_ns(),time.thread_time_ns())
+            write(out/'ready.json',readiness,compact=True)
+            finished=phase_mark(timing,'atomic_ready_write',phase)
+            timing_record=dict(issued_unix_ns=issued,ready=readiness['ready'],reason=readiness.get('reason'),
+              phases=timing,audit=audit_state,audit_sequence=audit_sequence,
+              reused_audit=audit_sequence is not None and audit_sequence==previous_audit_sequence,
+              heartbeat_gap_ns=finished[0]-last_write_finished_ns,cycle_wall_ns=finished[0]-cycle_started[0],
+              cycle_thread_cpu_ns=finished[1]-cycle_started[1])
+            producer_timing_stream.write(json.dumps(timing_record,separators=(',',':'))+'\n')
+            if time.monotonic()-last_timing_flush>=1.:
+                producer_timing_stream.flush();last_timing_flush=time.monotonic()
+            previous_write_timing=timing['atomic_ready_write'];previous_audit_sequence=audit_sequence
+            last_write_finished_ns=finished[0]
+            heartbeat_deadline=next_heartbeat_deadline(heartbeat_deadline,time.monotonic())
             if readiness['ready']!=previous:event('readiness_changed',ready=readiness['ready'],reason=readiness['reason'])
     except Exception as e:write(out/'failed.json',dict(error=repr(e)));event('failure',error=repr(e));raise
     finally:
         shutdown_started=True
         deadline_guard.begin_shutdown('runtime_shutdown_started')
+        if ownership_worker is not None:ownership_worker.request_stop()
         event('shutdown_started',requested_signals=stop_signals)
         readiness=json.loads((out/'ready.json').read_text()) if (out/'ready.json').exists() else {}
         readiness.update(ready=False,stopped_at_ns=node.get_clock().now().nanoseconds)
@@ -735,6 +863,8 @@ def run(args,out,selected_install,manifest,deadline_guard):
             write(out/'final_audit.json',dict(message_count=md['message_count'],topic_counts=topic_counts,required_topics_nonempty={t:topic_counts.get(t,0)>0 for t in required},
               static_layer_exactly_once_cdr_verified=snapshot_audit['passed'],mcap_sha256={p.name:sha(p) for p in (out/'bag').glob('*.mcap')},note='Sequential decode and per-case action/results remain required before acceptance.'))
             event('recording_audit_completed')
+        if ownership_worker is not None:event('ownership_audit_worker_closed',joined=ownership_worker.join())
+        if producer_timing_stream is not None:producer_timing_stream.close()
         event('stopped',observed_counts=counts);event_stream.close();node.destroy_node();rclpy.shutdown()
 
 def main():
