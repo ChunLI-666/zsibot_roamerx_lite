@@ -30,7 +30,7 @@ import pilot_scan_timing as frozen
 import message_info_contract
 from waypoint_contract import (ACTION, AsyncEvidenceWriter, OrderedVisits, OwnedGoalIdentity,
                                evidence_json, finite_velocity, mission_budget, strict_stopped, validate_ownership, validate_route, waypoint_binding)
-from waypoint_contract import validate_settle_budget
+from waypoint_contract import ownership_metadata_lease_deviation, validate_settle_budget
 from waypoint_contract import (scan_aging_confirmation_eligible, scan_aging_confirmation_outcome,
                                scan_confirmation_payload_valid, validate_scan_aging_confirmation)
 
@@ -60,6 +60,7 @@ def freeze_sources(output):
         cancellation='Only this client FollowWaypoints UUID; the upstream Jazzy server internally cancels all goals on its NavigateToPose endpoint. Exclusive experiment ownership is required.',
         timing_boundary='Native source pose sample stamps are retained. /plan receipt latency is transport/BT/observer latency, not planner computation time. Child NavigateToPose UUID is unavailable to this client.')
     manifest['nonfinite_evidence_encoding']='Writer/final serialization only: {nonfinite_float: NaN/+Infinity/-Infinity}; original caches, first-invalid references and decision values remain unchanged.'
+    manifest['ownership_metadata_lease']='NavigateToPose ownership metadata uses the same 500ms old/50ms future lease as READY. Each checked_unix_ns exceeding the historical 300ms metadata boundary is recorded once with original validation time and READY; this is separate metadata latency evidence and never changes physical-input classification.'
     manifest['stop_cleanup']='Every possibly sent goal reaches finally own-UUID cancellation and a fresh finite measured/commanded stop observation, including response timeout, signal and exception. Default rclpy shutdown-on-SIGINT is disabled until cleanup completes.'
     manifest['scan_aging_confirmation']='Default 0 preserves strict behavior. Opt-in <=.05s drains existing callbacks only after sole scan-header aging; a newer original stamp must restore every original guard. Every episode permanently fails strict timing acceptance; no header-age threshold changes.'
     (output/'instrumentation_manifest.json').write_text(json.dumps(manifest, indent=2)+'\n')
@@ -84,6 +85,7 @@ class WaypointPilot(frozen.Pilot):
         self.finalizing = False
         self.stop_evidence = None
         self.scan_aging_episodes = []
+        self.ownership_metadata_reported_check_ns = set()
         super().__init__(args, output)
         # Base opens this handle but all batch events use the asynchronous writer.
         self.events.close()
@@ -160,6 +162,11 @@ class WaypointPilot(frozen.Pilot):
                 readiness_stage = 'waypoint_binding'
                 native = waypoint_binding(self.latest_ready, self.native_binding)
                 readiness_stage, ownership_checked_now_ns = 'validate_ownership', time.time_ns()
+                metadata_deviation = ownership_metadata_lease_deviation(
+                    self.latest_ready, ownership_checked_now_ns, self.ownership_metadata_reported_check_ns)
+                if metadata_deviation is not None:
+                    self.emit('ownership_metadata_lease_deviation',
+                        latest_ready_sha256=self.latest_ready_sha, **metadata_deviation)
                 validate_ownership(self.latest_ready.get('waypoint_ownership',{}),ownership_checked_now_ns,
                     None if self.owned_identity is None else self.owned_identity.value.hex(),self.goal_sent_ns)
                 readiness_stage = 'tolerances_and_source_binding'

@@ -212,10 +212,10 @@ class ConfirmationTests(unittest.TestCase):
                 self.assertFalse(pilot.run([ISSUE],snapshot(),terminal)[0])
                 self.assertEqual(0,pilot.ros.spins)
 
-    def test_ownership_boundaries_unchanged_and_diagnostic_exists(self):
+    def test_ownership_boundaries_match_ready_lease_and_diagnostic_exists(self):
         ownership = dict(exclusive_nav_client=True,status_publishers_match=True,checked_unix_ns=1_000_000_000)
-        for now in [950_000_000,1_300_000_000]: contract.validate_ownership(ownership,now)
-        for now in [949_999_999,1_300_000_001]:
+        for now in [950_000_000,1_500_000_000]: contract.validate_ownership(ownership,now)
+        for now in [949_999_999,1_500_000_001]:
             with self.assertRaisesRegex(ValueError,'stale or future'): contract.validate_ownership(ownership,now)
         text=(ROOT/'goal_pilot_source/waypoint_batch.py').read_text()
         self.assertIn("self.emit('readiness_validation_failed'",text)
@@ -225,7 +225,7 @@ class ConfirmationTests(unittest.TestCase):
         tree=ast.parse((ROOT/'goal_pilot_source/waypoint_batch.py').read_text())
         cls=next(node for node in tree.body if isinstance(node,ast.ClassDef) and node.name=='WaypointPilot')
         method=copy.deepcopy(next(node for node in cls.body if isinstance(node,ast.FunctionDef) and node.name=='execution_ready'))
-        for checked,expected_age_ns in [(1_000_000_000,300_000_001),(1_350_000_002,-50_000_001)]:
+        for checked,expected_age_ns in [(800_000_000,500_000_001),(1_350_000_002,-50_000_001)]:
             ready=dict(waypoint_ownership=dict(exclusive_nav_client=True,status_publishers_match=True,checked_unix_ns=checked))
             current=snapshot(age=.1)
             current['last']['pose']['raw_pose_values_finite']=True
@@ -233,22 +233,25 @@ class ConfirmationTests(unittest.TestCase):
             fake=SimpleNamespace(args=SimpleNamespace(execute=True,scan_aging_confirm_sec=0.,ready=None,variant='official'),
                 check_interruption=lambda:None,input_ready=lambda **kw:(True,[],current),
                 runtime_binding=None,native_binding=None,owned_identity=None,goal_sent_ns=None,
+                ownership_metadata_reported_check_ns=set(),
                 event_pub=SimpleNamespace(get_subscription_count=lambda:1),
                 emit=lambda kind,**fields:captured.append(dict(kind=kind,**fields)),
                 scan_timing_record_check=lambda *args:None)
             namespace=dict(time=SimpleNamespace(time_ns=lambda:1_300_000_001,monotonic_ns=lambda:500),
                 frozen=SimpleNamespace(read_ready=lambda *args:(ready,{},'abc')),
                 finite_velocity=contract.finite_velocity,waypoint_binding=lambda *args:{},
-                validate_ownership=contract.validate_ownership)
+                validate_ownership=contract.validate_ownership,
+                ownership_metadata_lease_deviation=contract.ownership_metadata_lease_deviation)
             exec(compile(ast.fix_missing_locations(ast.Module(body=[method],type_ignores=[])),
                          'waypoint_batch.py','exec'),namespace)
             valid,issues,_=namespace['execution_ready'](fake)
             self.assertFalse(valid)
             self.assertEqual(['readiness:Waypoint action ownership observation is stale or future'],issues)
-            self.assertEqual('validate_ownership',captured[0]['stage'])
-            self.assertTrue(captured[0]['latest_ready_is_failing_read'])
-            self.assertEqual(expected_age_ns,captured[0]['ownership_validation_unix_ns']-
-                             captured[0]['latest_ready']['waypoint_ownership']['checked_unix_ns'])
+            failure=next(event for event in captured if event['kind']=='readiness_validation_failed')
+            self.assertEqual('validate_ownership',failure['stage'])
+            self.assertTrue(failure['latest_ready_is_failing_read'])
+            self.assertEqual(expected_age_ns,failure['ownership_validation_unix_ns']-
+                             failure['latest_ready']['waypoint_ownership']['checked_unix_ns'])
 
 
 

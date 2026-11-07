@@ -213,7 +213,9 @@ def exclusive_graph(nodes):
 def validate_ownership(ownership, now_ns, own_uuid=None, parent_sent_ns=None):
     if ownership.get('exclusive_nav_client') is not True or ownership.get('status_publishers_match') is not True:
         raise ValueError('NavigateToPose endpoint is not exclusively owned by the native follower')
-    if not -.05 <= (now_ns-ownership.get('checked_unix_ns', 0))/1e9 <= .3:
+    # This is launcher metadata, governed by the same 500ms lease as read_ready().
+    # Sensor/header, TF, scan, command and stop guards retain their 300ms limits.
+    if not -.05 <= (now_ns-ownership.get('checked_unix_ns', 0))/1e9 <= .5:
         raise ValueError('Waypoint action ownership observation is stale or future')
     pose = ownership.get('navigate_to_pose_active', [])
     batch = ownership.get('follow_waypoints_active', [])
@@ -224,6 +226,22 @@ def validate_ownership(ownership, now_ns, own_uuid=None, parent_sent_ns=None):
         raise ValueError('Foreign batch or concurrent NavigateToPose goal observed')
     elif parent_sent_ns is not None and any(item.get('accepted_stamp_ns', 0) < parent_sent_ns-50_000_000 for item in pose):
         raise ValueError('Active NavigateToPose predates this batch; child association is unproven')
+
+
+def ownership_metadata_lease_deviation(ready, now_ns, seen_check_ns):
+    """Record each >300ms metadata observation once, apart from physical inputs."""
+    ownership = ready.get('waypoint_ownership', {})
+    checked_ns = ownership.get('checked_unix_ns', 0)
+    age_ns = now_ns-checked_ns
+    if age_ns <= 300_000_000 or checked_ns in seen_check_ns:
+        return None
+    seen_check_ns.add(checked_ns)
+    return dict(classification='launcher_ownership_metadata_lease_latency',
+                ownership_validation_unix_ns=now_ns, checked_unix_ns=checked_ns,
+                ownership_age_ns=age_ns, original_max_age_ns=300_000_000,
+                effective_max_age_ns=500_000_000, original_300ms_boundary_exceeded=True,
+                within_effective_metadata_lease=age_ns <= 500_000_000,
+                physical_input_classification_affected=False, latest_ready=ready)
 
 
 class OwnedGoalIdentity:
