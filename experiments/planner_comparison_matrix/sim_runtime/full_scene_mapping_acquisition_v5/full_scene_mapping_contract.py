@@ -55,6 +55,22 @@ class Hold(ValueError):
     pass
 
 
+class InputUnavailable(Hold):
+    """A classified transient required-input/timing failure; zero before retry."""
+
+
+class CollisionBlocked(Hold):
+    """A physical body sweep or fresh raw hit rejects this primitive."""
+
+
+def mapping_survey_enabled(value):
+    enabled=value.get('mapping_only_relaxed_survey',False)
+    if type(enabled) is not bool:raise Hold('mapping_only_relaxed_survey must be strict boolean')
+    if enabled and (value.get('purpose')!='mapping_only_relaxed_survey' or value.get('formal_navigation_acceptance') is not False):
+        raise Hold('relaxed survey requires explicit mapping purpose and false formal navigation acceptance')
+    return enabled
+
+
 def sha(path):
     with Path(path).open('rb') as stream:return hashlib.file_digest(stream,'sha256').hexdigest()
 
@@ -130,10 +146,10 @@ def pose_at(history,stamp_ns,max_gap_ns=50_000_000):
 
 
 def fresh(sample,now_ns,steady,limit=MAX_INPUT_AGE):
-    if not sample:raise Hold('missing input')
+    if not sample:raise InputUnavailable('missing input')
     age=(now_ns-sample['stamp_ns'])/1e9;received=steady-sample['received_steady']
     if not finite([age,received]) or not -FUTURE_ALLOWANCE<=age<=limit or not 0<=received<=limit:
-        raise Hold('stale/future input header or callback receipt')
+        raise InputUnavailable('stale/future input header or callback receipt')
     return dict(header_age_s=age,callback_age_s=received)
 
 
@@ -157,8 +173,8 @@ def command_age_upper(header_age_s,truth_age_cap=MAX_TRUTH_AGE):
 def command_time_pose_guard(truth,issued_ns,steady,guard_started,age_upper,truth_age_cap=MAX_TRUTH_AGE):
     if not finite([truth_age_cap]) or not 0<truth_age_cap<=MAX_TRUTH_AGE or age_upper>truth_age_cap:raise Hold('command age cap differs from swept truth cap')
     age=fresh(truth,issued_ns,steady,limit=truth_age_cap)
-    if not finite([guard_started,age_upper]) or not 0<=steady-guard_started<=GUARD_COMPUTE_BUDGET:raise Hold('command guard computation exceeded its swept age budget')
-    if age['header_age_s']>age_upper+1e-9:raise Hold('command-time pose age exceeds swept uncertainty')
+    if not finite([guard_started,age_upper]) or not 0<=steady-guard_started<=GUARD_COMPUTE_BUDGET:raise InputUnavailable('command guard computation exceeded its swept age budget')
+    if age['header_age_s']>age_upper+1e-9:raise InputUnavailable('command-time pose age exceeds swept uncertainty')
     return dict(**age,guard_elapsed_s=steady-guard_started,swept_pose_age_upper_s=age_upper)
 
 
@@ -171,6 +187,7 @@ def valid_local_identity(value):
 
 
 def validate_route(value,execute=False):
+    relaxed=mapping_survey_enabled(value)
     if type(value.get('schema_version')) is not int or value.get('schema_version')!=1 or value.get('scope')!=SCOPE or value.get('mode')!=MODE:raise Hold('wrong mapping-only route scope/mode')
     if not valid_scene_instance(value.get('scene_instance_id')):raise Hold('root scene process identity binding required')
     if execute and value.get('executable') is not True:raise Hold('route remains non-executable')
@@ -187,6 +204,13 @@ def validate_route(value,execute=False):
         pose=entry.get('pose_truth');name=entry.get('id')
         if not isinstance(name,str) or not name or name in ids:raise Hold('route IDs must be unique')
         if not isinstance(pose,list) or len(pose)!=3 or not finite(pose):raise Hold('nonfinite truth route pose')
+        if relaxed:
+            policy=entry.get('leg_policy')
+            if policy is not None:
+                if not isinstance(policy,dict) or policy.get('kind') not in ('straight_fixed_heading','lateral_fixed_body_heading'):raise Hold('unsupported mapping direction hint')
+                hint=policy.get('body_yaw_rad') if policy['kind']=='lateral_fixed_body_heading' else policy.get('travel_yaw_rad')
+                if not finite([hint]):raise Hold('nonfinite mapping heading hint')
+            ids.add(name);continue
         if entry.get('require_stopped') is not True:raise Hold('all acquisition points require a measured stop')
         policy=entry.get('leg_policy')
         if policy is not None:
@@ -381,7 +405,7 @@ class OracleGrid:
 
     def checked_sweep(self,a,b,inflation=0.):
         samples=self.sweep(a,b,inflation)
-        if not all(self.footprint_free(*pose,inflation) for pose in samples):raise Hold('filled-body sweep intersects occupied/unknown/outside physical oracle')
+        if not all(self.footprint_free(*pose,inflation) for pose in samples):raise CollisionBlocked('filled-body sweep intersects occupied/unknown/outside physical oracle')
         return samples
 
 
@@ -459,7 +483,7 @@ def guard_hits(points,sweep,inflation,model,oracle):
     for x,y,yaw in sweep:
         c,s=math.cos(yaw),math.sin(yaw)
         dx,dy=nearby[:,0]-x,nearby[:,1]-y
-        if ((np.abs(c*dx+s*dy)<=hx)&(np.abs(-s*dx+c*dy)<=hy)).any():raise Hold('fresh raw hit contradicts body/stop swept corridor')
+        if ((np.abs(c*dx+s*dy)<=hx)&(np.abs(-s*dx+c*dy)<=hy)).any():raise CollisionBlocked('fresh raw hit contradicts body/stop swept corridor')
     bins=np.unique(((np.arctan2(kept[:,1]-sweep[0][1],kept[:,0]-sweep[0][0])+math.pi)/(2*math.pi)*72).astype(int)%72)
     return dict(raw_hits=len(points),height_relevant_hits=len(kept),azimuth_bins_with_hits=len(bins),azimuth_bins_without_hits=72-len(bins),
                 coverage_semantics='Hit/visibility statistics only; gaps/occlusion do not prove free. Physical static oracle is the free evidence.',
@@ -515,6 +539,10 @@ def audit_route_geometry(oracle,route,model):
     This is geometric feasibility under the root's SIM bounds, not a promise of
     successful control. A live age/drift/stop envelope may still require HOLD.
     """
+    if mapping_survey_enabled(route):
+        return dict(checked=False,mapping_only_relaxed_survey=True,formal_navigation_acceptance=False,
+            legs=[dict(id=point['id'],pose_truth=point['pose_truth']) for point in route['waypoints']],
+            semantics='Ordered mapping targets and direction hints only. Every actual primitive requires live full-body stopping sweep and raw-hit checks; blocked targets may be skipped.')
     pose=tuple(route['start_anchor_truth']);samples=0;legs=[];radius=oracle.padded_radius
     for point in route['waypoints']:
         x,y,yaw=point['pose_truth'];length=math.hypot(x-pose[0],y-pose[1]);policy=point.get('leg_policy')

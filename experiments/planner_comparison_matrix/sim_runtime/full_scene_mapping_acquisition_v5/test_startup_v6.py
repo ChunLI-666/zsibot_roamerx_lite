@@ -14,6 +14,7 @@ def actual_function(name):
     fn.body=[ast.copy_location(ast.Global(names=n.names),n) if isinstance(n,ast.Nonlocal) else n for n in fn.body]
     return fn
 def install(fn,namespace):
+    namespace.setdefault('mapping_ready',False)  # Default closure input for strict mode.
     exec(compile(ast.fix_missing_locations(ast.Module(body=[fn],type_ignores=[])),'<actual v6 function>','exec'),namespace)
     return namespace[fn.name]
 
