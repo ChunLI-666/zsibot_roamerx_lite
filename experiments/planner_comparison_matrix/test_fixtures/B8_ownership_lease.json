@@ -1,0 +1,32 @@
+{
+  "source_case": "full_native_warehouse_B_v8_cost02_fullroute_batches",
+  "scope": "Selected original fields of the exact failed B8 ownership check; no fabricated UUID or timestamps",
+  "ownership_validation_unix_ns": 1794031857174528538,
+  "latest_ready": {
+    "ready": true,
+    "time_ns": 1794031856874484715,
+    "valid_until_ns": 1794031857374502136,
+    "variant": "official",
+    "action_server": "/navigate_to_pose",
+    "goal_tolerances": {
+      "xy": 0.15,
+      "yaw": 0.08,
+      "stateful": false
+    },
+    "params_sha256": "9454b7fd24cf55baf0450485a9085735f1a0def839ccf9f7a672d2e3975340dd",
+    "build_receipt_sha256": "8597e3b0e74801d8a17bec23642fec9141b329961a6ca48e019cecd4370767f9",
+    "waypoint_ownership": {
+      "exclusive_nav_client": true,
+      "status_publishers_match": true,
+      "checked_unix_ns": 1794031856874260826,
+      "navigate_to_pose_active": [],
+      "follow_waypoints_active": [
+        {
+          "uuid": "788c025128de46678ed03f69c255c0ff",
+          "status": 2,
+          "accepted_stamp_ns": 1794031855758370779
+        }
+      ]
+    }
+  }
+}
