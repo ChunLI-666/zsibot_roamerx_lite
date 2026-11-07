@@ -354,6 +354,17 @@ def lifecycle_artifacts(install,receipt_path):
     return dict(install_prefix=str(prefix),receipt_path=str(receipt),receipt_sha256=sha(receipt),
       source_manifest=data['source_manifest'],artifact_sha256=files)
 
+def navigation_tree(variant):
+    """A single bounded controller recovery retains the same external goal."""
+    plain='<Sequence><ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/><FollowPath path="{path}" controller_id="FollowPath" goal_checker_id="Checker" progress_checker_id="Progress"/></Sequence>'
+    if variant=='official':
+        # Reset the error before ComputePath so planner failures cannot reuse a
+        # previous goal's controller error and spuriously enter recovery.
+        execute='<Sequence><SetBlackboard output_key="follow_path_error_code" value="0"/><ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased" error_code_id="{compute_path_error_code}"/><FollowPath path="{path}" controller_id="FollowPath" goal_checker_id="Checker" progress_checker_id="Progress" error_code_id="{follow_path_error_code}"/></Sequence>'
+        recover='<Sequence><WouldAControllerRecoveryHelp error_code="{follow_path_error_code}"/><Delay delay_msec="1000"><AlwaysSuccess/></Delay></Sequence>'
+        plain='<RecoveryNode number_of_retries="1" name="StoppedOriginalGoalReplan">'+execute+recover+'</RecoveryNode>'
+    return '<root BTCPP_format="4" main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree">'+plain+'</BehaviorTree></root>\n'
+
 def prepare(args):
     template=pathlib.Path(args.template).absolute()
     snapshot,snapshot_raw=source_snapshot(args.source_snapshot,template,args.with_waypoints) if args.source_snapshot else (None,None)
@@ -460,7 +471,11 @@ def prepare(args):
             boundary='Configured artifact/source binding; loaded-library evidence is recorded separately in runtime_identities.json'),sort_keys=True)
         manifest['planner_failure_snapshot']=dict(directory=str(snapshot_dir),
             scope='Exact locked input on failure; base iterations unknown; writes after locks release and outside original search timer')
-    bt=out/'navigate.xml';bt.write_text('<root BTCPP_format="4" main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree"><Sequence><ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/><FollowPath path="{path}" controller_id="FollowPath" goal_checker_id="Checker" progress_checker_id="Progress"/></Sequence></BehaviorTree></root>\n')
+    bt=out/'navigate.xml';bt.write_text(navigation_tree(args.variant))
+    manifest['controller_recovery']=dict(enabled=args.variant=='official',maximum_retries=1 if args.variant=='official' else 0,
+      policy='Controller recoverable failure only; stopped zero, builtin Delay1s, fresh full ComputePathToPose then new FollowPath to unchanged original goal; no waypoint success or external goal UUID resend',
+      wait_implementation='BehaviorTree.CPP Delay/AlwaysSuccess; no behavior_server or motion recovery action',
+      plugins=['nav2_recovery_node_bt_node','nav2_would_a_controller_recovery_help_condition_bt_node'] if args.variant=='official' else [])
     d['bt_navigator']['ros__parameters']['default_nav_to_pose_bt_xml']=str(bt)
     manifest['with_waypoints']=args.with_waypoints
     if args.with_waypoints:
