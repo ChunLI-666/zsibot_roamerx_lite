@@ -218,11 +218,13 @@ def prepare(args):
     planner=d['planner_server']['ros__parameters']['GridBased'];planner.update(plugin=required_plugin,tolerance=0.,max_planning_time=2.,rotation_penalty=1.)
     controller=d['controller_server']['ros__parameters'];controller['Checker'].update(stateful=False,xy_goal_tolerance=args.xy_tolerance,yaw_goal_tolerance=args.yaw_tolerance,controller_name='FollowPath')
     if args.variant=='segmented':
+        planner.update(cost_penalty=0.,terminal_goal_binding=True,terminal_global_resolution=.01)
         planner['lattice_filepath']=str(selected_install/'share/robot_feasible_navigation/params/stop_turn_1cm_h16.json')
         controller['Checker']['plugin']='nav2_controller::SimpleGoalChecker'
         controller['FollowPath']=dict(rpp,plugin='nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController')
         controller['segments']=dict(xy_tolerance=args.xy_tolerance,yaw_tolerance=args.yaw_tolerance,stopped_linear_velocity=.01,stopped_angular_velocity=.01,
-          same_xy_epsilon=.0001,progress_search_distance=.25,odom_timeout=.3,rotation_anchor_wait_timeout=15.,command_sweep_horizon=1.)
+          same_xy_epsilon=.0001,progress_search_distance=.25,odom_timeout=.3,rotation_anchor_wait_timeout=15.,command_sweep_horizon=1.,
+          terminal_goal_binding=True,terminal_global_resolution=.01,terminal_global_extent=20.)
     else:
         controller['Checker']['plugin']='official_lattice_rpp_adapter::FeasibleGoalChecker'
         controller['FollowPath']=dict(plugin='official_lattice_rpp_adapter::FeasibleRPP',rpp=rpp,odom_timeout=.3,sweep_horizon=1.,
@@ -447,7 +449,7 @@ def run(args,out,selected_install,manifest,deadline_guard):
     if len(commit)!=40 or any(c not in '0123456789abcdef' for c in commit):raise RuntimeError('Build receipt requires full repository_commit SHA')
     if receipt.get('source_files_match_commit') is not True:raise RuntimeError('Build receipt must prove selected source files match its commit')
     declared=receipt.get('artifact_sha256',{})
-    required=['lib/libsegment_controller_core.so','lib/libsafe_lattice_planner.so','lib/robot_feasible_navigation/segment_controller_server'] if args.variant=='segmented' else ['lib/libofficial_lattice_rpp_adapter.so']
+    required=['lib/librfn_goal_cell_binding.so','lib/libsegment_controller_core.so','lib/libsafe_lattice_planner.so','lib/robot_feasible_navigation/segment_controller_server'] if args.variant=='segmented' else ['lib/libofficial_lattice_rpp_adapter.so']
     for rel in required:
         if rel not in declared:raise RuntimeError('Missing required artifact in build receipt: '+rel)
     for rel,digest in declared.items():

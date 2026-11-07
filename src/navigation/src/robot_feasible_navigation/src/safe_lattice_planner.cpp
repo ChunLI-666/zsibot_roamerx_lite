@@ -8,6 +8,7 @@
 #include <utility>
 #include "nav2_core/planner_exceptions.hpp"
 #include "pluginlib/class_list_macros.hpp"
+#include "robot_feasible_navigation/goal_cell_binding.hpp"
 
 namespace robot_feasible_navigation
 {
@@ -152,6 +153,15 @@ void SafeLatticePlanner::configure(
 {
   auto node = parent.lock();
   require(static_cast<bool>(node), "missing lifecycle parent");
+  nav2_util::declare_parameter_if_not_declared(node,name+".terminal_goal_binding",rclcpp::ParameterValue(false));
+  nav2_util::declare_parameter_if_not_declared(node,name+".terminal_global_resolution",rclcpp::ParameterValue(.01));
+  terminal_goal_binding_=node->get_parameter(name+".terminal_goal_binding").as_bool();
+  if (terminal_goal_binding_) {
+    const double resolution=node->get_parameter(name+".terminal_global_resolution").as_double();
+    require(std::isfinite(resolution)&&resolution>0.&&
+      std::abs(resolution-costmap_ros->getCostmap()->getResolution())<1e-12,
+      "goal binding resolution mismatch");
+  }
   // Normal Nav2 LifecycleNode does not automatically declare YAML overrides.
   // Require each safety-critical value to be explicit, declare that override,
   // then validate; never require has_parameter() before reading overrides.
@@ -337,9 +347,23 @@ nav_msgs::msg::Path SafeLatticePlanner::createPlan(
   auto exact_goal = goal;
   exact_goal.header = output.header;
   if (sx == gx && sy == gy) {
-    connectStopTurn(output, exact_goal, *_costmap, footprint, canceled);
+    if (terminal_goal_binding_) {
+      // Existing Jazzy singleton semantics, proved before advertising the goal.
+      auto native=output;native.poses.back().pose.orientation=exact_goal.pose.orientation;
+      require(goal_region::proveGoalCell(
+        native,exact_start,exact_goal,*_costmap).valid,"same-cell goal binding proof failed");
+      auto attitude=output.poses.back();attitude.pose.orientation=exact_goal.pose.orientation;
+      appendCheckedSegment(output,attitude,*_costmap,footprint,canceled);
+      output.poses.push_back(exact_goal);  // Explicit protocol wire goal,never an executable edge.
+    } else {
+      connectStopTurn(output, exact_goal, *_costmap, footprint, canceled);
+    }
   } else {
     auto searched = robot_feasible_navigation_smac::SmacPlannerLattice::createPlan(start, goal, canceled);
+    if (terminal_goal_binding_) {
+      require(goal_region::proveGoalCell(
+        searched,exact_start,exact_goal,*_costmap).valid,"raw goal binding proof failed");
+    }
     restoreSearchRoundoff(searched, exact_start, exact_goal, *_costmap);
     auto first = searched.poses.front();
     first.header = output.header;
@@ -373,7 +397,13 @@ nav_msgs::msg::Path SafeLatticePlanner::createPlan(
       }
       appendCheckedSegment(output, pose, *_costmap, footprint, canceled);
     }
-    connectStopTurn(output, exact_goal, *_costmap, footprint, canceled);
+    if (terminal_goal_binding_) {
+      auto attitude=output.poses.back();attitude.pose.orientation=exact_goal.pose.orientation;
+      appendCheckedSegment(output,attitude,*_costmap,footprint,canceled);
+      output.poses.push_back(exact_goal);  // Consumer must split and retain original goal acceptance.
+    } else {
+      connectStopTurn(output, exact_goal, *_costmap, footprint, canceled);
+    }
   }
   require(output.poses.back().pose == exact_goal.pose, "exact original goal was not retained");
   return output;

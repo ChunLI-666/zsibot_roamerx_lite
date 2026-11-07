@@ -305,3 +305,14 @@ This changes only the recording supervisor's finite upper limit. The absolute
 CLOCK_BOOTTIME deadline, retained-pidfd ownership, stop order, default timeout,
 planning budget, sensor-age checks and measured stop requirements are unchanged.
 Inputs have their own deadline and must remain available throughout each case.
+
+Segmented A original-goal binding
+
+The segmented profile explicitly selects `cost_penalty: 0.0`, the original 2 s
+planning budget, and terminal goal binding on both producer and consumer.
+`robot_feasible_navigation::goal_region` exports stateless cell proof and wire
+parsing through `robot_feasible_navigation::rfn_goal_cell_binding`. The final
+original goal pose stays on the wire while only the checked prefix is executable.
+Current original-goal XY/yaw, ordered phases and measured stopping remain required.
+The vendor search and filled footprint checks are unchanged. This configuration
+is an offline-supported candidate; a full Native A run and comparison remain pending.

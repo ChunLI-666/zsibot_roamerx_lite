@@ -19,6 +19,7 @@ find_package(nav_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(builtin_interfaces REQUIRED)
+find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(pluginlib REQUIRED)
@@ -31,9 +32,18 @@ find_package(nlohmann_json REQUIRED)
 set(common_dependencies
   rclcpp rclcpp_action rclcpp_lifecycle rclcpp_components nav2_core nav2_util
   nav2_msgs nav2_costmap_2d nav_2d_msgs nav_2d_utils geometry_msgs nav_msgs
-  std_msgs visualization_msgs builtin_interfaces tf2_ros tf2_geometry_msgs pluginlib angles)
+  std_msgs visualization_msgs builtin_interfaces tf2 tf2_ros tf2_geometry_msgs pluginlib angles)
 
 option(RFN_BUILD_SEGMENT_CONTROLLER "Build ordered FollowPath server as well as the planner" ON)
+# Stateless cell proof and original-goal wire protocol, usable without the B package.
+add_library(rfn_goal_cell_binding SHARED src/goal_cell_binding.cpp)
+target_include_directories(rfn_goal_cell_binding PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>)
+ament_target_dependencies(rfn_goal_cell_binding nav2_costmap_2d nav_msgs tf2 tf2_geometry_msgs)
+install(TARGETS rfn_goal_cell_binding EXPORT export_goal_cell_binding
+  ARCHIVE DESTINATION lib LIBRARY DESTINATION lib RUNTIME DESTINATION bin)
+
 if(RFN_BUILD_SEGMENT_CONTROLLER)
 add_library(segment_controller_core SHARED
   src/segment_coordinator.cpp src/segment_controller_server.cpp)
@@ -41,6 +51,7 @@ target_include_directories(segment_controller_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
 ament_target_dependencies(segment_controller_core ${common_dependencies})
+target_link_libraries(segment_controller_core rfn_goal_cell_binding)
 rclcpp_components_register_nodes(segment_controller_core
   "robot_feasible_navigation::SegmentControllerServer")
 add_executable(segment_controller_server src/segment_controller_main.cpp)
@@ -66,7 +77,7 @@ target_include_directories(safe_lattice_planner PUBLIC
   $<INSTALL_INTERFACE:include>
   PRIVATE ${smac_vendor}/include ${OMPL_INCLUDE_DIRS})
 ament_target_dependencies(safe_lattice_planner ${common_dependencies})
-target_link_libraries(safe_lattice_planner Eigen3::Eigen nlohmann_json::nlohmann_json ${OMPL_LIBRARIES})
+target_link_libraries(safe_lattice_planner rfn_goal_cell_binding Eigen3::Eigen nlohmann_json::nlohmann_json ${OMPL_LIBRARIES})
 pluginlib_export_plugin_description_file(nav2_core plugin_lattice.xml)
 
 install(TARGETS safe_lattice_planner
@@ -101,10 +112,14 @@ if(BUILD_TESTING)
   ament_target_dependencies(test_lattice_safety ${common_dependencies})
   set_tests_properties(test_lattice_safety PROPERTIES
     RUN_SERIAL TRUE TIMEOUT 90)
+  ament_add_gtest(test_goal_cell_binding test/test_goal_cell_binding.cpp src/segment_coordinator.cpp)
+  target_include_directories(test_goal_cell_binding PRIVATE include)
+  target_link_libraries(test_goal_cell_binding rfn_goal_cell_binding)
+  ament_target_dependencies(test_goal_cell_binding ${common_dependencies})
   ament_add_pytest_test(test_primitives test/test_primitives.py)
   set(test_environment
-    "ROS_LOG_DIR=${CMAKE_CURRENT_BINARY_DIR}/ros_logs;ROS_DOMAIN_ID=228;ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST;PYTHONDONTWRITEBYTECODE=1;LD_LIBRARY_PATH=${CMAKE_CURRENT_BINARY_DIR}:/opt/ros/jazzy/lib:/opt/ros/jazzy/lib/${CMAKE_LIBRARY_ARCHITECTURE}:$ENV{LD_LIBRARY_PATH}")
-  set_tests_properties(test_footprint_sweep test_lattice_safety test_primitives PROPERTIES
+    "ROS_LOG_DIR=${CMAKE_CURRENT_BINARY_DIR}/ros_logs;ROS_DOMAIN_ID=190;ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST;PYTHONDONTWRITEBYTECODE=1;LD_LIBRARY_PATH=${CMAKE_CURRENT_BINARY_DIR}:/opt/ros/jazzy/lib:/opt/ros/jazzy/lib/${CMAKE_LIBRARY_ARCHITECTURE}:$ENV{LD_LIBRARY_PATH}")
+  set_tests_properties(test_footprint_sweep test_lattice_safety test_primitives test_goal_cell_binding PROPERTIES
     ENVIRONMENT "${test_environment}")
   if(RFN_BUILD_SEGMENT_CONTROLLER)
     set_tests_properties(test_segment_coordinator PROPERTIES ENVIRONMENT "${test_environment}")
@@ -112,6 +127,8 @@ if(BUILD_TESTING)
 endif()
 
 ament_export_include_directories(include)
+ament_export_targets(export_goal_cell_binding HAS_LIBRARY_TARGET)
+ament_export_libraries(rfn_goal_cell_binding)
 if(RFN_BUILD_SEGMENT_CONTROLLER)
 ament_export_libraries(segment_controller_core)
 endif()

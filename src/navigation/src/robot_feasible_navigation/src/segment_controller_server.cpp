@@ -34,6 +34,7 @@
 #include "nav2_util/node_utils.hpp"
 #include "nav2_util/geometry_utils.hpp"
 #include "robot_feasible_navigation/segment_controller_server.hpp"
+#include "robot_feasible_navigation/goal_cell_binding.hpp"
 
 using namespace std::chrono_literals;
 using rcl_interfaces::msg::ParameterType;
@@ -133,6 +134,9 @@ SegmentControllerServer::SegmentControllerServer(const rclcpp::NodeOptions & opt
   declare_parameter("segments.odom_timeout", config.odom_timeout, descriptor);
   declare_parameter("segments.rotation_anchor_wait_timeout", config.rotation_anchor_wait_timeout, descriptor);
   declare_parameter("segments.command_sweep_horizon", 1.0, descriptor);
+  declare_parameter("segments.terminal_goal_binding", false, descriptor);
+  declare_parameter("segments.terminal_global_resolution", .01, descriptor);
+  declare_parameter("segments.terminal_global_extent", 20., descriptor);
 
   // The costmap node is used in the implementation of the controller
   costmap_ros_ = std::make_shared<nav2_costmap_2d::Costmap2DROS>(
@@ -157,6 +161,15 @@ nav2_util::CallbackReturn
 SegmentControllerServer::on_configure(const rclcpp_lifecycle::State & state)
 {
   auto node = shared_from_this();
+  get_parameter("segments.terminal_goal_binding",terminal_goal_binding_);
+  get_parameter("segments.terminal_global_resolution",terminal_global_resolution_);
+  get_parameter("segments.terminal_global_extent",terminal_global_extent_);
+  if (terminal_goal_binding_ && (!std::isfinite(terminal_global_resolution_) ||
+    terminal_global_resolution_<=0. || !std::isfinite(terminal_global_extent_) || terminal_global_extent_<=0.))
+  {
+    RCLCPP_ERROR(get_logger(),"Invalid fixed goal binding geometry");
+    return nav2_util::CallbackReturn::FAILURE;
+  }
 
   SegmentCoordinator::Config segment_config;
   get_parameter("segments.xy_tolerance", segment_config.xy_tolerance);
@@ -781,6 +794,7 @@ void SegmentControllerServer::clearSegmentState()
   queued_path_.reset();
   segment_braking_ = false;
   original_goal_.reset();
+  current_wire_path_=nav_msgs::msg::Path{};
   terminal_braking_ = terminal_rotation_active_ = false;
   invalid_odom_since_.reset();
   rotation_anchor_wait_since_.reset();
@@ -788,16 +802,26 @@ void SegmentControllerServer::clearSegmentState()
   incoming_rotation_snapshot_ = false;
 }
 
+nav_msgs::msg::Path SegmentControllerServer::executionInput(const nav_msgs::msg::Path & path) const
+{
+  if (!terminal_goal_binding_) {return path;}
+  try {
+    return goal_region::splitBinding(
+      path,terminal_global_resolution_,terminal_global_extent_).executable;
+  } catch (const std::exception & e) {throw nav2_core::InvalidPath(e.what());}
+}
+
 void SegmentControllerServer::setPlannerPath(
   const nav_msgs::msg::Path & path, bool require_entry_stop)
 {
   const bool preserve_goal = original_goal_ &&
-    SegmentCoordinator::compatibleGoal(coordinator_.fullPath(), path);
+    SegmentCoordinator::compatibleGoal(current_wire_path_, path);
   try {
-    coordinator_.setPath(path, require_entry_stop);
+    coordinator_.setPath(executionInput(path), require_entry_stop);
   } catch (const std::invalid_argument & e) {
     throw nav2_core::InvalidPath(e.what());
   }
+  current_wire_path_=path;
   if (!preserve_goal) {
     original_goal_ = path.poses.back();
     original_goal_->header.frame_id = path.header.frame_id;
@@ -1153,9 +1177,9 @@ void SegmentControllerServer::updateGlobalPath()
   // same final pose/frame and same plugins within this worker; do not claim task identity.
   const bool compatible = controller == current_controller_ &&
     goal_checker == current_goal_checker_ && progress_checker == current_progress_checker_ &&
-    SegmentCoordinator::compatibleGoal(coordinator_.fullPath(), goal->path);
+    SegmentCoordinator::compatibleGoal(current_wire_path_, goal->path);
   SegmentCoordinator validated(coordinator_.config());
-  try {validated.setPath(goal->path);} catch (const std::invalid_argument & e) {
+  try {validated.setPath(executionInput(goal->path));} catch (const std::invalid_argument & e) {
     throw nav2_core::InvalidPath(e.what());
   }
   if (compatible && ((coordinator_.rotating() && !coordinator_.entryStopPending()) ||
@@ -1239,7 +1263,7 @@ bool SegmentControllerServer::isGoalReached()
     path_pose.pose, original_goal_->pose, xy_tolerance);
   if ((terminal_rotation_active_ || terminal_braking_) && queued_path_) {
     SegmentCoordinator pending(coordinator_.config());
-    pending.setPath(*queued_path_);
+    pending.setPath(executionInput(*queued_path_));
     pending.observe(path_pose.pose);
     terminal_eligible = terminal_eligible && pending.terminalWindowEligible(
       path_pose.pose, original_goal_->pose, xy_tolerance);

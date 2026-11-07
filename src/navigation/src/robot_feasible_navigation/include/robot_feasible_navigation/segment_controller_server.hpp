@@ -287,6 +287,10 @@ protected:
 
   // Only accessed by the existing FollowPath worker while it owns dynamic_params_lock_.
   SegmentCoordinator coordinator_;
+  nav_msgs::msg::Path executionInput(const nav_msgs::msg::Path & path) const;
+  nav_msgs::msg::Path current_wire_path_;
+  bool terminal_goal_binding_{false};
+  double terminal_global_resolution_{.01},terminal_global_extent_{20.};
   std::unique_ptr<nav2_core::GoalChecker> intermediate_goal_checker_;
   std::optional<nav_msgs::msg::Path> queued_path_;
   bool segment_braking_{false};

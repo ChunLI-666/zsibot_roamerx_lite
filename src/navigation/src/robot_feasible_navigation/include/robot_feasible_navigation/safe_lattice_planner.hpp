@@ -41,6 +41,7 @@ public:
 private:
   std::mutex request_mutex_;
   std::string control_file_;
+  bool terminal_goal_binding_{false};
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr safe_parameter_guard_;
 };
 }  // namespace robot_feasible_navigation
