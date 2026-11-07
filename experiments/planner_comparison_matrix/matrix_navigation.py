@@ -140,6 +140,25 @@ def waypoint_service_ownership(graph,action_classifier,native_self_client=None):
       client_classification_boundary='Actual service-client endpoints identify every caller/canceller, including partial/wrong types. Native follower and bt_navigator must each have all three exact service types. Only the owned, artifact-bound bt self-client with run-UUID private topic ingress, observed zero publishers/messages and exact subscription ownership is excluded from the legacy navigate_to_pose_clients business-sender list. Raw action graph and both actual callers remain recorded. This is monitored cooperative isolation, not an ACL. Existing action-server role checks are unchanged.')
     return result
 
+def lifecycle_artifacts(install,receipt_path):
+    """Bind an optional existing lifecycle implementation to its exact build."""
+    if bool(install)!=bool(receipt_path):raise ValueError('Lifecycle install and build receipt must be supplied together')
+    if not install:return None
+    prefix=pathlib.Path(install).resolve();receipt=pathlib.Path(receipt_path).resolve()
+    data=json.loads(receipt.read_text())
+    if data.get('schema')!='matrix.lifecycle.build_receipt.v1' or data.get('install_prefix')!=str(prefix):
+        raise ValueError('Lifecycle build receipt schema or prefix differs')
+    files=data.get('artifact_sha256',{})
+    required={'lib/nav2_lifecycle_manager/lifecycle_manager','lib/libnav2_lifecycle_manager_core.so'}
+    if not required<=files.keys():raise ValueError('Lifecycle receipt lacks executable/core library')
+    for name,digest in files.items():
+        relative=pathlib.PurePosixPath(name);path=(prefix/name).resolve()
+        if relative.is_absolute() or '..' in relative.parts or relative.as_posix()!=name or not path.is_relative_to(prefix):
+            raise ValueError('Lifecycle artifact escapes prefix')
+        if not path.is_file() or sha(path)!=digest:raise ValueError('Lifecycle artifact differs: '+name)
+    return dict(install_prefix=str(prefix),receipt_path=str(receipt),receipt_sha256=sha(receipt),
+      source_manifest=data['source_manifest'],artifact_sha256=files)
+
 def prepare(args):
     template=pathlib.Path(args.template).absolute()
     snapshot,snapshot_raw=source_snapshot(args.source_snapshot,template,args.with_waypoints) if args.source_snapshot else (None,None)
@@ -183,6 +202,9 @@ def prepare(args):
           note='Supplied canonical source observation and verified deployment bytes; no deployment Git checkout was inspected. This does not replace the selected artifact build receipt.')
     if args.build_receipt:
         receipt=pathlib.Path(args.build_receipt).resolve();shutil.copy2(receipt,out/'source_build_receipt.json');manifest['build_receipt_sha256']=sha(receipt)
+    manifest['lifecycle_manager_runtime']=lifecycle_artifacts(args.lifecycle_install,args.lifecycle_build_receipt)
+    if manifest['lifecycle_manager_runtime']:
+        shutil.copy2(args.lifecycle_build_receipt,out/'lifecycle_build_receipt.json')
     for node in ['controller_server','velocity_smoother','bt_navigator']:d[node]['ros__parameters']['odom_topic']=args.odom_topic
     d['map_server']['ros__parameters']['yaml_filename']=str(map_yaml)
     for name,size,frequency in [('global_costmap',20,.5),('local_costmap',6,1.)]:
@@ -264,6 +286,8 @@ def run(args,out,selected_install,manifest,deadline_guard):
     if os.environ.get('ROS_DOMAIN_ID')!='185':raise RuntimeError('Matrix navigation requires the isolated domain185 environment from simulation_setup')
     if not args.build_receipt:raise RuntimeError('--run requires a concrete selected-artifact --build-receipt')
     if not args.message_install:raise RuntimeError('--run requires an isolated custom-message --message-install for complete recording')
+    if lifecycle_artifacts(args.lifecycle_install,args.lifecycle_build_receipt)!=manifest['lifecycle_manager_runtime']:
+        raise RuntimeError('Lifecycle artifacts changed after preparation')
     if args.source_snapshot:
         # Recheck the frozen manifest immediately before runtime setup, including
         # files copied later (safety gate); a preparation result is not a lease.
@@ -435,6 +459,9 @@ def run(args,out,selected_install,manifest,deadline_guard):
         artifact=(runtime/rel).resolve()
         if not artifact.is_relative_to(runtime.resolve()) or not artifact.is_file() or sha(artifact)!=digest:raise RuntimeError('Selected runtime does not match concrete build receipt: '+rel)
     env=os.environ.copy();env['AMENT_PREFIX_PATH']=str(runtime)+':/opt/ros/jazzy';env['LD_LIBRARY_PATH']=str(runtime/'lib')+':/opt/ros/jazzy/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu'
+    lifecycle_prefix=pathlib.Path(args.lifecycle_install).resolve() if args.lifecycle_install else None
+    lifecycle_env=env.copy()
+    if lifecycle_prefix:lifecycle_env['LD_LIBRARY_PATH']=str(lifecycle_prefix/'lib')+':'+env['LD_LIBRARY_PATH']
     message_runtime=out/'message_runtime';shutil.copytree(pathlib.Path(args.message_install).resolve(),message_runtime)
     recorder_env=env.copy()
     recorder_env['AMENT_PREFIX_PATH']=str(message_runtime)+':'+env['AMENT_PREFIX_PATH']
@@ -505,8 +532,9 @@ def run(args,out,selected_install,manifest,deadline_guard):
         servers.append(('nav2_lifecycle_manager','lifecycle_manager','lifecycle_manager',[]))
         for package,exe,name,remaps in servers:
             exe_path=str(runtime/'lib/robot_feasible_navigation/segment_controller_server') if name=='controller_server' and args.variant=='segmented' else '/opt/ros/jazzy/lib/'+package+'/'+exe
+            if name=='lifecycle_manager' and lifecycle_prefix:exe_path=str(lifecycle_prefix/'lib/nav2_lifecycle_manager/lifecycle_manager')
             if name=='bt_navigator' and args.with_waypoints:bt_launch_steady_ns=time.monotonic_ns()
-            launch(name,[exe_path]+common+remaps)
+            launch(name,[exe_path]+common+remaps,lifecycle_env if name=='lifecycle_manager' else None)
             if name=='bt_navigator' and args.with_waypoints:
                 pid=dict(procs)[name].pid
                 bt_binding=dict(run_id=deadline_guard.manifest['run_id'],private_goal_topic=private_goal_topic,
@@ -571,7 +599,8 @@ def run(args,out,selected_install,manifest,deadline_guard):
         for name,p in procs:
             maps=pathlib.Path(f'/proc/{p.pid}/maps').read_text()
             libraries=set(line.split()[-1] for line in maps.splitlines() if len(line.split())>=6 and
-              ('/opt/ros/jazzy/lib/' in line or str(runtime/'lib') in line))
+              ('/opt/ros/jazzy/lib/' in line or str(runtime/'lib') in line or
+               (lifecycle_prefix and str(lifecycle_prefix/'lib') in line)))
             identities[name]=dict(pid=p.pid,cmdline=pathlib.Path(f'/proc/{p.pid}/cmdline').read_bytes().replace(b'\0',b' ').decode(),maps=maps,
               selected_libraries_sha256={library:sha(library) for library in libraries if pathlib.Path(library).is_file()})
         write(out/'runtime_identities.json',identities)
@@ -695,6 +724,8 @@ def main():
     p.add_argument('--rotate-threshold',type=float,help='Explicit RPP heading threshold override; otherwise frozen template value')
     p.add_argument('--xy-tolerance',type=float,default=.15);p.add_argument('--yaw-tolerance',type=float,default=.08)
     p.add_argument('--build-receipt');p.add_argument('--message-install');p.add_argument('--preflight-timeout',type=float,default=30.);p.add_argument('--run',action='store_true')
+    p.add_argument('--lifecycle-install',help='Optional isolated lifecycle executable/core pair, shared by all variants')
+    p.add_argument('--lifecycle-build-receipt',help='Exact lifecycle artifact receipt; required with --lifecycle-install')
     p.add_argument('--max-runtime-sec',type=runtime_seconds,default=600.,help='Fixed deadline from launcher process start, in (0,3600] seconds; default 600')
     p.add_argument('--with-waypoints',action='store_true',help='Activate the native Jazzy FollowWaypoints server for an independently authorized ordered batch client')
     args=p.parse_args();out,install,manifest=prepare(args)
