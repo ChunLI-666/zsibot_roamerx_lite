@@ -211,6 +211,9 @@ def prepare(args):
         p=d[name][name]['ros__parameters'];p.update(footprint=json.dumps(footprint),footprint_padding=args.padding,
           rolling_window=True,width=size,height=size,resolution=.01,publish_frequency=frequency,
           update_frequency=2. if name=='global_costmap' else 10.,always_send_full_costmap=True)
+        # Preserve the original map's unknown-space hard boundary: with only
+        # inflate_unknown=false, stock inflation may replace unknown by253.
+        p['inflation_layer'].update(inflate_unknown=False,inflate_around_unknown=True)
         p['obstacle_layer']=dict(plugin='nav2_costmap_2d::ObstacleLayer',enabled=True,footprint_clearing_enabled=False,observation_sources='scan',
           scan=dict(topic=args.scan_topic,data_type='LaserScan',marking=True,clearing=True,inf_is_valid=False,
             observation_persistence=0.,expected_update_rate=.3,min_obstacle_height=0.,max_obstacle_height=2.,
