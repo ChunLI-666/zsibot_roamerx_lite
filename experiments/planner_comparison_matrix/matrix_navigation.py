@@ -16,6 +16,136 @@ def write(path,value,compact=False):
     temporary.write_text(json.dumps(value,separators=(',',':'))+'\n' if compact else json.dumps(value,indent=2)+'\n');temporary.replace(path)
 
 
+
+class LiveReadyStorage:
+    """Only the live READY transport uses a run-owned same-namespace tmpfs slot."""
+    def __init__(self,output,deadline_manifest,root=pathlib.Path('/dev/shm')):
+        self.output=pathlib.Path(output).resolve();self.root=pathlib.Path(root).resolve()
+        self.launcher=deadline_manifest['launcher'];self.run_id=deadline_manifest['run_id']
+        if len(self.run_id)!=32 or any(c not in '0123456789abcdef' for c in self.run_id):raise ValueError('Invalid READY run UUID')
+        if self.launcher!=process_identity(os.getpid()):raise ValueError('READY launcher PID/birth/boot identity mismatch')
+        self.owner=dict(schema='matrix.live_ready.owner.v1',run_id=self.run_id,launcher=self.launcher,
+          output_directory=str(self.output),uid=os.getuid(),mount_namespace=os.readlink('/proc/self/ns/mnt'),
+          pid_namespace=os.readlink('/proc/self/ns/pid'))
+        self.owner_raw=(json.dumps(self.owner,sort_keys=True,separators=(',',':'))+'\n').encode()
+        self.slot=self.root/('matrix-ready-'+self.run_id+'-'+self.launcher['boot_id']+'-'+str(self.launcher['pid'])+'-'+str(self.launcher['starttime_ticks']))
+        self.live=self.slot/'ready.json';self.owner_path=self.slot/'owner.json';self.path=self.output/'ready.json'
+        self.created=False;self.linked=False;self.archived=False;self.cleaned=False;self.slot_identity=None;self.files={}
+        self.storage=dict(schema='matrix.live_ready.storage.v1',owner=self.owner,owner_sha256=hashlib.sha256(self.owner_raw).hexdigest(),
+          live_slot=str(self.slot),live_file=str(self.live),case_file=str(self.path),live_storage='tmpfs',owned_slot_removed=False,
+          namespace_boundary='Live absolute /dev/shm target resolves only in this container mount namespace; host prelaunch readers must read the case path inside the container until materialized.',
+          policy='Only READY and owner in RAM. Original checked timestamp,500ms/50ms lease and physical predicates unchanged; disk events/timing/recording unchanged.')
+    def start(self):
+        if self.path.exists() or self.path.is_symlink():raise FileExistsError('Case READY already exists')
+        mount=None
+        for line in pathlib.Path('/proc/self/mountinfo').read_text().splitlines():
+            before,after=line.split(' - ',1);point=pathlib.Path(before.split()[4])
+            if self.root.is_relative_to(point) and (mount is None or len(str(point))>len(mount[0])):mount=(str(point),after.split()[0])
+        if mount is None or mount[1]!='tmpfs':raise RuntimeError('Live READY root must be tmpfs')
+        usage=shutil.disk_usage(self.root)
+        if usage.free<4*1024*1024:raise RuntimeError('Live READY tmpfs needs4MiB free before business startup')
+        self.storage['startup_tmpfs']=dict(mount_point=mount[0],filesystem=mount[1],total_bytes=usage.total,free_bytes=usage.free)
+        self.slot.mkdir(mode=0o700);self.created=True
+        st=self.slot.stat();self.slot_identity=(st.st_dev,st.st_ino,st.st_uid)
+        try:
+            os.chmod(self.slot,0o700)
+            with self.owner_path.open('xb') as stream:
+                value=os.fstat(stream.fileno());self.files['owner.json']=(value.st_dev,value.st_ino);stream.write(self.owner_raw)
+            os.chmod(self.owner_path,0o600)
+            self.publish(dict(ready=False,reason='launcher_starting',time_ns=time.time_ns()))
+            # Preserve exact ownership on disk before any business process exists.
+            with (self.output/'ready_storage_owner.json').open('xb') as stream:stream.write(self.owner_raw)
+            write(self.output/'ready_storage.json',self.storage)
+            self.path.symlink_to(self.live);self.linked=True
+        except BaseException:
+            # No runtime child can exist yet. Publish an ordinary false case file
+            # before removing only this startup's inode-bound private files.
+            self._rollback_start()
+            raise
+    def _rollback_start(self):
+        if self.path.exists() or self.path.is_symlink():raise RuntimeError('Unexpected case READY during partial startup; no cleanup attempted')
+        write(self.path,dict(ready=False,reason='live_ready_startup_failed',stopped_at_ns=time.time_ns()))
+        self.archive_raw=self.path.read_bytes();self.archived=True
+        if not (self.output/'ready_storage_owner.json').exists():
+            with (self.output/'ready_storage_owner.json').open('xb') as stream:stream.write(self.owner_raw)
+        self._remove_slot_files()
+        self.storage.update(archived=True,startup_failed=True,owned_slot_removed=True,
+          archive_sha256=hashlib.sha256(self.archive_raw).hexdigest(),archive_bytes=len(self.archive_raw),case_file_is_regular=True)
+        write(self.output/'ready_storage.json',self.storage)
+    def _remove_slot_files(self):
+        st=self.slot.lstat()
+        if self.slot.is_symlink() or (st.st_dev,st.st_ino,st.st_uid)!=self.slot_identity or process_identity(os.getpid())!=self.launcher:
+            raise RuntimeError('READY slot/launcher identity changed; no cleanup attempted')
+        if {p.name for p in self.slot.iterdir()}!=set(self.files):raise RuntimeError('Unexpected READY slot files; no cleanup attempted')
+        for name,identity in self.files.items():
+            item=self.slot/name;value=item.lstat()
+            if item.is_symlink() or (value.st_dev,value.st_ino)!=identity:raise RuntimeError('READY file identity changed; no cleanup attempted')
+        for name in self.files:(self.slot/name).unlink()
+        self.slot.rmdir();self.cleaned=True
+    def _owned(self):
+        if not self.created:raise RuntimeError('READY slot has not been created')
+        st=self.slot.lstat()
+        if self.slot.is_symlink() or (st.st_dev,st.st_ino,st.st_uid)!=self.slot_identity or st.st_mode&0o777!=0o700:
+            raise RuntimeError('READY slot identity/mode changed')
+        if self.owner_path.is_symlink() or self.owner_path.read_bytes()!=self.owner_raw or process_identity(os.getpid())!=self.launcher:
+            raise RuntimeError('READY owner identity changed')
+    def publish(self,value,compact=False):
+        if self.archived:raise RuntimeError('Live READY is already archived')
+        self._owned()
+        if self.linked and (not self.path.is_symlink() or os.readlink(self.path)!=str(self.live)):
+            raise RuntimeError('Case READY link ownership changed')
+        raw=(json.dumps(value,separators=(',',':'))+'\n' if compact else json.dumps(value,indent=2)+'\n').encode()
+        temporary=self.slot/'ready.tmp';created_temporary=False
+        try:
+            with temporary.open('xb') as stream:
+                created_temporary=True;value=os.fstat(stream.fileno());temporary_identity=(value.st_dev,value.st_ino);stream.write(raw)
+            os.chmod(temporary,0o600);temporary.replace(self.live);self.files['ready.json']=temporary_identity
+        except BaseException:
+            # This private temp belongs to this exact write, never another slot.
+            if created_temporary and temporary.exists() and not temporary.is_symlink():
+                value=temporary.lstat()
+                if (value.st_dev,value.st_ino)==temporary_identity:temporary.unlink()
+            raise
+    def stop_false(self,stopped_at_ns=None):
+        if self.archived:
+            if self.path.is_symlink() or self.path.read_bytes()!=self.archive_raw:raise RuntimeError('Archived READY changed')
+            return
+        if not self.created:
+            if self.path.exists() or self.path.is_symlink():raise RuntimeError('Unowned case READY; refusing overwrite')
+            write(self.path,dict(ready=False,reason='live_ready_not_started',stopped_at_ns=time.time_ns()))
+            self.archive_raw=self.path.read_bytes();self.archived=True
+            return
+        self._owned()
+        try:value=json.loads(self.live.read_bytes())
+        except (OSError,ValueError):value={}
+        if value.get('ready') is False and 'stopped_at_ns' in value:return
+        value.update(ready=False,stopped_at_ns=time.time_ns() if stopped_at_ns is None else stopped_at_ns)
+        self.publish(value)
+    def materialize(self):
+        """Caller proves controls/recorder closed; preserve identical final false bytes."""
+        if self.archived:return
+        self._owned();raw=self.live.read_bytes()
+        if json.loads(raw).get('ready') is not False:raise RuntimeError('Cannot archive a true READY')
+        if self.linked and (not self.path.is_symlink() or os.readlink(self.path)!=str(self.live)):
+            raise RuntimeError('Case READY link ownership changed')
+        temporary=self.output/'ready.materialize.tmp';created_temporary=False
+        try:
+            with temporary.open('xb') as stream:
+                created_temporary=True;value=os.fstat(stream.fileno());temporary_identity=(value.st_dev,value.st_ino);stream.write(raw)
+            temporary.replace(self.path)
+        except BaseException:
+            if created_temporary and temporary.exists() and not temporary.is_symlink():
+                value=temporary.lstat()
+                if (value.st_dev,value.st_ino)==temporary_identity:temporary.unlink()
+            raise
+        self.archive_raw=raw;self.archived=True
+        self.storage.update(archived=True,archive_sha256=hashlib.sha256(raw).hexdigest(),archive_bytes=len(raw),
+          archive_identical_to_final_live_bytes=True,case_file_is_regular=not self.path.is_symlink())
+        write(self.output/'ready_storage.json',self.storage)
+        self._owned();self._remove_slot_files()
+        self.storage['owned_slot_removed']=True;write(self.output/'ready_storage.json',self.storage)
+
+
 def phase_mark(timing,name,started):
     finished=(time.monotonic_ns(),time.thread_time_ns())
     timing[name]=dict(wall_ns=finished[0]-started[0],thread_cpu_ns=finished[1]-started[1])
@@ -363,7 +493,7 @@ def prepare(args):
     write(out/'runtime_manifest.json',manifest);write(out/'invocation.json',dict(argv=sys.argv,cwd=os.getcwd()))
     return out,selected_install,manifest
 
-def run(args,out,selected_install,manifest,deadline_guard):
+def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
     if os.environ.get('ROS_DOMAIN_ID')!='185':raise RuntimeError('Matrix navigation requires the isolated domain185 environment from simulation_setup')
     if not args.build_receipt:raise RuntimeError('--run requires a concrete selected-artifact --build-receipt')
     if not args.message_install:raise RuntimeError('--run requires an isolated custom-message --message-install for complete recording')
@@ -774,7 +904,7 @@ def run(args,out,selected_install,manifest,deadline_guard):
         readiness['time_ns']=node.get_clock().now().nanoseconds
         readiness['valid_until_ns']=readiness['time_ns']+500_000_000
         if args.with_waypoints:readiness['valid_until_ns']=min(readiness['valid_until_ns'],ownership['checked_unix_ns']+500_000_000)
-        write(out/'ready.json',readiness,compact=True)
+        ready_storage.publish(readiness,compact=True)
         event('navigation_ready');print(str(out/'ready.json'),flush=True)
         heartbeat_deadline=time.monotonic();last_write_finished_ns=time.monotonic_ns()
         previous_write_timing=None;previous_audit_sequence=None;last_timing_flush=time.monotonic()
@@ -820,7 +950,7 @@ def run(args,out,selected_install,manifest,deadline_guard):
               ownership_audit_sequence_reused=audit_sequence is not None and audit_sequence==previous_audit_sequence,
               ownership_checked_age_ns=issued-readiness['waypoint_ownership']['checked_unix_ns'] if args.with_waypoints else None)
             phase=(time.monotonic_ns(),time.thread_time_ns())
-            write(out/'ready.json',readiness,compact=True)
+            ready_storage.publish(readiness,compact=True)
             finished=phase_mark(timing,'atomic_ready_write',phase)
             timing_record=dict(issued_unix_ns=issued,ready=readiness['ready'],reason=readiness.get('reason'),
               phases=timing,audit=audit_state,audit_sequence=audit_sequence,
@@ -834,15 +964,18 @@ def run(args,out,selected_install,manifest,deadline_guard):
             last_write_finished_ns=finished[0]
             heartbeat_deadline=next_heartbeat_deadline(heartbeat_deadline,time.monotonic())
             if readiness['ready']!=previous:event('readiness_changed',ready=readiness['ready'],reason=readiness['reason'])
-    except Exception as e:write(out/'failed.json',dict(error=repr(e)));event('failure',error=repr(e));raise
+    except Exception as e:
+        try:ready_storage.stop_false()
+        except Exception:pass  # Owned process cleanup below must still run.
+        write(out/'failed.json',dict(error=repr(e)));event('failure',error=repr(e));raise
     finally:
         shutdown_started=True
         deadline_guard.begin_shutdown('runtime_shutdown_started')
+        shutdown_ready_error=None
+        try:ready_storage.stop_false(node.get_clock().now().nanoseconds)
+        except Exception as error:shutdown_ready_error=repr(error)
         if ownership_worker is not None:ownership_worker.request_stop()
-        event('shutdown_started',requested_signals=stop_signals)
-        readiness=json.loads((out/'ready.json').read_text()) if (out/'ready.json').exists() else {}
-        readiness.update(ready=False,stopped_at_ns=node.get_clock().now().nanoseconds)
-        write(out/'ready.json',readiness)
+        event('shutdown_started',requested_signals=stop_signals,ready_storage_error=shutdown_ready_error)
         # Stop command-producing servers first; keep smoother/gate/recorder alive for the zero tail.
         for name,p in procs:
             if name in ['waypoint_follower','bt_navigator','controller_server'] and p.poll() is None:os.killpg(p.pid,signal.SIGINT)
@@ -859,6 +992,8 @@ def run(args,out,selected_install,manifest,deadline_guard):
             try:p.wait(timeout=30. if name=='recorder' else 8.)
             except subprocess.TimeoutExpired:os.killpg(p.pid,signal.SIGTERM);p.wait(timeout=3.)
         deadline_guard.recording_closed('all_owned_processes_waited')
+        ready_storage.stop_false()
+        ready_storage.materialize()
         event('owned_processes_closed',returncodes={name:p.returncode for name,p in procs})
         for log in logs:log.close()
         metadata=out/'bag/metadata.yaml'
@@ -894,19 +1029,28 @@ def main():
     p.add_argument('--with-waypoints',action='store_true',help='Activate the native Jazzy FollowWaypoints server for an independently authorized ordered batch client')
     args=p.parse_args();out,install,manifest=prepare(args)
     if args.run:
-        deadline_guard=None
+        deadline_guard=None;ready_storage=None
         try:
             deadline_guard=arm_deadline(out,args.max_runtime_sec)
-            manifest['recording_deadline']=deadline_guard.manifest;write(out/'runtime_manifest.json',manifest)
-            run(args,out,install,manifest,deadline_guard)
+            ready_storage=LiveReadyStorage(out,deadline_guard.manifest);ready_storage.start()
+            manifest['recording_deadline']=deadline_guard.manifest;manifest['ready_storage']=ready_storage.storage
+            write(out/'runtime_manifest.json',manifest)
+            run(args,out,install,manifest,deadline_guard,ready_storage)
         except Exception as error:
+            if ready_storage is not None:
+                try:ready_storage.stop_false()
+                except Exception:pass  # Preserve the original failure and reach deadline cleanup.
+            elif not (out/'ready.json').exists() and not (out/'ready.json').is_symlink():
+                write(out/'ready.json',dict(ready=False,stopped_at_ns=time.time_ns()))
             if not (out/'failed.json').exists():write(out/'failed.json',dict(error=repr(error),stage='receipt_or_runtime_setup'))
-            write(out/'ready.json',dict(ready=False,stopped_at_ns=time.time_ns()))
             raise
         finally:
             if deadline_guard is not None:
                 if not deadline_guard.runtime_children_started:
                     deadline_guard.recording_closed('launcher_exiting_before_any_runtime_children')
-                if deadline_guard.closing:deadline_guard.process.wait(timeout=2.)
+                if deadline_guard.closing:
+                    if ready_storage is not None and ready_storage.created:
+                        ready_storage.stop_false();ready_storage.materialize()
+                    deadline_guard.process.wait(timeout=2.)
     else:print(str(out/'runtime_manifest.json'))
 if __name__=='__main__':main()
