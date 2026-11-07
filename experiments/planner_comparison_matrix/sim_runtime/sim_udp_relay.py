@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""SSH stdin relay: hard-wired SIM loopback destination with age/watchdog checks."""
-import json,math,select,socket,sys,time
+"""SIM stdin relay: explicit allowed host, fixed UDP7447, age/watchdog checks."""
+import argparse,json,math,select,socket,sys,time
 
 def validated_axes(msg, now_ns):
     if not isinstance(msg,dict):raise ValueError('object required')
@@ -11,11 +11,17 @@ def validated_axes(msg, now_ns):
     if not 0<=f<=.25 or abs(y)>.5:raise ValueError('uncalibrated command bound')
     return dict(version=1,action='walk',forward=f,lateral=0.,yaw=y)
 
-def main():
-    sock=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);target=('127.0.0.1',7447)
+def parse_args(argv=None):
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--sim-host',choices=['127.0.0.1','192.168.1.219'],default='127.0.0.1')
+    return parser.parse_args(argv)
+
+def main(argv=None):
+    args=parse_args(argv)  # Invalid destinations must fail before opening a socket.
+    target=(args.sim_host,7447);sock=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
     zero=dict(version=1,action='walk',forward=0.,lateral=0.,yaw=0.)
     current=zero;last_valid=0.;running=True;accepted=0;rejected=0
-    print('SIM_RELAY_READY 127.0.0.1:7447',flush=True)
+    print('SIM_RELAY_READY '+args.sim_host+':7447',flush=True)
     try:
         while running:
             readable,_,_=select.select([sys.stdin],[],[],.05)

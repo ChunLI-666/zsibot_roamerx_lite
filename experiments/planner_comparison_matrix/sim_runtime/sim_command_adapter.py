@@ -11,15 +11,25 @@ from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from std_msgs.msg import UInt8,Bool,String
 
-def relay_command(mode):
+SIM_HOSTS=('127.0.0.1','192.168.1.219')
+
+def relay_command(mode,sim_host='127.0.0.1'):
+    if sim_host not in SIM_HOSTS:raise ValueError('unsupported SIM host')
+    if mode=='ssh' and sim_host!='127.0.0.1':raise ValueError('nonloopback SIM host requires --relay-mode local')
     if mode=='local':
-        return [sys.executable,str(pathlib.Path(__file__).resolve().with_name('sim_udp_relay.py'))]
+        return [sys.executable,str(pathlib.Path(__file__).resolve().with_name('sim_udp_relay.py')),'--sim-host',sim_host]
     if mode=='ssh':
         return ['ssh','-o','BatchMode=yes','-o','ConnectTimeout=5','-o','ServerAliveInterval=2','-o','ServerAliveCountMax=2','charles@192.168.1.219','python3','/mnt/data/planner_comparison_20261105/sim_udp_relay.py']
     raise ValueError('unknown relay mode')
 
+def require_relay_ready(line,sim_host):
+    expected='SIM_RELAY_READY '+sim_host+':7447'
+    if line!=expected:raise RuntimeError('relay startup endpoint mismatch: expected '+expected+', got '+line)
+
 class Adapter(Node):
     def __init__(self,args):
+        # Validate the destination before creating any ROS Node or relay child.
+        argv=relay_command(args.relay_mode,args.sim_host)
         super().__init__('matrix_sim_command_adapter')
         self.maximum_vx=args.max_policy_vx;self.maximum_wz=args.max_policy_wz
         self.cmd=None;self.cmd_received=0.;self.loc=0;self.loc_received=0.;self.valid=False;self.valid_received=0.;self.odom=None;self.odom_received=0.
@@ -29,11 +39,12 @@ class Adapter(Node):
             self.create_subscription(UInt8,'/lightning/loc_status',self.status,10),
             self.create_subscription(Bool,'/lightning/pose_valid',self.pose_valid,10),
             self.create_subscription(Odometry,'/odom/current_pose',self.odometry,10)]
-        self.relay=subprocess.Popen(relay_command(args.relay_mode),stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=None,text=True,bufsize=1)
-        line=self.relay.stdout.readline().strip()
-        if line!='SIM_RELAY_READY 127.0.0.1:7447':raise RuntimeError('relay startup failed: '+line)
+        self.relay=subprocess.Popen(argv,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=None,text=True,bufsize=1)
+        try:require_relay_ready(self.relay.stdout.readline().strip(),args.sim_host)
+        except (OSError,RuntimeError):self.close();raise
         self.timer=self.create_timer(.05,self.tick)
-        self.get_logger().info('SIM-only /cmd_vel_safe -> '+args.relay_mode+' age-checked relay -> localhost7447. No SDK, no auto route.')
+        location='local network namespace' if args.relay_mode=='local' else 'SSH host 192.168.1.219'
+        self.get_logger().info('SIM-only /cmd_vel_safe -> '+args.relay_mode+' age-checked relay -> '+args.sim_host+':7447 ('+location+'). No SDK, no auto route.')
     def command(self,m):self.cmd=m;self.cmd_received=time.monotonic()
     def status(self,m):self.loc=m.data;self.loc_received=time.monotonic()
     def pose_valid(self,m):self.valid=m.data;self.valid_received=time.monotonic()
@@ -62,11 +73,17 @@ class Adapter(Node):
         try:self.relay.stdin.close();self.relay.wait(timeout=3)
         except (OSError,subprocess.TimeoutExpired):self.relay.terminate()
 
-def main():
+def parse_args(argv=None):
     p=argparse.ArgumentParser();p.add_argument('--max-policy-vx',type=float,default=.4);p.add_argument('--max-policy-wz',type=float,default=.3)
-    p.add_argument('--relay-mode',choices=['ssh','local'],default='ssh',help='local requires the Matrix simulator on this host at loopback UDP7447')
-    a=p.parse_args()
+    p.add_argument('--relay-mode',choices=['ssh','local'],default='ssh',help='local spawns the relay in this network namespace; SSH retains the legacy remote loopback relay')
+    p.add_argument('--sim-host',choices=SIM_HOSTS,default='127.0.0.1',help='Explicit SIM UDP destination; port is fixed at7447')
+    a=p.parse_args(argv)
     if not 0<a.max_policy_vx<=.5 or not 0<a.max_policy_wz<=.5:p.error('limits exceed validated relay bounds')
+    if a.relay_mode=='ssh' and a.sim_host!='127.0.0.1':p.error('nonloopback SIM host requires --relay-mode local')
+    return a
+
+def main():
+    a=parse_args()
     rclpy.init();node=Adapter(a)
     try:rclpy.spin(node)
     except KeyboardInterrupt:pass
