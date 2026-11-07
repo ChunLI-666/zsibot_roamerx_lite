@@ -31,7 +31,8 @@ import pilot_scan_timing as frozen
 import message_info_contract
 from waypoint_contract import (ACTION, AsyncEvidenceWriter, OrderedVisits, OwnedGoalIdentity,
                                evidence_json, finite_velocity, mission_budget, strict_stopped, validate_ownership, validate_route, waypoint_binding)
-from waypoint_contract import ReadyReadCapture, ownership_metadata_lease_deviation, validate_settle_budget
+from waypoint_contract import (ReadyReadCapture, ownership_metadata_lease_deviation, validate_settle_budget,
+                               producer_scan_confirmation_failure, producer_scan_confirmation_outcome)
 from waypoint_contract import (scan_aging_confirmation_eligible, scan_aging_confirmation_outcome,
                                scan_confirmation_payload_valid, validate_scan_aging_confirmation)
 
@@ -63,9 +64,10 @@ def freeze_sources(output):
     manifest['nonfinite_evidence_encoding']='Writer/final serialization only: {nonfinite_float: NaN/+Infinity/-Infinity}; original caches, first-invalid references and decision values remain unchanged.'
     manifest['ownership_metadata_lease']='NavigateToPose ownership metadata uses the same 500ms old/50ms future lease as READY. Each checked_unix_ns exceeding the historical 300ms metadata boundary is recorded once with original validation time and READY; this is separate metadata latency evidence and never changes physical-input classification.'
     manifest['raw_plan_observer']='Only inherited /plan subscription uses raw=True with identical Path type/QoS. Plain CDR1 endian-aware observer scans headers/count/last pose only; full original Path remains recorded by MCAP. Decode failures are explicit observer gaps, never fresh input replacements.'
-    manifest['runtime_callback_pump']='Runtime batches callbacks within 20ms before unchanged guards; interruption/terminal/own-cancel/existing deadlines checked per callback. Single-callback overruns, original topic-count deltas and check intervals are recorded; no 300ms/500ms/QoS changes.'
+    manifest['runtime_callback_pump']='Runtime batches callbacks within 20ms before unchanged guards; interruption/terminal/own-cancel/existing deadlines checked per callback. Single-callback overruns, original topic-count deltas and check intervals are recorded; no 300ms/500ms/QoS changes. Fixed .002s spin kwargs preserve Jazzy ready iterator fairness; one idle wait may exceed a wall window, and single callbacks remain nonpreemptible.'
     manifest['ready_read_failure_capture']='Unchanged a63b validator receives one path-like single-file read with fd stat and wall/steady bounds. Only the first read_ready exception retains exact raw bytes in memory, persisted after own-goal cleanup; internal validator now remains unknown. Last-passing READY cache is labelled separately.'
     manifest['stop_cleanup']='Every possibly sent goal reaches finally own-UUID cancellation and a fresh finite measured/commanded stop observation, including response timeout, signal and exception. Default rclpy shutdown-on-SIGINT is disabled until cleanup completes.'
+    manifest['producer_scan_confirmation']='Opt-in same-scan producer-only not_ready may use the existing <=50ms window only after current raw metadata/bindings/UUID revalidation. New strict READY with a later original producer scan stamp and all own original guards is required; every episode permanently fails strict timing. Preflight/runtime failed reads are separate.'
     manifest['scan_aging_confirmation']='Default 0 preserves strict behavior. Opt-in <=.05s drains existing callbacks only after sole scan-header aging; a newer original stamp must restore every original guard. Every episode permanently fails strict timing acceptance; no header-age threshold changes.'
     (output/'instrumentation_manifest.json').write_text(json.dumps(manifest, indent=2)+'\n')
     return manifest
@@ -134,6 +136,8 @@ class WaypointPilot(frozen.Pilot):
         self.scan_aging_episodes = []
         self.ownership_metadata_reported_check_ns = set()
         self.first_ready_read_failure = None
+        self.first_runtime_ready_read_failure=None;self.current_ready_read_failure=None
+        self.producer_scan_failure_reads=[]
         self.plan_raw_parse_errors=0;self.plan_raw_last_error=None
         self.runtime_last_pump=None;self.runtime_last_ready_check_ns=None
         super().__init__(args, output)
@@ -212,6 +216,7 @@ class WaypointPilot(frozen.Pilot):
             stopped, stop_issues = strict_stopped(snapshot)
             if not stopped:
                 issues.extend(stop_issues)
+        self.current_ready_read_failure=None
         if self.args.execute:
             readiness_stage, ownership_checked_now_ns = 'read_ready', None
             ready_capture = ReadyReadCapture(self.args.ready)
@@ -239,15 +244,23 @@ class WaypointPilot(frozen.Pilot):
             except Exception as exc:
                 call_end_unix_ns, call_end_steady_ns = time.time_ns(), time.monotonic_ns()
                 captured_first_failure = False
-                if readiness_stage == 'read_ready' and self.first_ready_read_failure is None:
+                failure_file=None
+                if readiness_stage == 'read_ready':
                     ready_call_bounds.update(call_end_unix_ns=call_end_unix_ns, call_end_steady_ns=call_end_steady_ns)
-                    self.first_ready_read_failure = ready_capture.failure(exc, ready_call_bounds)
-                    captured_first_failure = True
+                    self.current_ready_read_failure=ready_capture.failure(exc,ready_call_bounds)
+                    runtime=self.goal_sent_ns is not None and self.owned_identity is not None
+                    slot='first_runtime_ready_read_failure' if runtime else 'first_ready_read_failure'
+                    failure_file='runtime_ready_read_failure' if runtime else 'ready_read_failure'
+                    self.current_ready_read_failure['metadata']['raw_file']=None
+                    if getattr(self,slot,None) is None:
+                        self.current_ready_read_failure['metadata']['raw_file']=failure_file+'.raw'
+                        setattr(self,slot,self.current_ready_read_failure);captured_first_failure=True
                 issues.append('readiness:'+str(exc))
                 self.emit('readiness_validation_failed', stage=readiness_stage, message=str(exc),
                     ownership_validation_unix_ns=ownership_checked_now_ns,
                     first_failed_read_capture=captured_first_failure,
-                    first_failed_read_metadata_file='ready_read_failure.json' if self.first_ready_read_failure is not None else None,
+                    first_failed_read_metadata_file=failure_file+'.json' if failure_file is not None else None,
+                    current_failed_read_sha256=None if self.current_ready_read_failure is None else self.current_ready_read_failure['metadata']['sha256'],
                     latest_ready_sha256=getattr(self, 'latest_ready_sha', None),
                     latest_ready_is_failing_read=readiness_stage != 'read_ready',
                     latest_ready=getattr(self, 'latest_ready', None))
@@ -256,19 +269,50 @@ class WaypointPilot(frozen.Pilot):
         self.scan_timing_record_check(require_stopped, issues, snapshot, entered_unix_ns, entered_steady_ns)
         return not issues, issues, snapshot
 
+    def producer_scan_confirmation_failure(self,issues,snapshot):
+        topic=getattr(self.args,'scan_topic','/laser_scan_leveled')
+        allowed={'readiness:launcher_not_ready:Stale/future stamp '+topic,
+                 'readiness:launcher_not_ready:Stale receive '+topic}
+        failure=getattr(self,'current_ready_read_failure',None)
+        if len(issues)!=1 or issues[0] not in allowed or failure is None or failure['raw_bytes'] is None:return None
+        try:
+            verified=producer_scan_confirmation_failure(failure['raw_bytes'],self.args.variant,
+                self.runtime_binding,self.native_binding,self.loaded_sources,
+                None if self.owned_identity is None else self.owned_identity.value.hex(),self.goal_sent_ns,
+                time.time_ns(),topic)
+            return dict(verified,failed_read=failure)
+        except Exception as exc:
+            self.emit('producer_scan_confirmation_rejected',message=str(exc),
+                current_failed_read_sha256=failure['metadata']['sha256'])
+            return None
+
     def confirm_scan_aging(self, issues, snapshot, terminal):
         """Drain callbacks for <=50ms; any recovered run remains strict-timing FAIL."""
         seconds = self.args.scan_aging_confirm_sec
-        if (seconds == 0. or terminal.done() or self.cancel_requested
-                or not scan_aging_confirmation_eligible(issues, snapshot)):
-            return False, issues, snapshot
+        if seconds == 0. or terminal.done() or self.cancel_requested:return False,issues,snapshot
+        producer=None
+        if not scan_aging_confirmation_eligible(issues,snapshot):
+            producer=getattr(self,'producer_scan_confirmation_failure',lambda *args:None)(issues,snapshot)
+            if producer is None:return False,issues,snapshot
         started_ns = self.scan_timing_latest_check['check_enter_steady_ns']
         budget_ns = int(seconds*1e9)
-        original_stamp = snapshot['last']['scan']['stamp_ns']
+        original_stamp = producer['original_stamp_ns'] if producer is not None else snapshot['last']['scan']['stamp_ns']
         episode = dict(index=len(self.scan_aging_episodes), original_stamp_ns=original_stamp,
             started_steady_ns=started_ns, deadline_steady_ns=started_ns+budget_ns,
             confirmation_budget_sec=seconds, original_issues=list(issues), original_snapshot=snapshot,
             strict_timing_status='FAIL', strict_timing_accepted=False, outcome='pending')
+        if producer is not None:
+            captures=getattr(self,'producer_scan_failure_reads',None)
+            if captures is None:self.producer_scan_failure_reads=[];captures=self.producer_scan_failure_reads
+            name='producer_scan_confirmation_failure_'+str(len(captures))
+            failure=producer['failed_read'];saved=dict(raw_bytes=failure['raw_bytes'],metadata=dict(failure['metadata'],raw_file=name+'.raw'))
+            captures.append((name,saved))
+            episode['producer_ready_failed_read']=saved['metadata']
+            episode['producer_scan_observation']=producer['producer_scan_observation']
+            episode['basis']='producer_scan_observer_disagreement'
+            self.emit('producer_consumer_health_disagreement',producer_ready=producer['ready'],
+                failed_read_metadata=saved['metadata'],consumer_original_snapshot=snapshot,
+                boundary='Own original guards passed; producer stopped at first scan error, later producer guards unknown. New strict READY is still required.')
         self.scan_aging_episodes.append(episode)
         self.invalidate_artifact(issues)
         self.emit('performance_violation', violation='scan_header_age', **episode)
@@ -288,11 +332,16 @@ class WaypointPilot(frozen.Pilot):
             if remaining_ns <= 0:
                 outcome = 'expired'
                 break
-            rclpy.spin_once(self, timeout_sec=min(.005, remaining_ns/1e9))
+            rclpy.spin_once(self, timeout_sec=.005)
             _, current_issues, current_snapshot = self.execution_ready()
             checked_ns = time.monotonic_ns()
-            outcome = scan_aging_confirmation_outcome(current_issues, current_snapshot, original_stamp,
-                                                       checked_ns-started_ns, budget_ns)
+            if producer is None:
+                outcome = scan_aging_confirmation_outcome(current_issues, current_snapshot, original_stamp,
+                                                           checked_ns-started_ns, budget_ns)
+            else:
+                pending=getattr(self,'producer_scan_confirmation_failure',lambda *args:None)(current_issues,current_snapshot) if current_issues else None
+                outcome=producer_scan_confirmation_outcome(current_issues,current_snapshot,producer,
+                    self.latest_ready,checked_ns-started_ns,budget_ns,pending is not None)
             self.emit('scan_aging_confirmation_check', episode_index=episode['index'], outcome=outcome,
                 checked_steady_ns=checked_ns, elapsed_ns=checked_ns-started_ns,
                 issues=list(current_issues), snapshot=current_snapshot)
@@ -468,11 +517,10 @@ class WaypointPilot(frozen.Pilot):
                     reason='existing_deadline';break
                 remaining_ns=budget_ns-(now-started)
                 if remaining_ns<=0:break
-                wait=min(.005,remaining_ns/1e9)
-                if not self.cancel_requested:
-                    wait=min(wait,max(0.,self.args.timeout-elapsed))
-                    if self.args.cancel_after is not None:wait=min(wait,max(0.,self.args.cancel_after-elapsed))
-                rclpy.spin_once(self,timeout_sec=wait);calls+=1
+                # Fixed kwargs retain Jazzy's cached ready iterator and its
+                # subscription order. The window/deadlines may exceed by one
+                # 2ms idle wait; callback overruns remain explicitly measured.
+                rclpy.spin_once(self,timeout_sec=.002);calls+=1
             else:reason='context_not_ok'
         except BaseException:
             reason='interruption_or_callback_exception';raise
@@ -634,6 +682,14 @@ class WaypointPilot(frozen.Pilot):
             with (self.output/'ready_read_failure.json').open('x') as stream:
                 stream.write(evidence_json(failure['metadata'], indent=2)+'\n')
             writer['first_ready_read_failure'] = failure['metadata']
+        saved_reads=list(getattr(self,'producer_scan_failure_reads',[]))
+        runtime_failure=getattr(self,'first_runtime_ready_read_failure',None)
+        if runtime_failure is not None:saved_reads.insert(0,('runtime_ready_read_failure',runtime_failure))
+        for name,failure in saved_reads:
+            if failure['raw_bytes'] is not None:
+                with (self.output/(name+'.raw')).open('xb') as stream:stream.write(failure['raw_bytes'])
+            with (self.output/(name+'.json')).open('x') as stream:stream.write(evidence_json(failure['metadata'],indent=2)+'\n')
+        writer['first_runtime_ready_read_failure']=None if runtime_failure is None else runtime_failure['metadata']
         evidence = dict(schema='matrix_native_follow_waypoints_scan_timing_v1', scan_ring_limit=50,
             plan_raw_parse_errors=getattr(self,'plan_raw_parse_errors',0),plan_raw_last_error=getattr(self,'plan_raw_last_error',None),
             runtime_last_pump=getattr(self,'runtime_last_pump',None),

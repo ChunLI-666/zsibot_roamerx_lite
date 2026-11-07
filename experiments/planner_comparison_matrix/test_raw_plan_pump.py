@@ -84,7 +84,7 @@ class RawPathTests(unittest.TestCase):
         self.assertTrue(all(args[3] is qos for args,kw in calls))
     def test_no_original_guard_method_AST_changes(self):
         self.assertEqual(hashlib.sha256(FROZEN.read_bytes()).hexdigest(),'a63bce9490f55438e7af5d16025e4dd20d86293cec12f1560d403ecb629cbe31')
-        expected={'execution_ready': 'cbcc1b0646c8e39c512201cea7e1487d093685e7de5944fbb3d23e9a4170758d', 'confirm_scan_aging': 'a2bc51008b1748d807bfe33a83134ee7a4fe1f8bb75ab85e7ff8a4495de9a450', 'cancel_own': '3c8c0e7e689262980e1bbadbad67bb62f398f23ff4eec3d57bf406033e9b57ce'}
+        expected={'execution_ready': 'ad5b6dd26a853a9c71f17909f9f29c0e788af23c11cd708b297de78f06bdc8c0', 'confirm_scan_aging': 'db28cdd3018c42ba7c38169d33f45f046759cc90fc1e277763ec2b426d6cfebb', 'cancel_own': '3c8c0e7e689262980e1bbadbad67bb62f398f23ff4eec3d57bf406033e9b57ce'}
         cls=next(n for n in ast.parse(SOURCE.read_text()).body if isinstance(n,ast.ClassDef) and n.name=='WaypointPilot')
         observed={n.name:hashlib.sha256(ast.dump(n,include_attributes=False).encode()).hexdigest() for n in cls.body if isinstance(n,ast.FunctionDef) and n.name in expected}
         self.assertEqual(observed,expected)
