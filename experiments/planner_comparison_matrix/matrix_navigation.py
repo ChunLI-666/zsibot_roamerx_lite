@@ -250,6 +250,17 @@ def prepare(args):
                 original_model=previous_model,effective_model='omni',primitives_unchanged=True,
                 semantics='Official SE2 heuristic relaxation for the same forward/rotate primitive graph; no lateral actions or analytic connectors added.')
         planner['lattice_filepath']=str(out/'lattice.json');manifest['lattice_sha256']=sha(out/'lattice.json')
+    if args.variant!='segmented':
+        snapshot_dir=out/'planner_failure_inputs'
+        planner['failure_snapshot_directory']=str(snapshot_dir)
+        planner['failure_snapshot_source_identity']=json.dumps(dict(case_output=str(out),
+            runtime_manifest=str(out/'runtime_manifest.json'),
+            runtime_identities=str(out/'runtime_identities.json'),
+            build_receipt_sha256=manifest.get('build_receipt_sha256'),
+            source_snapshot_sha256=manifest.get('deployment_source_snapshot',{}).get('sha256'),
+            boundary='Configured artifact/source binding; loaded-library evidence is recorded separately in runtime_identities.json'),sort_keys=True)
+        manifest['planner_failure_snapshot']=dict(directory=str(snapshot_dir),
+            scope='Exact locked input on failure; base iterations unknown; writes after locks release and outside original search timer')
     bt=out/'navigate.xml';bt.write_text('<root BTCPP_format="4" main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree"><Sequence><ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/><FollowPath path="{path}" controller_id="FollowPath" goal_checker_id="Checker" progress_checker_id="Progress"/></Sequence></BehaviorTree></root>\n')
     d['bt_navigator']['ros__parameters']['default_nav_to_pose_bt_xml']=str(bt)
     manifest['with_waypoints']=args.with_waypoints

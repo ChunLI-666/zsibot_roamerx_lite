@@ -19,6 +19,7 @@
 #include "official_lattice_rpp_adapter/planner_goal_contract.hpp"
 #include "official_lattice_rpp_adapter/terminal_goal_binding.hpp"
 #include "official_lattice_rpp_adapter/initial_goal_rotation.hpp"
+#include "official_lattice_rpp_adapter/planner_failure_snapshot.hpp"
 #include "robot_feasible_navigation/footprint_sweep.hpp"
 
 namespace official_lattice_rpp_adapter {
@@ -529,7 +530,7 @@ public:
   CheckedLattice():CheckedLattice("nav2_smac_planner::SmacPlannerLattice",true) {}
   void configure(const rclcpp_lifecycle::LifecycleNode::WeakPtr & parent,std::string name,
     std::shared_ptr<tf2_ros::Buffer> tf,std::shared_ptr<nav2_costmap_2d::Costmap2DROS> map) override {
-    auto node=parent.lock();require(bool(node),"missing planner node");map_=map;
+    auto node=parent.lock();require(bool(node),"missing planner node");map_=map;node_=parent;
     require(sweep::validFootprint(map_->getRobotFootprint()),"planner requires convex body footprint");
     require(!parameter(node,name+".smooth_path",false),"smoothing must be disabled");
     require(!parameter(node,name+".allow_unknown",false),"unknown space must be blocked");
@@ -553,6 +554,17 @@ public:
       "stop-turn Lattice requires no analytic connector; Hybrid uses an explicit nonnegative length");
     planner_=loader_.createSharedInstance(planner_type_);
     planner_->configure(parent,name,tf,map);
+    snapshot_directory_=parameter<std::string>(node,name+".failure_snapshot_directory","");
+    snapshot_source_identity_=parameter<std::string>(node,name+".failure_snapshot_source_identity","");
+    if (!snapshot_directory_.empty()) {
+      require(std::filesystem::path(snapshot_directory_).is_absolute(),"diagnostic output must be absolute");
+      require(!snapshot_source_identity_.empty(),"diagnostic source/artifact/run identity must be explicit");
+      if (node->has_parameter(name+".lattice_filepath")) {
+        snapshot_primitive_path_=node->get_parameter(name+".lattice_filepath").as_string();
+        snapshot_primitive_bytes_=diagnostics::readFile(snapshot_primitive_path_);
+      }
+      require(std::filesystem::create_directory(snapshot_directory_),"diagnostic output directory already exists");
+    }
     guard_=freeze(node,name);
   }
   void cleanup() override {planner_->cleanup();guard_.reset();planner_.reset();}
@@ -560,12 +572,39 @@ public:
   void deactivate() override {planner_->deactivate();}
   nav_msgs::msg::Path createPlan(const geometry_msgs::msg::PoseStamped & start,
     const geometry_msgs::msg::PoseStamped & goal,std::function<bool()> cancel) override {
-    std::lock_guard<std::mutex> request_lock(mutex_);
+    std::unique_lock<std::mutex> request_lock(mutex_);
     require(finite(start.pose)&&finite(goal.pose),"invalid planar planner request");
     require(start.header.frame_id==map_->getGlobalFrameID()&&goal.header.frame_id==start.header.frame_id,
       "planner frame mismatch");
     auto * map=map_->getCostmap();
     std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> lock(*map->getMutex());
+    std::optional<diagnostics::FailureSnapshot> snapshot;
+    const auto snapshot_sequence=++snapshot_sequence_;
+    std::exception_ptr snapshot_capture_error;
+    if (!snapshot_directory_.empty()) {
+      try {
+      // All input bytes/geometry are from this request under the same costmap lock.
+      // No disk I/O occurs here. The installed planner starts its own timer later.
+      snapshot.emplace();auto & saved=*snapshot;saved.capture_start_ns=diagnostics::steadyNs();
+      saved.width=map->getSizeInCellsX();saved.height=map->getSizeInCellsY();
+      saved.resolution=map->getResolution();saved.origin_x=map->getOriginX();saved.origin_y=map->getOriginY();
+      const auto count=std::size_t(saved.width)*saved.height;
+      saved.grid.assign(map->getCharMap(),map->getCharMap()+count);
+      saved.start_json=diagnostics::poseJson(start);saved.goal_json=diagnostics::poseJson(goal);
+      const auto node=node_.lock();require(bool(node),"diagnostic node unavailable");
+      saved.parameters_json=diagnostics::parametersJson(*node);
+      saved.costmap_parameters_json=diagnostics::parametersJson(*map_);
+      std::ostringstream footprint;footprint << std::setprecision(17) << '[';bool comma=false;
+      for (const auto & p:map_->getRobotFootprint()) {
+        if (comma) {footprint << ',';}comma=true;footprint << '[' << p.x << ',' << p.y << ',' << p.z << ']';
+      }
+      footprint << ']';saved.footprint_json=footprint.str();
+      saved.source_identity=snapshot_source_identity_;saved.primitive_path=snapshot_primitive_path_;
+      saved.primitive_bytes=snapshot_primitive_bytes_;saved.planner_type=planner_type_;
+      saved.capture_end_ns=diagnostics::steadyNs();
+      } catch (...) {snapshot_capture_error=std::current_exception();snapshot.reset();}
+    }
+    try {
     const auto fp=map_->getRobotFootprint();sweep::ScopedObstacleIndex index(*map);
     if (!sweep::footprintFree(*map,fp,start.pose.position.x,start.pose.position.y,yaw(start.pose))) {
       throw nav2_core::StartOccupied("Filled start footprint occupied");
@@ -573,7 +612,17 @@ public:
     if (!sweep::footprintFree(*map,fp,goal.pose.position.x,goal.pose.position.y,yaw(goal.pose))) {
       throw nav2_core::GoalOccupied("Filled goal footprint occupied");
     }
-    auto raw=planner_->createPlan(start,goal,cancel);
+    auto observed_cancel=cancel;
+    if (snapshot&&cancel) {
+      observed_cancel=[&] {++snapshot->base_cancel_checks;const bool requested=cancel();
+        if (requested) {++snapshot->base_cancel_true;}return requested;};
+    }
+    if (snapshot) {snapshot->beginBase();}
+    nav_msgs::msg::Path raw;
+    try {raw=planner_->createPlan(start,goal,observed_cancel);}
+    catch (...) {if (snapshot) {snapshot->endBase(false);}throw;}
+    if (snapshot) {snapshot->endBase(true);snapshot->raw_pose_count=raw.poses.size();
+      snapshot->phase="filled_output_validation";}
     require(!raw.poses.empty()&&raw.poses.size()<1000000,"invalid official planner output");
     // Jazzy Lattice's same-cell shortcut returns start XY with goal yaw, not
     // float-converted goal XY. Accept only its exact documented singleton and
@@ -663,6 +712,28 @@ public:
       auto original=goal;original.header=output.header;output.poses.push_back(original);
     } else {output.poses.back().pose=goal.pose;}
     return output;
+    } catch (...) {
+      const auto original_error=std::current_exception();
+      // ScopedObstacleIndex has unwound before either mutex is released.
+      lock.unlock();request_lock.unlock();
+      if (snapshot_capture_error) {
+        try {std::rethrow_exception(snapshot_capture_error);}
+        catch (const std::exception & e) {
+          if (auto node=node_.lock()) {RCLCPP_ERROR(node->get_logger(),"Planner diagnostic input-capture evidence gap: %s; original planner exception retained",e.what());}
+        } catch (...) {
+          if (auto node=node_.lock()) {RCLCPP_ERROR(node->get_logger(),"Planner diagnostic input-capture evidence gap: unknown exception; original planner exception retained");}
+        }
+      }
+      if (snapshot) {
+        try {snapshot->save(std::filesystem::path(snapshot_directory_)/("failure_"+std::to_string(snapshot_sequence)),original_error);}
+        catch (const std::exception & e) {
+          if (auto node=node_.lock()) {RCLCPP_ERROR(node->get_logger(),"Planner diagnostic evidence gap: %s",e.what());}
+        } catch (...) {
+          if (auto node=node_.lock()) {RCLCPP_ERROR(node->get_logger(),"Planner diagnostic evidence gap: unknown writer exception");}
+        }
+      }
+      std::rethrow_exception(original_error);
+    }
   }
 protected:
   CheckedLattice(std::string type,bool stop_turn):loader_("nav2_core","nav2_core::GlobalPlanner"),
@@ -675,6 +746,9 @@ private:
   nav2_core::GlobalPlanner::Ptr planner_;
   std::shared_ptr<nav2_costmap_2d::Costmap2DROS> map_;
   std::mutex mutex_;
+  rclcpp_lifecycle::LifecycleNode::WeakPtr node_;
+  std::string snapshot_directory_,snapshot_source_identity_,snapshot_primitive_path_,snapshot_primitive_bytes_;
+  std::uint64_t snapshot_sequence_=0;
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr guard_;
 };
 class CheckedHybrid : public CheckedLattice {

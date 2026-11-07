@@ -322,6 +322,12 @@ the metadata motion model to `omni`, selecting the installed official SE2
 heuristic. All forward/rotate primitive arrays remain unchanged; analytic
 connectors remain disabled. The original and derived file hashes are recorded.
 
+Official/Hybrid Matrix runs explicitly enable failure-only planner snapshots.
+The wrapper copies the actual locked grid and request, then writes a numbered
+snapshot after releasing its locks if planning or output validation fails.
+Search wall time, thread CPU and original cancel-check counts are separate from
+capture and write overhead. Actual base iteration counts remain unknown.
+
 ### Initial Pose-goal region (official variant only)
 
 The official Matrix Pose-goal profile explicitly enables
