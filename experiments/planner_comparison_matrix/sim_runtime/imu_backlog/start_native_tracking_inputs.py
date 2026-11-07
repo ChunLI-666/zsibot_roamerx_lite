@@ -136,6 +136,18 @@ def artifacts():
     return result
 
 
+def lio_wake_diagnostic_profile(data,mode='template'):
+    require(mode in ('template','false'),'unsupported LIO wake diagnostic mode')
+    previous=data.get('performance',{}).get('lio_imu_ready_wake')
+    if mode=='false':
+        require(type(previous)is bool,'diagnostic requires an explicit boolean template wake option')
+        data['performance']['lio_imu_ready_wake']=False
+    return dict(mode=mode,template_value=previous,
+        effective_value=data.get('performance',{}).get('lio_imu_ready_wake'),
+        diagnostic_only=mode!='template',
+        boundary='Existing compiled configuration only. Disabling ready wake changes LIO scheduling; consumption, tail, frame freshness and accuracy must be evaluated separately. No source stamp or freshness predicate is changed.')
+
+
 def prepare(args):
     case=args.closed_case_dir.resolve();map_dir=args.map_dir.resolve()
     provenance=(args.seed_provenance or map_dir.parent.parent/'new_map_seed_provenance.json').resolve()
@@ -143,12 +155,16 @@ def prepare(args):
     data=yaml.safe_load(TEMPLATE.read_text());original=copy.deepcopy(data)
     data['system'].update(map_path=str(map_dir),use_fp_init=False,init_x=seed['init_x'],init_y=seed['init_y'],init_yaw=seed['init_yaw'])
     data['lidar_loc']['init_with_fp']=False
+    wake_profile=lio_wake_diagnostic_profile(data,getattr(args,'lio_imu_ready_wake','template'))
     config=args.output/'localization.yaml'
     with config.open('x') as stream:yaml.safe_dump(data,stream,sort_keys=False)
     # Preserve every other template value, including TBB4, geometry and input timing.
     for key in ['map_path','use_fp_init','init_x','init_y','init_yaw']:original['system'][key]=data['system'][key]
-    original['lidar_loc']['init_with_fp']=False;require(original==data,'unexpected template semantic change')
+    original['lidar_loc']['init_with_fp']=False
+    if wake_profile['diagnostic_only']:original['performance']['lio_imu_ready_wake']=False
+    require(original==data,'unexpected template semantic change')
     return dict(state='HOLD_PREPARED_NO_PROCESS',closure=closure,seed=seed,source_binding=binding,
+        lio_wake_diagnostic_profile=wake_profile,
         template=dict(path=str(TEMPLATE),sha256=sha(TEMPLATE)),config=dict(path=str(config),sha256=sha(config)),artifacts=artifacts(),
         argv=dict(localization=[str(LM),'--config',str(config)],adapter=['/usr/bin/python3','-u',str(NATIVE/ADAPTER_REL),'--relay-mode','local','--sim-host','192.168.1.219','--max-policy-vx','0.4','--max-policy-wz','0.3']),
         boundary='Inputs only; no Nav/goal/source3/UE launch or signal. Seed does not imply accepted Native pose.')
@@ -235,6 +251,8 @@ def main(argv=None):
     parser.add_argument('--map-dir',required=True,type=Path);parser.add_argument('--seed-provenance',type=Path)
     parser.add_argument('--source-release',required=True,type=Path);parser.add_argument('--output',required=True,type=Path)
     parser.add_argument('--max-runtime-sec',type=float,default=14400.)
+    parser.add_argument('--lio-imu-ready-wake',choices=['template','false'],default='template',
+        help='Source-only diagnostic of existing Native LIO scheduling; false requires separate timing/accuracy evaluation')
     args=parser.parse_args(argv);args.output=args.output.resolve()
     if not math.isfinite(args.max_runtime_sec) or not 0<args.max_runtime_sec<=14400.:parser.error('runtime must be finite in(0,14400]')
     args.output.mkdir(parents=True,exist_ok=False)
