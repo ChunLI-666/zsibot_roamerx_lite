@@ -22,7 +22,7 @@ when its raw sensors and front camera are available.
 
 Every new `--run` arms an independent, detached recording deadline before ROS
 setup or runtime children. `--max-runtime-sec` defaults to 600 and accepts only
-finite values in `(0, 3600]`; startup time counts from the launcher's Linux process
+finite values in `(0, 7200]`; startup time counts from the launcher's Linux process
 start, using `CLOCK_BOOTTIME`, independently of agent/SSH lifetime or ROS time.
 Arming must acknowledge successfully or startup fails. The frozen helper runs
 with Python's isolated import path, no terminal, no inherited stdio pipes and no
@@ -209,7 +209,7 @@ must equal it. Before sending, the client checks the launcher's fixed
 `CLOCK_BOOTTIME` deadline and same boot ID, requiring the full budget plus
 30 seconds for stopping/closure. Stop observation is bounded to `[.3,8]` seconds
 so an override cannot consume that reserve. The launcher retains its default 600-second
-deadline and explicit maximum 3600 seconds. Choose a sufficient explicit
+deadline and explicit maximum 7200 seconds. Choose a sufficient explicit
 launcher deadline before starting a long experiment.
 
 The batch client inherits the unchanged a63b observer's 13 explicit
@@ -290,3 +290,18 @@ source analysis and independent review are under
 `native_B3_lattice_parameter_candidates_solmax_v1`. The published costmap and
 nearest Native pose sample are the available offline fixture, not an exact
 recording of the planner's internal locked map or TF lookup.
+
+### Separate recording and mission budgets (2026-11-07)
+
+The optional recording deadline now accepts up to 7200 seconds; its default
+remains 600 seconds. Select enough recording time for setup, the independently
+bounded route and final stop/closure. B4 sent no goal because its fixed 3600
+second window had only 3267.6 seconds left before dispatch, below the unchanged
+3300 second mission plus 30 second reserve. Keep B4 as a zero-goal preparation
+case, not a planner failure. The next full-route recording explicitly requests
+7200 seconds, while its route still has a 3300 second execution budget.
+
+This changes only the recording supervisor's finite upper limit. The absolute
+CLOCK_BOOTTIME deadline, retained-pidfd ownership, stop order, default timeout,
+planning budget, sensor-age checks and measured stop requirements are unchanged.
+Inputs have their own deadline and must remain available throughout each case.

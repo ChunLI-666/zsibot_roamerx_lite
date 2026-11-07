@@ -15,7 +15,7 @@ import time
 import uuid
 
 
-MAX_RUNTIME_SEC = 3600.0
+MAX_RUNTIME_SEC = 7200.0
 MANIFEST = 'recording_deadline.json'
 ARMED = 'recording_deadline_armed.json'
 SHUTDOWN = 'recording_deadline_shutdown.json'
@@ -33,7 +33,7 @@ LAUNCH_ENV = 'MATRIX_RECORDING_LAUNCH_ID'
 def runtime_seconds(value):
     seconds = float(value)
     if not math.isfinite(seconds) or not 0 < seconds <= MAX_RUNTIME_SEC:
-        raise argparse.ArgumentTypeError('max runtime must be finite and in (0, 3600] seconds')
+        raise argparse.ArgumentTypeError('max runtime must be finite and in (0, 7200] seconds')
     return seconds
 
 
