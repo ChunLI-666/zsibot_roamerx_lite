@@ -436,13 +436,17 @@ def prepare(args):
             raytrace_max_range=8.5,raytrace_min_range=.0,obstacle_max_range=8.,obstacle_min_range=.1))
     planner=d['planner_server']['ros__parameters']['GridBased'];planner.update(plugin=required_plugin,tolerance=0.,max_planning_time=2.,rotation_penalty=1.)
     controller=d['controller_server']['ros__parameters'];controller['Checker'].update(stateful=False,xy_goal_tolerance=args.xy_tolerance,yaw_goal_tolerance=args.yaw_tolerance,controller_name='FollowPath')
-    controller['Checker'].update(trans_stopped_velocity=.01,rot_stopped_velocity=.01)
+    controller['Checker'].update(trans_stopped_velocity=.03,rot_stopped_velocity=.05)
+    manifest['measured_stop_contract']=dict(schema='matrix.measured_stop.v1',
+      measured_linear_mps=.03,measured_angular_radps=.05,commanded_linear_mps=.01,
+      commanded_angular_radps=.01,continuous_final_stop_sec=.3,
+      boundary='Measured limits match the existing independent waypoint contract; measured values and original geometry remain unchanged. Native final completion requires continuous stopped geometry after a checked zero.')
     if args.variant=='segmented':
         planner.update(cost_penalty=0.,terminal_goal_binding=True,terminal_global_resolution=.01)
         planner['lattice_filepath']=str(selected_install/'share/robot_feasible_navigation/params/stop_turn_1cm_h16.json')
         controller['Checker']['plugin']='nav2_controller::StoppedGoalChecker'
         controller['FollowPath']=dict(rpp,plugin='nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController')
-        controller['segments']=dict(xy_tolerance=args.xy_tolerance,yaw_tolerance=args.yaw_tolerance,stopped_linear_velocity=.01,stopped_angular_velocity=.01,
+        controller['segments']=dict(xy_tolerance=args.xy_tolerance,yaw_tolerance=args.yaw_tolerance,stopped_linear_velocity=.03,stopped_angular_velocity=.05,final_stop_dwell_sec=.3,
           same_xy_epsilon=.0001,progress_search_distance=.25,odom_timeout=.3,rotation_anchor_wait_timeout=15.,command_sweep_horizon=1.,
           terminal_goal_binding=True,terminal_global_resolution=.01,terminal_global_extent=20.)
     else:

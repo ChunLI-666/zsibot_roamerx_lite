@@ -498,3 +498,92 @@ TEST(SegmentCoordinator, StoppedOutsideAnchorRequiresFailureReplanWithoutAdvanci
   EXPECT_FALSE(c.stoppedRotationNeedsReplan(pose(-9.915,-38.861,target),measured));
   EXPECT_FALSE(c.stoppedRotationNeedsReplan(pose(-10.024448854,-38.719629926,target-.09),measured));
 }
+
+#include "robot_feasible_navigation/original_goal_stop_dwell.hpp"
+using FinalDwell = robot_feasible_navigation::OriginalGoalStopDwell;
+namespace {
+constexpr std::int64_t dwell_s=1000000000,dwell_o=1000000000000000000,dwell_step=50000000;
+bool dwell_tick(FinalDwell & d,int i,bool geometry=true,bool stopped=true,bool zero=true) {
+  return d.observe(dwell_s+i*dwell_step,dwell_o+i*dwell_step,
+    dwell_o+i*dwell_step,geometry,stopped,zero);
+}
+}
+TEST(OriginalGoalStopDwell, MovingInsideOriginalGeometryNeverReady) {
+  FinalDwell d;for(int i=0;i<20;++i) {EXPECT_FALSE(dwell_tick(d,i,true,false));}
+}
+TEST(OriginalGoalStopDwell, FirstZeroIsBaselineAndBothClocksNeed300ms) {
+  FinalDwell d;for(int i=0;i<7;++i) {EXPECT_FALSE(dwell_tick(d,i));}
+  EXPECT_TRUE(dwell_tick(d,7));  // .3s after the first NEW post-zero observation.
+}
+TEST(OriginalGoalStopDwell, MeasuredPolicyMatchesPilotAndProductionSegmentDefaultStaysSeparate) {
+  EXPECT_TRUE(FinalDwell::measuredStopped(.03,0.,.05));
+  EXPECT_TRUE(FinalDwell::measuredStopped(0.,-.03,-.05));
+  EXPECT_FALSE(FinalDwell::measuredStopped(.03,.03,0.));
+  EXPECT_FALSE(FinalDwell::measuredStopped(0.,0.,std::nextafter(.05,1.)));
+  EXPECT_FALSE(FinalDwell::measuredStopped(std::numeric_limits<double>::quiet_NaN(),0.,0.));
+  SegmentCoordinator c;geometry_msgs::msg::Twist v;v.linear.x=.02;v.angular.z=.04;
+  EXPECT_FALSE(c.stopped(v));  // Production Config is still .01/.01.
+  EXPECT_TRUE(FinalDwell::measuredStopped(v.linear.x,v.linear.y,v.angular.z));
+}
+TEST(OriginalGoalStopDwell, SourceClockSpanCannotBeReplacedBySteadyTime) {
+  FinalDwell d;
+  for(int i=0;i<13;++i) {EXPECT_FALSE(d.observe(dwell_s+i*dwell_step,
+    dwell_o+i*dwell_step/2,dwell_o+i*dwell_step,true,true,true));}
+  EXPECT_TRUE(d.observe(dwell_s+13*dwell_step,dwell_o+13*dwell_step/2,
+    dwell_o+13*dwell_step,true,true,true));
+}
+TEST(OriginalGoalStopDwell, SteadySpanCannotBeReplacedBySourceClock) {
+  FinalDwell d;
+  for(int i=0;i<13;++i) {EXPECT_FALSE(d.observe(dwell_s+i*dwell_step/2,
+    dwell_o+i*dwell_step,dwell_o+i*dwell_step,true,true,true));}
+  EXPECT_TRUE(d.observe(dwell_s+13*dwell_step/2,dwell_o+13*dwell_step,
+    dwell_o+13*dwell_step,true,true,true));
+}
+TEST(OriginalGoalStopDwell, PreZeroEpochsDoNotCountEvenWhenAdvancing) {
+  FinalDwell d;
+  for(int i=0;i<11;++i) {EXPECT_FALSE(d.observe(dwell_s+i*dwell_step,
+    dwell_o-4*dwell_step+i*dwell_step,dwell_o+i*dwell_step,true,true,true));}
+  EXPECT_TRUE(d.observe(dwell_s+11*dwell_step,dwell_o+7*dwell_step,
+    dwell_o+11*dwell_step,true,true,true));
+}
+TEST(OriginalGoalStopDwell, DuplicateOriginalOdomNeverMatures) {
+  FinalDwell d;
+  for(int i=0;i<20;++i) {EXPECT_FALSE(d.observe(dwell_s+i*dwell_step,
+    dwell_o,dwell_o+i*dwell_step,true,true,true));}
+}
+TEST(OriginalGoalStopDwell, RegressionInvalidatesEntireHold) {
+  FinalDwell d;for(int i=0;i<6;++i) {EXPECT_FALSE(dwell_tick(d,i));}
+  EXPECT_FALSE(d.observe(dwell_s+6*dwell_step,dwell_o+4*dwell_step,
+    dwell_o+6*dwell_step,true,true,true));EXPECT_FALSE(d.active());
+}
+TEST(OriginalGoalStopDwell, ControlPauseBeyondFreshnessCannotBeBridged) {
+  FinalDwell d;for(int i=0;i<6;++i) {EXPECT_FALSE(dwell_tick(d,i));}
+  EXPECT_FALSE(d.observe(dwell_s+6*dwell_step+300000001,
+    dwell_o+6*dwell_step+300000001,dwell_o+6*dwell_step+300000001,true,true,true));
+  EXPECT_FALSE(d.active());
+}
+TEST(OriginalGoalStopDwell, SourceEpochGapBeyondFreshnessCannotBeBridged) {
+  FinalDwell d;for(int i=0;i<6;++i) {EXPECT_FALSE(dwell_tick(d,i));}
+  EXPECT_FALSE(d.observe(dwell_s+6*dwell_step,dwell_o+6*dwell_step+300000001,
+    dwell_o+6*dwell_step+300000001,true,true,true));
+}
+TEST(OriginalGoalStopDwell, GeometryOrCheckedZeroLossResets) {
+  for(bool lose_geometry:{false,true}) {
+    FinalDwell d;for(int i=0;i<6;++i) {EXPECT_FALSE(dwell_tick(d,i));}
+    EXPECT_FALSE(dwell_tick(d,6,!lose_geometry,true,lose_geometry));EXPECT_FALSE(d.active());
+    for(int i=7;i<14;++i) {EXPECT_FALSE(dwell_tick(d,i));}
+    EXPECT_TRUE(dwell_tick(d,14));
+  }
+}
+TEST(OriginalGoalStopDwell, OneMovingSampleBreaksContinuousStop) {
+  FinalDwell d;for(int i=0;i<6;++i) {EXPECT_FALSE(dwell_tick(d,i));}
+  EXPECT_FALSE(dwell_tick(d,6,true,false));
+  for(int i=7;i<13;++i) {EXPECT_FALSE(dwell_tick(d,i));}
+  EXPECT_TRUE(dwell_tick(d,13));
+}
+TEST(OriginalGoalStopDwell, NewPlanCancelAndResetCannotReuseQualifiedHistory) {
+  FinalDwell d;for(int i=0;i<7;++i) {EXPECT_FALSE(dwell_tick(d,i));}
+  d.reset();EXPECT_FALSE(d.active());
+  for(int i=7;i<14;++i) {EXPECT_FALSE(dwell_tick(d,i));}
+  EXPECT_TRUE(dwell_tick(d,14));
+}

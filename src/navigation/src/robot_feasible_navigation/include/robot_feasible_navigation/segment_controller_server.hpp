@@ -27,6 +27,7 @@
 #include <chrono>
 #include <utility>
 #include "robot_feasible_navigation/segment_coordinator.hpp"
+#include "robot_feasible_navigation/original_goal_stop_dwell.hpp"
 
 #include "nav2_core/controller.hpp"
 #include "nav2_core/progress_checker.hpp"
@@ -312,7 +313,11 @@ protected:
   void clearSegmentState();
   geometry_msgs::msg::PoseStamped actualPathPose();
   geometry_msgs::msg::PoseStamped toPathPose(const geometry_msgs::msg::PoseStamped & actual);
-  bool measuredVelocity(geometry_msgs::msg::Twist & velocity);
+  bool measuredVelocity(geometry_msgs::msg::Twist & velocity, std::int64_t * original_stamp_ns=nullptr);
+  OriginalGoalStopDwell final_goal_stop_dwell_;
+  bool final_stop_zero_this_cycle_{false};
+  void resetFinalGoalStop();
+  std::int64_t publishFinalGoalStop(const geometry_msgs::msg::PoseStamped & actual);
   void enforceRotationSweep(const geometry_msgs::msg::PoseStamped & actual_pose);
   bool rotationSweepFree(const geometry_msgs::msg::PoseStamped & actual_pose,
     const geometry_msgs::msg::PoseStamped & target);

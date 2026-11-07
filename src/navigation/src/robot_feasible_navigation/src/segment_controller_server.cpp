@@ -127,6 +127,7 @@ SegmentControllerServer::SegmentControllerServer(const rclcpp::NodeOptions & opt
   const SegmentCoordinator::Config config;
   declare_parameter("segments.xy_tolerance", config.xy_tolerance, descriptor);
   declare_parameter("segments.yaw_tolerance", config.yaw_tolerance, descriptor);
+  declare_parameter("segments.final_stop_dwell_sec", .3, descriptor);
   declare_parameter("segments.stopped_linear_velocity", config.stopped_linear_velocity, descriptor);
   declare_parameter("segments.stopped_angular_velocity", config.stopped_angular_velocity, descriptor);
   declare_parameter("segments.same_xy_epsilon", config.same_xy_epsilon, descriptor);
@@ -174,6 +175,9 @@ SegmentControllerServer::on_configure(const rclcpp_lifecycle::State & state)
   SegmentCoordinator::Config segment_config;
   get_parameter("segments.xy_tolerance", segment_config.xy_tolerance);
   get_parameter("segments.yaw_tolerance", segment_config.yaw_tolerance);
+  if (get_parameter("segments.final_stop_dwell_sec").as_double()!=
+      OriginalGoalStopDwell::kDwellNs/1.e9)
+  {throw std::runtime_error("Final original-goal stop dwell must be .3 seconds");}
   get_parameter("segments.stopped_linear_velocity", segment_config.stopped_linear_velocity);
   get_parameter("segments.stopped_angular_velocity", segment_config.stopped_angular_velocity);
   get_parameter("segments.same_xy_epsilon", segment_config.same_xy_epsilon);
@@ -652,6 +656,7 @@ void SegmentControllerServer::computeControl()
       }
 
       if (action_server_->is_cancel_requested()) {
+        resetFinalGoalStop();  // Pending cancellation cannot mature final-stop history.
         if (controllers_[current_controller_]->cancel()) {
           RCLCPP_INFO(get_logger(), "Cancellation was successful. Stopping the robot.");
           action_server_->terminate_all();
@@ -790,6 +795,7 @@ void SegmentControllerServer::computeControl()
 
 void SegmentControllerServer::clearSegmentState()
 {
+  resetFinalGoalStop();
   coordinator_.clear();
   queued_path_.reset();
   segment_braking_ = false;
@@ -814,6 +820,7 @@ nav_msgs::msg::Path SegmentControllerServer::executionInput(const nav_msgs::msg:
 void SegmentControllerServer::setPlannerPath(
   const nav_msgs::msg::Path & path, bool require_entry_stop)
 {
+  resetFinalGoalStop();  // Every newly installed plan starts a new final-stop observation.
   const bool preserve_goal = original_goal_ &&
     SegmentCoordinator::compatibleGoal(current_wire_path_, path);
   try {
@@ -840,6 +847,7 @@ void SegmentControllerServer::setPlannerPath(
 
 void SegmentControllerServer::installActiveSegment()
 {
+  resetFinalGoalStop();
   current_path_ = coordinator_.active().path;
   for (auto & pose : current_path_.poses) {
     if (pose.header.frame_id.empty()) {pose.header.frame_id = current_path_.header.frame_id;}
@@ -881,7 +889,8 @@ geometry_msgs::msg::PoseStamped SegmentControllerServer::toPathPose(
   return transformed;
 }
 
-bool SegmentControllerServer::measuredVelocity(geometry_msgs::msg::Twist & measured)
+bool SegmentControllerServer::measuredVelocity(geometry_msgs::msg::Twist & measured,
+  std::int64_t * original_stamp_ns)
 {
   const auto sample = odom_sub_->getTwistStamped();
   const rclcpp::Time stamp(sample.header.stamp, get_clock()->get_clock_type());
@@ -918,7 +927,35 @@ bool SegmentControllerServer::measuredVelocity(geometry_msgs::msg::Twist & measu
   }
   invalid_odom_since_.reset();
   measured = velocity;
+  if (original_stamp_ns) {*original_stamp_ns=stamp.nanoseconds();}
   return true;
+}
+
+void SegmentControllerServer::resetFinalGoalStop()
+{
+  final_goal_stop_dwell_.reset();final_stop_zero_this_cycle_=false;
+}
+
+std::int64_t SegmentControllerServer::publishFinalGoalStop(
+  const geometry_msgs::msg::PoseStamped & actual)
+{
+  auto * map=costmap_ros_->getCostmap();
+  {
+    std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> lock(*map->getMutex());
+    sweep::ScopedObstacleIndex index(*map);
+    const double horizon=get_parameter("segments.command_sweep_horizon").as_double();
+    if (horizon<.5 || !sweep::commandSweepFree(*map,costmap_ros_->getRobotFootprint(),
+      actual.pose.position.x,actual.pose.position.y,SegmentCoordinator::yaw(actual.pose),0.,0.,horizon))
+    {throw nav2_core::NoValidControl("Filled original-goal final zero sweep blocked");}
+  }
+  if (!rclcpp::ok() || !vel_publisher_ || !vel_publisher_->is_activated() ||
+    vel_publisher_->get_subscription_count()==0)
+  {throw nav2_core::NoValidControl("Original-goal final zero publisher unavailable");}
+  geometry_msgs::msg::TwistStamped zero;
+  zero.header.frame_id=costmap_ros_->getBaseFrameID();zero.header.stamp=now();
+  publishVelocity(zero);last_valid_cmd_time_=now();
+  final_stop_zero_this_cycle_=true;
+  return rclcpp::Time(zero.header.stamp,get_clock()->get_clock_type()).nanoseconds();
 }
 
 void SegmentControllerServer::publishSegmentStop()
@@ -992,6 +1029,7 @@ void SegmentControllerServer::enforceRotationSweep(
 void SegmentControllerServer::activateTerminalRotation(
   const geometry_msgs::msg::PoseStamped & path_pose)
 {
+  resetFinalGoalStop();
   // This ephemeral RPP path is never installed in the ordered coordinator. Its original
   // full path/goal remain the authority for compatibility, pending progress and success.
   nav_msgs::msg::Path path;
@@ -1016,6 +1054,7 @@ void SegmentControllerServer::activateTerminalRotation(
 
 void SegmentControllerServer::restoreOrderedSegment()
 {
+  resetFinalGoalStop();
   terminal_rotation_active_ = terminal_braking_ = false;
   segment_braking_ = false;
   if (queued_path_) {
@@ -1030,6 +1069,7 @@ void SegmentControllerServer::restoreOrderedSegment()
 
 void SegmentControllerServer::computeAndPublishVelocity()
 {
+  if (final_stop_zero_this_cycle_) {return;}  // The checked final zero was already published.
   geometry_msgs::msg::PoseStamped pose;
 
   if (!getRobotPose(pose)) {
@@ -1171,6 +1211,7 @@ void SegmentControllerServer::updateGlobalPath()
   if (!action_server_->is_preempt_requested()) {return;}
   auto goal = action_server_->accept_pending_goal();
   if (!goal) {throw nav2_core::InvalidPath("Missing pending FollowPath goal");}
+  resetFinalGoalStop();  // Includes compatible replans queued during a turn.
   std::string controller, goal_checker, progress_checker;
   if (!findControllerId(goal->controller_id, controller)) {
     throw nav2_core::InvalidController("Invalid controller in preempting path");
@@ -1253,11 +1294,17 @@ std::pair<double, double> SegmentControllerServer::originalGoalTolerances()
 
 bool SegmentControllerServer::isGoalReached()
 {
-  if (coordinator_.empty() || !original_goal_) {return false;}
-  const auto path_pose = actualPathPose();
+  final_stop_zero_this_cycle_=false;
+  if (coordinator_.empty() || !original_goal_) {resetFinalGoalStop();return false;}
+  geometry_msgs::msg::PoseStamped actual;
+  if (!getRobotPose(actual)) {
+    resetFinalGoalStop();throw nav2_core::ControllerTFError("Failed to obtain final observation pose");
+  }
+  const auto path_pose=toPathPose(actual);
   coordinator_.observe(path_pose.pose);
-  geometry_msgs::msg::Twist measured;
-  if (!measuredVelocity(measured)) {
+  geometry_msgs::msg::Twist measured;std::int64_t original_odom_stamp=0;
+  if (!measuredVelocity(measured,&original_odom_stamp)) {
+    resetFinalGoalStop();
     segment_braking_ = true;  // Do not bypass this cycle's phase/goal checks if DDS catches up.
     publishSegmentStop();
     return false;
@@ -1282,11 +1329,20 @@ bool SegmentControllerServer::isGoalReached()
   if (terminal_eligible && SegmentCoordinator::originalGoalGeometryReached(
     path_pose.pose, original_goal_->pose, xy_tolerance, yaw_tolerance))
   {
-    const bool reached = goal_checkers_[current_goal_checker_]->isGoalReached(
-      path_pose.pose, original_goal_->pose, measured);
-    segment_braking_ = !reached;  // E.g. a real stopped-goal checker still requests a stop.
-    return reached;
+    // Only final original-goal acceptance changes. The coordinator's mandatory
+    // prefix/segment stop remains authoritative and unchanged.
+    segment_braking_=true;
+    const auto zero_command_stamp=publishFinalGoalStop(actual);
+    const bool measured_stopped=OriginalGoalStopDwell::measuredStopped(
+      measured.linear.x,measured.linear.y,measured.angular.z);
+    const bool checker_reached=goal_checkers_[current_goal_checker_]->isGoalReached(
+      path_pose.pose,original_goal_->pose,measured);
+    const auto steady_ns=std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now().time_since_epoch()).count();
+    return final_goal_stop_dwell_.observe(steady_ns,original_odom_stamp,zero_command_stamp,true,
+      measured_stopped && checker_reached,true);
   }
+  resetFinalGoalStop();  // XY/yaw/mandatory eligibility loss breaks the continuous dwell.
   if (!terminal_braking_) {segment_braking_ = false;}
 
   bool sweep_free = false;
