@@ -1047,6 +1047,11 @@ void SegmentControllerServer::computeAndPublishVelocity()
 
   if (coordinator_.rotating() || terminal_rotation_active_) {
     enforceRotationSweep(pose);  // At entry and every command cycle, full remaining turn.
+    // RPP must rotate to the ordered yaw, never toward a displaced old XY carrot.
+    // This derived two-pose control path does not replace current_path_, end_pose_,
+    // the coordinator's original anchor/progress, or the external original goal.
+    controllers_[current_controller_]->setPlan(SegmentCoordinator::actualOriginRotationPath(
+      toPathPose(pose),terminal_rotation_active_ ? *original_goal_ : end_pose_));
   } else if (!coordinator_.finalSegment()) {
     // Use the SAME actual pose passed to RPP. A fresh TF update between the goal/phase
     // check and this call must not let RPP start an implicit end-of-TRACK yaw correction.
@@ -1082,13 +1087,15 @@ void SegmentControllerServer::computeAndPublishVelocity()
       const double remaining = SegmentCoordinator::angle(
         SegmentCoordinator::yaw(terminal_rotation_active_ ? original_goal_->pose : end_pose_.pose) -
         SegmentCoordinator::yaw(toPathPose(pose).pose));
+      const double settling_yaw_tolerance = terminal_rotation_active_ ?
+        originalGoalTolerances().second : coordinator_.config().yaw_tolerance;
       const auto decision = SegmentCoordinator::rotationCommandDecision(
-        remaining, cmd_vel_2d.twist.angular.z, measured.angular.z);
+        remaining, cmd_vel_2d.twist.angular.z, measured.angular.z, settling_yaw_tolerance);
       if (decision != SegmentCoordinator::RotationCommandDecision::Allow) {
         RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
           "RPP rotation command %s: remaining=%.9f cmd_wz=%.9f measured_wz=%.9f",
           decision == SegmentCoordinator::RotationCommandDecision::HoldZero ?
-          "zero-held during measured deceleration" : "rejected",
+          "zero-held for endpoint settling or measured deceleration" : "rejected",
           remaining, cmd_vel_2d.twist.angular.z, measured.angular.z);
         if (decision == SegmentCoordinator::RotationCommandDecision::HoldZero) {
           publishSegmentStop();
@@ -1346,6 +1353,13 @@ bool SegmentControllerServer::isGoalReached()
     incoming_rotation_snapshot_ = false;
   }
   if (!coordinator_.executionReady(measured)) {return false;}
+  if (coordinator_.stoppedRotationNeedsReplan(path_pose.pose,measured)) {
+    // The angular checkpoint is observed, but its original XY anchor is not.
+    // Preserve that failure: no advance/success. The bounded BT recovery may
+    // compute a new full path to the SAME external goal from this stopped body.
+    publishSegmentStop();
+    throw nav2_core::NoValidControl("Ordered rotation stopped outside its original XY anchor; fresh original-goal replan required");
+  }
   if (!coordinator_.finalSegment()) {
     segment_braking_ = coordinator_.geometryReached(path_pose.pose, xy_tolerance);
     if (segment_braking_ && coordinator_.stopped(measured)) {

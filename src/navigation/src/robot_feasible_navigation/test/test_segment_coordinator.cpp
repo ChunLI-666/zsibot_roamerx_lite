@@ -412,3 +412,89 @@ TEST(SegmentCoordinator, RotationDecisionRejectsEveryNonfiniteInput)
     EXPECT_EQ(SegmentCoordinator::rotationCommandDecision(.1, .05, value), Decision::Reject);
   }
 }
+
+
+TEST(SegmentCoordinator, RecordedAInitialTurnNearEndpointPublishesOnlyZero)
+{
+  using Decision = SegmentCoordinator::RotationCommandDecision;
+  // Exact closed A setup Return failure: wrong-way .15 exceeds measured .0749.
+  EXPECT_EQ(SegmentCoordinator::rotationCommandDecision(
+    .002680148, -.150000000, -.074945915), Decision::Reject);
+  EXPECT_EQ(SegmentCoordinator::rotationCommandDecision(
+    .002680148, -.150000000, -.074945915, .08), Decision::HoldZero);
+  EXPECT_EQ(SegmentCoordinator::rotationCommandDecision(
+    -.002680148, .150000000, .074945915, .08), Decision::HoldZero);
+  EXPECT_EQ(SegmentCoordinator::rotationCommandDecision(.08, .15, .07, .08), Decision::HoldZero);
+  EXPECT_EQ(SegmentCoordinator::rotationCommandDecision(-.08, -.15, -.07, .08), Decision::HoldZero);
+  EXPECT_EQ(SegmentCoordinator::rotationCommandDecision(0., -.15, 0., .08), Decision::HoldZero);
+}
+TEST(SegmentCoordinator, EndpointSettlingPreservesOutsideToleranceDirectionProtection)
+{
+  using Decision = SegmentCoordinator::RotationCommandDecision;
+  EXPECT_EQ(SegmentCoordinator::rotationCommandDecision(.0800001, -.15, -.0749, .08), Decision::Reject);
+  EXPECT_EQ(SegmentCoordinator::rotationCommandDecision(-.0800001, .15, .0749, .08), Decision::Reject);
+  EXPECT_EQ(SegmentCoordinator::rotationCommandDecision(.0800001, .15, -.0749, .08), Decision::Allow);
+  for(double invalid:{-.01,std::numeric_limits<double>::quiet_NaN(),std::numeric_limits<double>::infinity()}) {
+    EXPECT_EQ(SegmentCoordinator::rotationCommandDecision(.002, -.15, -.07, invalid), Decision::Reject);
+  }
+}
+TEST(SegmentCoordinator, YawZeroHoldDoesNotWaiveDisplacedXYAnchorOrOrderedProgress)
+{
+  SegmentCoordinator::Config cfg;cfg.xy_tolerance=.15;cfg.yaw_tolerance=.08;
+  SegmentCoordinator c(cfg);
+  const double target=1.1071487177940904,start=target+pi/2.;
+  c.setPath(path({pose(-9.915,-38.861,start),pose(-9.915,-38.861,target),
+    pose(-9.815,-38.661,target)}),false);
+  c.observe(pose(-9.915,-38.861,start));
+  const auto actual=pose(-10.02336,-38.71349,target-.002680148);c.observe(actual);
+  ASSERT_TRUE(c.rotating());EXPECT_TRUE(c.orderedProgressReached(.3,.08));
+  EXPECT_FALSE(c.rotationAnchorReached(actual));EXPECT_FALSE(c.geometryReached(actual));
+  EXPECT_EQ(SegmentCoordinator::rotationCommandDecision(
+    .002680148,-.15,-.074945915,.08),SegmentCoordinator::RotationCommandDecision::HoldZero);
+  geometry_msgs::msg::Twist stopped;EXPECT_TRUE(c.stopped(stopped));
+  EXPECT_FALSE(c.geometryReached(actual));EXPECT_EQ(c.index(),0u);
+}
+TEST(SegmentCoordinator, EndpointOnlyAdvancesAfterUnchangedGeometryAndMeasuredStop)
+{
+  SegmentCoordinator::Config cfg;cfg.xy_tolerance=.15;cfg.yaw_tolerance=.08;
+  SegmentCoordinator c(cfg);c.setPath(path({pose(0.,0.,.4),pose(0.,0.,.8),pose(.1,.1,.8)}),false);
+  c.observe(pose(0.,0.,.4));const auto actual=pose(.02,.03,.797319852);c.observe(actual);
+  ASSERT_TRUE(c.geometryReached(actual));geometry_msgs::msg::Twist v;v.angular.z=-.074945915;
+  EXPECT_FALSE(c.stopped(v));EXPECT_EQ(c.index(),0u);
+  v.angular.z=0.;ASSERT_TRUE(c.stopped(v));ASSERT_TRUE(c.geometryReached(actual));
+  EXPECT_TRUE(c.advance());EXPECT_EQ(c.index(),1u);EXPECT_FALSE(c.rotating());
+}
+
+
+TEST(SegmentCoordinator, ActualOriginControlPathPreservesOriginalOrderedAuthority)
+{
+  const double target=1.1071487177940904;
+  auto original=path({pose(-9.915,-38.861,target+pi/2.),pose(-9.915,-38.861,target),
+    pose(-9.815,-38.661,target)});
+  auto actual=original.poses.front();actual.pose=pose(-10.024448854,-38.719629926,1.104765730);
+  actual.header.stamp.sec=1794038316;actual.header.stamp.nanosec=150314331;
+  const auto saved=original;
+  const auto control=SegmentCoordinator::actualOriginRotationPath(actual,original.poses[1]);
+  ASSERT_EQ(control.poses.size(),2u);
+  EXPECT_EQ(control.header,actual.header);EXPECT_EQ(control.poses.front(),actual);
+  EXPECT_EQ(control.poses.back().pose.position,actual.pose.position);
+  EXPECT_EQ(control.poses.back().pose.orientation,original.poses[1].pose.orientation);
+  EXPECT_EQ(original,saved);
+  auto foreign=original.poses[1];foreign.header.frame_id="odom";
+  EXPECT_THROW(SegmentCoordinator::actualOriginRotationPath(actual,foreign),std::invalid_argument);
+}
+TEST(SegmentCoordinator, StoppedOutsideAnchorRequiresFailureReplanWithoutAdvancing)
+{
+  SegmentCoordinator::Config cfg;cfg.xy_tolerance=.15;cfg.yaw_tolerance=.08;
+  SegmentCoordinator c(cfg);const double target=1.1071487177940904;
+  c.setPath(path({pose(-9.915,-38.861,target+pi/2.),pose(-9.915,-38.861,target),
+    pose(-9.815,-38.661,target)}),false);
+  c.observe(pose(-9.915,-38.861,target+pi/2.));
+  const auto actual=pose(-10.024448854,-38.719629926,1.104765730);c.observe(actual);
+  geometry_msgs::msg::Twist measured;measured.angular.z=-.075103827;
+  EXPECT_FALSE(c.stoppedRotationNeedsReplan(actual,measured));
+  measured.angular.z=0.;EXPECT_TRUE(c.stoppedRotationNeedsReplan(actual,measured));
+  EXPECT_EQ(c.index(),0u);EXPECT_FALSE(c.geometryReached(actual));
+  EXPECT_FALSE(c.stoppedRotationNeedsReplan(pose(-9.915,-38.861,target),measured));
+  EXPECT_FALSE(c.stoppedRotationNeedsReplan(pose(-10.024448854,-38.719629926,target-.09),measured));
+}

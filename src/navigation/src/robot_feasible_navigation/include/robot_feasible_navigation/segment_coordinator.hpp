@@ -68,6 +68,13 @@ public:
   bool entryStopPending() const {return entry_stop_pending_;}
   void requireEntryStop() {entry_stop_pending_ = true;}
   bool rotationAnchorReached(const geometry_msgs::msg::Pose & actual_pose) const;
+  // Retire an action with an explicit failure/replan, never advance this phase.
+  bool stoppedRotationNeedsReplan(const geometry_msgs::msg::Pose & actual_pose,
+    const geometry_msgs::msg::Twist & measured_velocity) const;
+  // RPP-only derived sameXY path; original ordered path/anchor/goal stay intact.
+  static nav_msgs::msg::Path actualOriginRotationPath(
+    const geometry_msgs::msg::PoseStamped & actual,
+    const geometry_msgs::msg::PoseStamped & ordered_target);
   // Only for the first phase of a newly received snapshot. The planner retains the
   // actual unquantized request start; an old yaw must not replay an obsolete turn.
   bool incomingRotationStartReached(const geometry_msgs::msg::Pose & actual_pose) const;
@@ -91,9 +98,12 @@ public:
     bool current, double steady_elapsed, double timeout);
   static InputWaitStatus inputWaitStatus(bool ready, double steady_elapsed, double timeout);
   // Direction policy only; the caller must independently certify the remaining sweep.
-  // An opposite-direction deceleration requests zero hold, never permission to publish it.
+  // Opposite deceleration or an endpoint inside the existing angular tolerance
+  // requests zero hold, never permission to publish an uncertified rotation.
+  // Zero hold does not certify XY/ordered progress or advance a segment.
   static RotationCommandDecision rotationCommandDecision(
-    double remaining_angle, double commanded_angular_velocity, double measured_angular_velocity);
+    double remaining_angle, double commanded_angular_velocity, double measured_angular_velocity,
+    double settling_yaw_tolerance = 0.0);
 
 private:
   void resetObservation();

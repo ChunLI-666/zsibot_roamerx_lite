@@ -320,6 +320,27 @@ is an offline-supported candidate; a full Native A run and comparison remain pen
 The request-local obstacle index also stores each row's exact blocked columns.
 SAT checks visit those same cells in the original order, avoiding scans of empty
 cells without changing geometry, unknown classification or the planning budget.
+
+### Native short-route controller recovery (2026-11-07)
+
+The segmented controller feeds RPP a temporary same-XY path at the measured body
+origin during an ordered rotation. Its target yaw and the coordinator's original
+path, XY anchor, signed progress and external goal remain unchanged. Within the
+existing yaw tolerance it commands zero and waits for measured stopping. A stopped
+rotation outside its original anchor fails explicitly instead of advancing.
+
+The segmented Matrix tree permits one controller-recoverable failure per original
+NavigateToPose goal. It delays one second with BehaviorTree.CPP, computes a fresh
+full path from the stopped body and starts a new FollowPath. It neither resends the
+parent goal nor records the failed phase as visited. Planner errors are excluded
+from this recovery. The official and Hybrid trees retain their single sequence.
+
+The current Matrix profile caps RPP rotation at 0.15 rad/s and uses stopped-goal
+thresholds of 0.01 m/s and 0.01 rad/s. Original goal tolerances remain 0.15 m and
+0.08 rad; physical-input freshness remains 0.3 s. Both costmaps inflate around
+unknown cells so inflation cannot turn an original unknown cell into a traversable
+inscribed-cost cell. These changes require native runtime verification; a build or
+static path check alone does not establish navigation acceptance.
 All package consumers of this header must be rebuilt together. Ownership metadata
 uses the READY 500 ms lease; physical-input freshness and stopped visits retain
 their original contracts. Unknown cells seed inflation as hard obstacles.

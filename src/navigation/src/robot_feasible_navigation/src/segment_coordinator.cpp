@@ -45,12 +45,22 @@ SegmentCoordinator::SegmentCoordinator(const Config & config) : config_(config)
 
 double SegmentCoordinator::angle(double value) {return std::atan2(std::sin(value), std::cos(value));}
 SegmentCoordinator::RotationCommandDecision SegmentCoordinator::rotationCommandDecision(
-  double remaining_angle, double commanded_angular_velocity, double measured_angular_velocity)
+  double remaining_angle, double commanded_angular_velocity, double measured_angular_velocity,
+  double settling_yaw_tolerance)
 {
   if (!std::isfinite(remaining_angle) || !std::isfinite(commanded_angular_velocity) ||
-    !std::isfinite(measured_angular_velocity))
+    !std::isfinite(measured_angular_velocity) || !std::isfinite(settling_yaw_tolerance) ||
+    settling_yaw_tolerance < 0.0)
   {
     return RotationCommandDecision::Reject;
+  }
+  if (settling_yaw_tolerance > 0.0 &&
+    std::abs(remaining_angle) <= settling_yaw_tolerance)
+  {
+    // At the original yaw boundary, RPP can still request its fixed rotation
+    // speed (including toward an old displaced XY anchor). Publish only zero;
+    // unchanged XY + ordered progress + measured stop still govern handoff.
+    return RotationCommandDecision::HoldZero;
   }
   if (commanded_angular_velocity == 0.0 ||
     (remaining_angle > 0.0 && commanded_angular_velocity > 0.0) ||
@@ -279,6 +289,25 @@ bool SegmentCoordinator::rotationAnchorReached(const geometry_msgs::msg::Pose & 
 {
   return !rotating() || (finitePose(actual_pose) &&
          distance(actual_pose, active().path.poses.front().pose) <= config_.xy_tolerance);
+}
+bool SegmentCoordinator::stoppedRotationNeedsReplan(
+  const geometry_msgs::msg::Pose & actual,const geometry_msgs::msg::Twist & measured) const
+{
+  return rotating() && finitePose(actual) && stopped(measured) &&
+    std::abs(angle(yaw(active().path.poses.back().pose)-yaw(actual)))<=config_.yaw_tolerance &&
+    orderedProgressReached(config_.xy_tolerance*2.,config_.yaw_tolerance) &&
+    !rotationAnchorReached(actual);
+}
+nav_msgs::msg::Path SegmentCoordinator::actualOriginRotationPath(
+  const geometry_msgs::msg::PoseStamped & actual,
+  const geometry_msgs::msg::PoseStamped & ordered_target)
+{
+  if (!finitePose(actual.pose)||!finitePose(ordered_target.pose)||actual.header.frame_id.empty()||
+    actual.header.frame_id!=ordered_target.header.frame_id)
+  {throw std::invalid_argument("Actual-origin control rotation needs finite poses in the same frame");}
+  nav_msgs::msg::Path control;control.header=actual.header;control.poses={actual,actual};
+  control.poses.back().pose.orientation=ordered_target.pose.orientation;
+  return control;
 }
 bool SegmentCoordinator::incomingRotationStartReached(
   const geometry_msgs::msg::Pose & actual_pose) const
