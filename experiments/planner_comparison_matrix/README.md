@@ -314,6 +314,14 @@ filled sweep checks remain unchanged. Published maps and nearest recorded Native
 poses are offline proxies, not the unrecorded planner-lock inputs; these results
 do not establish full-route or live timing acceptance.
 
+Ownership metadata uses the existing READY 500 ms lease. Its older 300 ms
+boundary is still recorded once per observation as metadata latency evidence;
+sensor, TF, command and independent stopped-visit checks retain their contracts.
+The official Matrix variant derives its frozen lattice file by changing only
+the metadata motion model to `omni`, selecting the installed official SE2
+heuristic. All forward/rotate primitive arrays remain unchanged; analytic
+connectors remain disabled. The original and derived file hashes are recorded.
+
 ### Initial Pose-goal region (official variant only)
 
 The official Matrix Pose-goal profile explicitly enables

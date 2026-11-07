@@ -240,7 +240,16 @@ def prepare(args):
                 semantics='Original path.back goal is retained for server acceptance; RPP executes checked prefix and ordered actual-origin terminal headings, never an artificial quantization tail.')
     # Freeze the actual primitive input instead of depending on subsequent canonical branch switches.
     if 'lattice_filepath' in planner:
-        source=pathlib.Path(planner['lattice_filepath']);shutil.copy2(source,out/'lattice.json');planner['lattice_filepath']=str(out/'lattice.json');manifest['lattice_sha256']=sha(out/'lattice.json')
+        source=pathlib.Path(planner['lattice_filepath']);shutil.copy2(source,out/'lattice.json')
+        if args.variant=='official':
+            lattice=json.loads((out/'lattice.json').read_text())
+            previous_model=lattice['lattice_metadata']['motion_model']
+            lattice['lattice_metadata']['motion_model']='omni'
+            write(out/'lattice.json',lattice)
+            manifest['lattice_heuristic_model']=dict(source_sha256=sha(source),
+                original_model=previous_model,effective_model='omni',primitives_unchanged=True,
+                semantics='Official SE2 heuristic relaxation for the same forward/rotate primitive graph; no lateral actions or analytic connectors added.')
+        planner['lattice_filepath']=str(out/'lattice.json');manifest['lattice_sha256']=sha(out/'lattice.json')
     bt=out/'navigate.xml';bt.write_text('<root BTCPP_format="4" main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree"><Sequence><ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/><FollowPath path="{path}" controller_id="FollowPath" goal_checker_id="Checker" progress_checker_id="Progress"/></Sequence></BehaviorTree></root>\n')
     d['bt_navigator']['ros__parameters']['default_nav_to_pose_bt_xml']=str(bt)
     manifest['with_waypoints']=args.with_waypoints
