@@ -230,7 +230,8 @@ class ConfirmationTests(unittest.TestCase):
             current=snapshot(age=.1)
             current['last']['pose']['raw_pose_values_finite']=True
             captured=[]
-            fake=SimpleNamespace(args=SimpleNamespace(execute=True,scan_aging_confirm_sec=0.,ready=None,variant='official'),
+            fake=SimpleNamespace(simulation_scan_max_age_sec=.3,simulation_scan_sequence_fault=None,
+                args=SimpleNamespace(execute=True,scan_aging_confirm_sec=0.,ready=None,variant='official'),
                 check_interruption=lambda:None,input_ready=lambda **kw:(True,[],current),
                 runtime_binding=None,native_binding=None,owned_identity=None,goal_sent_ns=None,
                 ownership_metadata_reported_check_ns=set(),
@@ -244,6 +245,7 @@ class ConfirmationTests(unittest.TestCase):
                 finite_velocity=contract.finite_velocity,waypoint_binding=lambda *args:{},
                 validate_ownership=contract.validate_ownership,
                 ownership_metadata_lease_deviation=contract.ownership_metadata_lease_deviation)
+            namespace.update({name:getattr(contract,name) for name in ['simulation_scan_latency_profile', 'validate_simulation_scan_latency_profile', 'operational_scan_age_issues', 'strict_simulation_scan_deviations', 'producer_scan_signed_age_bounds']})
             exec(compile(ast.fix_missing_locations(ast.Module(body=[method],type_ignores=[])),
                          'waypoint_batch.py','exec'),namespace)
             valid,issues,_=namespace['execution_ready'](fake)

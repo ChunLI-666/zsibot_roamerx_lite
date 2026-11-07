@@ -365,7 +365,16 @@ def navigation_tree(variant):
         plain='<RecoveryNode number_of_retries="1" name="StoppedOriginalGoalReplan">'+execute+recover+'</RecoveryNode>'
     return '<root BTCPP_format="4" main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree">'+plain+'</BehaviorTree></root>\n'
 
+def simulation_scan_latency_profile(max_age=.3):
+    if max_age not in (.3,.5):raise ValueError('Matrix scan operational age must be .3 or .5 seconds')
+    return dict(schema='matrix.simulation_scan_latency.v1',
+      mode='strict_300ms' if max_age==.3 else 'simulation_500ms',
+      operational_max_age_sec=max_age,strict_max_age_sec=.3,future_tolerance_sec=.05,
+      original_header_and_receive_timestamps=True,applies_only_to='scan_header_and_receive_age')
+
+
 def prepare(args):
+    scan_profile=simulation_scan_latency_profile(getattr(args,'simulation_scan_max_age_sec',.3))
     template=pathlib.Path(args.template).absolute()
     snapshot,snapshot_raw=source_snapshot(args.source_snapshot,template,args.with_waypoints) if args.source_snapshot else (None,None)
     out=pathlib.Path(args.output).resolve();out.mkdir(parents=True,exist_ok=False)
@@ -389,6 +398,7 @@ def prepare(args):
     selected_install=pathlib.Path(selected_path).resolve()
     required_plugin={'official':'official_lattice_rpp_adapter::CheckedLattice','hybrid':'official_lattice_rpp_adapter::CheckedHybrid','segmented':'robot_feasible_navigation::SafeLatticePlanner'}[args.variant]
     manifest=dict(scope='Matrix navigation experiment only; not physical robot acceptance',stage='prepared',execution_requested=args.run,variant=args.variant,
+        simulation_scan_latency_profile=scan_profile,
         selected_install=str(selected_install),map_yaml=str(map_yaml),map_yaml_sha256=sha(map_yaml),map_image=str(map_image),map_image_sha256=sha(map_image),
         profile_template=str(template),profile_template_sha256=sha(template),footprint=footprint,padding=args.padding,
         rotate_to_heading_min_angle=rpp['rotate_to_heading_min_angle'],
@@ -639,7 +649,7 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
             return ownership
     def source_health():
         now=node.get_clock().now().nanoseconds/1e9
-        for topic,limit in [(args.odom_topic,.3),(args.scan_topic,.3),('/lightning/loc_status',.2),('/lightning/pose_valid',.2),(args.camera_topic,.5)]:
+        for topic,limit in [(args.odom_topic,.3),(args.scan_topic,getattr(args,'simulation_scan_max_age_sec',.3)),('/lightning/loc_status',.2),('/lightning/pose_valid',.2),(args.camera_topic,.5)]:
             if topic not in latest:raise RuntimeError('Missing source '+topic)
             received,msg=latest[topic]
             if time.monotonic()-received>limit:raise RuntimeError('Stale receive '+topic)
@@ -881,6 +891,7 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
             write(out/'waypoint_ownership_initial.json',ownership)
         readiness=dict(ready=True,time_ns=node.get_clock().now().nanoseconds,variant=args.variant,actual_costmaps=actual_maps,
           params_sha256=sha(out/'params.yaml'),build_receipt_sha256=manifest['build_receipt_sha256'],source_counts=counts,
+          simulation_scan_latency_profile=manifest['simulation_scan_latency_profile'],
           action_server='/navigate_to_pose',goal_tolerances=manifest['goal_tolerances'],goal_client_authorization='Wait for root instruction; this file alone does not dispatch navigation')
         if args.with_waypoints:
             readiness.update(waypoint_action_server='/follow_waypoints',waypoint_contract=manifest['waypoint_contract'],
@@ -894,7 +905,7 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
         manifest['ready_producer']=dict(heartbeat_period_sec=.05,ownership_audit_period_sec=.2,
           ready_lease_ns=500_000_000,ownership_lease_ns=500_000_000,
           policy='Absolute heartbeat; complete worker audit retains checked timestamp; READY expiry never exceeds that original audit expiry; source_health last before publication',
-          timing='Wall/thread CPU per phase; callback-pump, audit, health and atomic-write timings; no physical input limits changed',
+          timing='Wall/thread CPU per phase; all original predicates retained except explicitly selected simulation scan latency profile; strict original300ms scan evidence retained',
           callback_wait_policy='Fixed .002s per spin, including overrun cycles, preserves Jazzy ready iterator fairness; at most one extra idle wait beyond a window, single callbacks remain nonpreemptible')
         write(out/'runtime_manifest.json',manifest)
         health_started=(node.get_clock().now().nanoseconds,time.monotonic_ns())
@@ -1016,6 +1027,8 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--map',required=True);p.add_argument('--footprint',required=True,help='JSON list of body-frame [x,y] vertices')
     p.add_argument('--padding',required=True,type=float);p.add_argument('--variant',required=True,choices=['official','segmented','hybrid']);p.add_argument('--output',required=True)
+    p.add_argument('--simulation-scan-max-age-sec',type=float,choices=[.3,.5],default=.3,
+      help='Matrix only scan header/receive operational limit; original .3s strict timing remains separately reported')
     p.add_argument('--odom-topic',default='/odom/current_pose');p.add_argument('--scan-topic',default='/laser_scan');p.add_argument('--camera-topic',default='/camera/front/image/compressed');p.add_argument('--camera-info-topic',default='/camera/front/camera_info')
     p.add_argument('--template',default=str(BASE/'matrix_profile.yaml'))
     p.add_argument('--source-snapshot',help='Validated source manifest for a Git-free frozen deployment; defaults to observing canonical Git')

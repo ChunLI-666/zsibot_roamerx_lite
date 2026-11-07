@@ -567,3 +567,65 @@ class OrderedVisits:
                     xy_tolerance_m=self.xy_tolerance, yaw_tolerance_rad=self.yaw_tolerance,
                     continuous_stopped_seconds=self.dwell_ns/1e9, visits=self.visits,
                     evidence_boundary='Native feedback only chooses the expected leg. Actual original-map pose and fresh measured/commanded stop prove each ordered visit. Motion counters are observations; rotation sweep and camera/path acceptance require closed-MCAP analysis.')
+
+
+# Explicit simulation-only scan age profile. No sensor/clock/metadata rewriting.
+def simulation_scan_latency_profile(max_age_sec=.3):
+    if type(max_age_sec) not in (int,float) or max_age_sec not in (.3,.5):
+        raise ValueError('simulation scan max age must be .3 or .5')
+    return dict(schema='matrix.simulation_scan_latency.v1',
+        mode='strict_300ms' if max_age_sec==.3 else 'simulation_500ms',
+        operational_max_age_sec=max_age_sec,strict_max_age_sec=.3,future_tolerance_sec=.05,
+        original_header_and_receive_timestamps=True,applies_only_to='scan_header_and_receive_age')
+
+
+def validate_simulation_scan_latency_profile(ready,max_age_sec=.3):
+    expected=simulation_scan_latency_profile(max_age_sec)
+    actual=ready.get('simulation_scan_latency_profile')
+    # Historical strict fixtures remain valid; every opted-in read is exact-bound.
+    if actual is None and max_age_sec==.3:return expected
+    if actual!=expected or actual.get('original_header_and_receive_timestamps') is not True:
+        raise ValueError('simulation_scan_latency_profile_mismatch')
+    return expected
+
+
+def operational_scan_age_issues(strict_issues,snapshot,max_age_sec=.3):
+    simulation_scan_latency_profile(max_age_sec)
+    if max_age_sec==.3:return list(strict_issues)
+    scan=snapshot.get('last',{}).get('scan',{})
+    receive,header=scan.get('receive_age_s'),scan.get('header_age_s')
+    fresh=(type(receive) in (int,float) and type(header) in (int,float)
+        and math.isfinite(receive) and math.isfinite(header) and 0<=receive<=max_age_sec
+        and -.05<=header<=max_age_sec and type(scan.get('stamp_ns')) is int and scan['stamp_ns']>0
+        and scan.get('frame_id')=='base_link' and scan.get('ranges',0)>0
+        and scan.get('confirmation_payload_valid') is True)
+    if not fresh:
+        return list(strict_issues)+['scan:simulation_operational_age_or_payload_invalid']
+    allowed={'scan:missing_or_stale_receive','scan:invalid_header_age','scan:producer_strict_300ms_age_exceeded'}
+    return [issue for issue in strict_issues if issue not in allowed]
+
+
+def producer_scan_signed_age_bounds(ready):
+    obs=ready.get('producer_scan_observation')
+    if not isinstance(obs,dict):raise ValueError('scan:producer_observation_missing_or_invalid')
+    stamp=obs.get('header_ns');begin=obs.get('validation_clock_begin_ns');end=obs.get('validation_clock_end_ns')
+    sb=obs.get('validation_steady_begin_ns');se=obs.get('validation_steady_end_ns');received=obs.get('receive_steady_seconds')
+    if (any(type(v) is not int or v<=0 for v in [stamp,begin,end,sb,se]) or begin>end or sb>se
+            or type(received) not in (int,float) or not math.isfinite(received) or received<=0
+            or obs.get('frame_id')!='base_link' or obs.get('ranges',0)<=0):
+        raise ValueError('scan:producer_observation_missing_or_invalid')
+    return dict(header_age_bounds_s=[(begin-stamp)/1e9,(end-stamp)/1e9],
+        receive_age_bounds_s=[sb/1e9-received,se/1e9-received],original_observation=obs)
+
+
+def strict_simulation_scan_deviations(snapshot,ready):
+    deviations=[];scan=snapshot.get('last',{}).get('scan',{})
+    own={k:scan.get(k) for k in ['stamp_ns','receive_age_s','header_age_s','received_unix_ns','received_steady']}
+    if any(type(own.get(k)) in (int,float) and math.isfinite(own[k]) and own[k]>.3
+           for k in ['receive_age_s','header_age_s']):
+        deviations.append(dict(source='consumer_original_scan',original_scan=own))
+    if ready is not None:
+        bounds=producer_scan_signed_age_bounds(ready)
+        if any(age>.3 for key in ['header_age_bounds_s','receive_age_bounds_s'] for age in bounds[key]):
+            deviations.append(dict(source='producer_original_scan_bounds',**bounds))
+    return deviations
