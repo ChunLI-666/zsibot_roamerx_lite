@@ -268,3 +268,25 @@ are encoded only during writer/final persistence as a
 location without changing the original safety caches or first-invalid references.
 Run the additional offline
 checks with `python3 experiments/planner_comparison_matrix/test_native_waypoints.py`.
+
+### Full-map Lattice search candidate (2026-11-07)
+
+The Matrix profile explicitly sets `GridBased.cost_penalty: 1.0` for all three
+runtime variants. The prior profile omitted this parameter and used the
+installed Jazzy 1.3.13 default of 2.0. On the frozen published costmap preceding
+B3's N001 failure, the official Lattice reached the 1,000,000-iteration cap
+in about 1.55 seconds with 2.0; changing only this soft-cost weight to 1.0
+returned a path in about 226 milliseconds. Every returned pose and connecting
+sweep passed the existing filled, padded rectangular body check. This is an
+offline candidate, not full-route navigation acceptance or an A/B winner.
+
+The map, 1 cm grid, primitive file, 2 second planning budget, iteration cap,
+footprint, padding and original goal stay fixed. The selected planner binary
+retains its separate build receipt; a configuration commit does not rebuild it.
+The fixture, typed effective parameters, original and candidate outputs,
+source analysis and independent review are under
+`analysis_outputs/planner_comparison_20261105/` in
+`native_B3_planner_frozen_costmap_benchmark_solmax_v1` and
+`native_B3_lattice_parameter_candidates_solmax_v1`. The published costmap and
+nearest Native pose sample are the available offline fixture, not an exact
+recording of the planner's internal locked map or TF lookup.

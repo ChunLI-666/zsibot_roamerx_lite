@@ -19,6 +19,7 @@ planner_server:
       allow_reverse_expansion: false
       analytic_expansion_max_length: 0.0
       rotation_penalty: 1.0
+      cost_penalty: 1.0
       lookup_table_size: 1.0
       cache_obstacle_heuristic: false
       max_planning_time: 2.0
