@@ -393,6 +393,10 @@ def prepare(args):
     d=yaml.safe_load(template.read_text());rpp=copy.deepcopy(d['controller_server']['ros__parameters']['FollowPath'].get('rpp',d['controller_server']['ros__parameters']['FollowPath']))
     rpp.pop('plugin',None)
     if args.rotate_threshold is not None:rpp['rotate_to_heading_min_angle']=args.rotate_threshold
+    if args.variant=='segmented':
+        # A8 fixed tracking horizon only; explicit same-XY ROTATE remains enabled.
+        rpp.update(lookahead_dist=.75,min_lookahead_dist=.75,max_lookahead_dist=.75,
+          use_velocity_scaled_lookahead_dist=False)
     selected_path=args.segmented_install if args.variant=='segmented' else args.official_install
     if not selected_path:raise ValueError('Provide an explicit --segmented-install or --official-install for the selected variant')
     selected_install=pathlib.Path(selected_path).resolve()
@@ -402,6 +406,8 @@ def prepare(args):
         selected_install=str(selected_install),map_yaml=str(map_yaml),map_yaml_sha256=sha(map_yaml),map_image=str(map_image),map_image_sha256=sha(map_image),
         profile_template=str(template),profile_template_sha256=sha(template),footprint=footprint,padding=args.padding,
         rotate_to_heading_min_angle=rpp['rotate_to_heading_min_angle'],
+        rpp_tracking_lookahead=dict(fixed=rpp['lookahead_dist'],minimum=rpp['min_lookahead_dist'],
+          maximum=rpp['max_lookahead_dist'],velocity_scaled=rpp['use_velocity_scaled_lookahead_dist']),
         odom_topic=args.odom_topic,scan_topic=args.scan_topic,camera_topic=args.camera_topic,camera_info_topic=args.camera_info_topic,
         global_costmap=dict(rolling_window=True,width_m=20,height_m=20,resolution=.01,publish_frequency=.5),
         local_costmap=dict(rolling_window=True,width_m=6,height_m=6,resolution=.01,publish_frequency=1.),
@@ -447,7 +453,7 @@ def prepare(args):
         controller['Checker']['plugin']='nav2_controller::StoppedGoalChecker'
         controller['FollowPath']=dict(rpp,plugin='nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController')
         controller['segments']=dict(xy_tolerance=args.xy_tolerance,yaw_tolerance=args.yaw_tolerance,stopped_linear_velocity=.03,stopped_angular_velocity=.05,final_stop_dwell_sec=.3,
-          same_xy_epsilon=.0001,progress_search_distance=.25,odom_timeout=.3,rotation_anchor_wait_timeout=15.,command_sweep_horizon=1.,
+          same_xy_epsilon=.0001,progress_search_distance=.25,odom_timeout=.3,rotation_anchor_wait_timeout=15.,command_sweep_horizon=1.,max_angular_velocity=.3,
           terminal_goal_binding=True,terminal_global_resolution=.01,terminal_global_extent=20.)
     else:
         controller['Checker']['plugin']='official_lattice_rpp_adapter::FeasibleGoalChecker'

@@ -35,6 +35,7 @@
 #include "nav2_util/geometry_utils.hpp"
 #include "robot_feasible_navigation/segment_controller_server.hpp"
 #include "robot_feasible_navigation/goal_cell_binding.hpp"
+#include "robot_feasible_navigation/bounded_planar_command.hpp"
 
 using namespace std::chrono_literals;
 using rcl_interfaces::msg::ParameterType;
@@ -135,6 +136,7 @@ SegmentControllerServer::SegmentControllerServer(const rclcpp::NodeOptions & opt
   declare_parameter("segments.odom_timeout", config.odom_timeout, descriptor);
   declare_parameter("segments.rotation_anchor_wait_timeout", config.rotation_anchor_wait_timeout, descriptor);
   declare_parameter("segments.command_sweep_horizon", 1.0, descriptor);
+  declare_parameter("segments.max_angular_velocity", kExperimentMaxAngularVelocity, descriptor);
   declare_parameter("segments.terminal_goal_binding", false, descriptor);
   declare_parameter("segments.terminal_global_resolution", .01, descriptor);
   declare_parameter("segments.terminal_global_extent", 20., descriptor);
@@ -185,6 +187,11 @@ SegmentControllerServer::on_configure(const rclcpp_lifecycle::State & state)
   get_parameter("segments.odom_timeout", segment_config.odom_timeout);
   get_parameter("segments.rotation_anchor_wait_timeout", segment_config.rotation_anchor_wait_timeout);
   try {
+    if (!validExperimentAngularLimit(
+      get_parameter("segments.max_angular_velocity").as_double()))
+    {
+      throw std::invalid_argument("segments.max_angular_velocity must be finite in (0, .3]");
+    }
     coordinator_ = SegmentCoordinator(segment_config);
     intermediate_goal_checker_ = std::make_unique<IntermediateGoalChecker>(segment_config,
       [this]() {return coordinator_.rotating() ? coordinator_.config().xy_tolerance :
@@ -1120,6 +1127,13 @@ void SegmentControllerServer::computeAndPublishVelocity()
       (terminal_rotation_active_ || coordinator_.finalSegment()) ?
       goal_checkers_[current_goal_checker_].get() :
       intermediate_goal_checker_.get());
+    // Limit BEFORE both the filled command sweep and publication. Validate raw
+    // finite/forward/axis invariants first; never convert invalid output to motion.
+    if (!boundPlanarAngularVelocity(cmd_vel_2d.twist,
+      get_parameter("segments.max_angular_velocity").as_double()))
+    {
+      throw nav2_core::NoValidControl("RPP produced an invalid forward planar command or angular limit");
+    }
     if (coordinator_.rotating() || terminal_rotation_active_) {
       if (std::hypot(cmd_vel_2d.twist.linear.x, cmd_vel_2d.twist.linear.y) > 1e-6) {
         throw nav2_core::NoValidControl("RPP attempted translation inside an explicit rotation");

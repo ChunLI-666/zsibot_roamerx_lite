@@ -335,8 +335,9 @@ full path from the stopped body and starts a new FollowPath. It neither resends 
 parent goal nor records the failed phase as visited. Planner errors are excluded
 from this recovery. The official and Hybrid trees retain their single sequence.
 
-The current Matrix profile caps RPP rotation at 0.15 rad/s and uses stopped-goal
-thresholds of 0.01 m/s and 0.01 rad/s. Original goal tolerances remain 0.15 m and
+The segmented Matrix profile requests nominal RPP rotation at 0.15 rad/s and uses
+stopped-goal thresholds of 0.03 m/s and 0.05 rad/s with a continuous 0.3 s dwell.
+Original goal tolerances remain 0.15 m and
 0.08 rad; physical-input freshness remains 0.3 s. Both costmaps inflate around
 unknown cells so inflation cannot turn an original unknown cell into a traversable
 inscribed-cost cell. These changes require native runtime verification; a build or
@@ -344,3 +345,18 @@ static path check alone does not establish navigation acceptance.
 All package consumers of this header must be rebuilt together. Ownership metadata
 uses the READY 500 ms lease; physical-input freshness and stopped visits retain
 their original contracts. Unknown cells seed inflation as hard obstacles.
+
+### A8 bounded tracking candidate (2026-11-08)
+
+The segmented experiment uses a fixed 0.75 m RPP lookahead. Original A5 recordings
+showed that the previous 0.25 m carrot triggered autonomous RPP rotation during
+an ordered TRACK phase. The TRACK pure-spin rejection and explicit signed ROTATE
+phases remain enforced; the rotation threshold is still 0.5 rad.
+
+The read-only `segments.max_angular_velocity` parameter defaults to 0.3 rad/s and
+must be finite in `(0, 0.3]`. The controller rejects invalid raw commands before
+limiting angular velocity, then checks the filled footprint sweep of that bounded
+command and publishes the same command. This avoids checking a tighter turn while
+the downstream smoother executes a clipped turn. The fixed lookahead override
+applies only to the segmented variant. Smoother transients and simulator tracking
+still require runtime validation; these settings are not a navigation acceptance.
