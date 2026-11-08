@@ -16,6 +16,30 @@ def write(path,value,compact=False):
     temporary.write_text(json.dumps(value,separators=(',',':'))+'\n' if compact else json.dumps(value,indent=2)+'\n');temporary.replace(path)
 
 
+def make_health_tf_listener(buffer,node,latest_only=False):
+    """Read-only health observation; controller and publisher QoS are unchanged."""
+    from tf2_ros import TransformListener
+    state=dict(mode='legacy_tf2_default',callbacks=0,last_by_edge={})
+    if not latest_only:return TransformListener(buffer,node),state
+    from rclpy.qos import QoSProfile,HistoryPolicy,ReliabilityPolicy,DurabilityPolicy
+    class LatestHealthListener(TransformListener):
+        def callback(self,message,info):
+            received=node.get_clock().now().nanoseconds
+            state['callbacks']+=1
+            for transform in message.transforms:
+                key=transform.header.frame_id+'<-'+transform.child_frame_id
+                state['last_by_edge'][key]=dict(received_ros_ns=received,
+                    original_stamp_ns=transform.header.stamp.sec*10**9+transform.header.stamp.nanosec,
+                    DDS_source_timestamp=info.get('source_timestamp') if isinstance(info,dict) else getattr(info,'source_timestamp',None),
+                    DDS_received_timestamp=info.get('received_timestamp') if isinstance(info,dict) else getattr(info,'received_timestamp',None))
+            super().callback(message)
+    qos=QoSProfile(depth=1,history=HistoryPolicy.KEEP_LAST,
+        reliability=ReliabilityPolicy.BEST_EFFORT,durability=DurabilityPolicy.VOLATILE)
+    state.update(mode='simulation_latest_health_observation',dynamic_depth=1,
+        reliability='BEST_EFFORT',static_QoS='unchanged_tf2_default',guard_limit_sec=.3)
+    return LatestHealthListener(buffer,node,qos=qos),state
+
+
 
 class LiveReadyStorage:
     """Only the live READY transport uses a run-owned same-namespace tmpfs slot."""
@@ -375,6 +399,8 @@ def simulation_scan_latency_profile(max_age=.3):
 
 def prepare(args):
     scan_profile=simulation_scan_latency_profile(getattr(args,'simulation_scan_max_age_sec',.3))
+    if getattr(args,'health_tf_latest_only',False) and scan_profile['operational_max_age_sec']!=.5:
+        raise ValueError('Latest-only health TF observation requires the explicit simulation profile')
     template=pathlib.Path(args.template).absolute()
     snapshot,snapshot_raw=source_snapshot(args.source_snapshot,template,args.with_waypoints) if args.source_snapshot else (None,None)
     out=pathlib.Path(args.output).resolve();out.mkdir(parents=True,exist_ok=False)
@@ -399,6 +425,8 @@ def prepare(args):
     required_plugin={'official':'official_lattice_rpp_adapter::CheckedLattice','hybrid':'official_lattice_rpp_adapter::CheckedHybrid','segmented':'robot_feasible_navigation::SafeLatticePlanner'}[args.variant]
     manifest=dict(scope='Matrix navigation experiment only; not physical robot acceptance',stage='prepared',execution_requested=args.run,variant=args.variant,
         simulation_scan_latency_profile=scan_profile,
+        health_tf_listener_policy=dict(latest_only=getattr(args,'health_tf_latest_only',False),
+            scope='Read-only launcher observer; native TF, controller and .3s age checks unchanged'),
         selected_install=str(selected_install),map_yaml=str(map_yaml),map_yaml_sha256=sha(map_yaml),map_image=str(map_image),map_image_sha256=sha(map_image),
         profile_template=str(template),profile_template_sha256=sha(template),footprint=footprint,padding=args.padding,
         rotate_to_heading_min_angle=rpp['rotate_to_heading_min_angle'],
@@ -591,7 +619,8 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
         subscriptions.append(subscription)
         if topic in ('/global_costmap/costmap_raw','/local_costmap/costmap_raw'):
             startup_costmap_observers[topic]=subscription
-    tf=Buffer();listener=TransformListener(tf,node)
+    tf=Buffer();listener,health_tf_callbacks=make_health_tf_listener(tf,node,getattr(args,'health_tf_latest_only',False))
+    health_tf_lookups={}
     action_status={};bt_binding=None;bt_launch_steady_ns=None;private_goal_messages=0;first_private_goal=None;first_private_publisher_violation=None
     ownership_observation_lock=threading.Lock()
     if args.with_waypoints:
@@ -683,6 +712,7 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
             return ownership
     def source_health():
         now=node.get_clock().now().nanoseconds/1e9
+        health_tf_lookups.clear()
         for topic,limit in [(args.odom_topic,.3),(args.scan_topic,getattr(args,'simulation_scan_max_age_sec',.3)),('/lightning/loc_status',.2),('/lightning/pose_valid',.2),(args.camera_topic,.5)]:
             if topic not in latest:raise RuntimeError('Missing source '+topic)
             received,msg=latest[topic]
@@ -693,7 +723,11 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
         if latest['/lightning/loc_status'][1].data!=1 or not latest['/lightning/pose_valid'][1].data:
             raise RuntimeError('Localization is not NORMAL with valid pose')
         for target,source in [('odom','base_link'),('map','odom')]:
-            transform=tf.lookup_transform(target,source,Time());age=now-transform.header.stamp.sec-transform.header.stamp.nanosec/1e9
+            began=node.get_clock().now().nanoseconds
+            transform=tf.lookup_transform(target,source,Time());ended=node.get_clock().now().nanoseconds
+            age=now-transform.header.stamp.sec-transform.header.stamp.nanosec/1e9
+            health_tf_lookups[target+'<-'+source]=dict(original_stamp_ns=transform.header.stamp.sec*10**9+transform.header.stamp.nanosec,
+                guard_now_original_seconds=now,lookup_begin_ns=began,lookup_end_ns=ended,age_sec_used_by_guard=age)
             if not -.05<=age<=.3:raise RuntimeError('Stale/future actual TF '+source+' -> '+target)
     def pump(seconds):
         end=time.monotonic()+seconds
@@ -959,6 +993,7 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
         readiness['time_ns']=node.get_clock().now().nanoseconds
         readiness['valid_until_ns']=readiness['time_ns']+500_000_000
         if args.with_waypoints:readiness['valid_until_ns']=min(readiness['valid_until_ns'],ownership['checked_unix_ns']+500_000_000)
+        readiness['producer_tf_observation']=dict(callbacks=copy.deepcopy(health_tf_callbacks),lookups=copy.deepcopy(health_tf_lookups))
         ready_storage.publish(readiness,compact=True)
         event('navigation_ready');print(str(out/'ready.json'),flush=True)
         heartbeat_deadline=time.monotonic();last_write_finished_ns=time.monotonic_ns()
@@ -1005,6 +1040,7 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
               ownership_audit_sequence_reused=audit_sequence is not None and audit_sequence==previous_audit_sequence,
               ownership_checked_age_ns=issued-readiness['waypoint_ownership']['checked_unix_ns'] if args.with_waypoints else None)
             phase=(time.monotonic_ns(),time.thread_time_ns())
+            readiness['producer_tf_observation']=dict(callbacks=copy.deepcopy(health_tf_callbacks),lookups=copy.deepcopy(health_tf_lookups))
             ready_storage.publish(readiness,compact=True)
             finished=phase_mark(timing,'atomic_ready_write',phase)
             timing_record=dict(issued_unix_ns=issued,ready=readiness['ready'],reason=readiness.get('reason'),
@@ -1073,6 +1109,8 @@ def main():
     p.add_argument('--padding',required=True,type=float);p.add_argument('--variant',required=True,choices=['official','segmented','hybrid']);p.add_argument('--output',required=True)
     p.add_argument('--simulation-scan-max-age-sec',type=float,choices=[.3,.5],default=.3,
       help='Matrix only scan header/receive operational limit; original .3s strict timing remains separately reported')
+    p.add_argument('--health-tf-latest-only',action='store_true',
+      help='Simulation-only latest-depth1 read-only TF health listener; all original age/control checks remain')
     p.add_argument('--odom-topic',default='/odom/current_pose');p.add_argument('--scan-topic',default='/laser_scan');p.add_argument('--camera-topic',default='/camera/front/image/compressed');p.add_argument('--camera-info-topic',default='/camera/front/camera_info')
     p.add_argument('--template',default=str(BASE/'matrix_profile.yaml'))
     p.add_argument('--source-snapshot',help='Validated source manifest for a Git-free frozen deployment; defaults to observing canonical Git')

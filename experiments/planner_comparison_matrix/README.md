@@ -370,3 +370,10 @@ XY 容差取较小值；只有 official Matrix profile 显式选择 0.05 m。B25
 window 至少为 20 m 时放行；各原路线相邻段仍须小于 8 m。它用于原目标失败
 后实际起点的有限偏差，完整机身、地图边界与碰撞可行性仍由规划服务检查。
 首段实测距离、请求上限及原始 pose 时间戳独立记录；TF/停稳/最终目标容差不变。
+
+`--health-tf-latest-only` 为显式仿真下的只读 launcher 健康监听器选择动态 TF
+BEST_EFFORT/KEEP_LAST/depth1；默认仍为 tf2 自带配置，静态 TF 配置不变。
+B27 录包在拒绝前已收到约 102 ms 时间龄的连续 Native TF，但 launcher 报告
+自身缓存超限。这个候选减少监听旧队列，并逐次记录 callback/DDS 时间、原 TF
+stamp 与 lookup 实际结果，供区分接收和消费延迟。Native TF 发布、控制器、
+原 300 ms 判断和导航取消条件均保持，首次错误不会被延后或改判为健康。
