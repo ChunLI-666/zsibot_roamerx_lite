@@ -487,12 +487,12 @@ def prepare(args):
         else:
             planner['lattice_filepath']=str(selected_install/'share/official_lattice_rpp_adapter/params/stop_turn_1cm_h16_small_radius.json')
             planner.update(terminal_goal_binding=True,terminal_global_resolution=.01,cost_penalty=1.)
-            controller['FollowPath'].update(terminal_goal_binding=True,terminal_global_resolution=.01,terminal_global_extent=20.,initial_goal_region_shortcut=True,initial_goal_region_max_xy_error=.10,terminal_track_xy_drift_limit=.05)
+            controller['FollowPath'].update(terminal_goal_binding=True,terminal_global_resolution=.01,terminal_global_extent=20.,initial_goal_region_shortcut=True,initial_goal_region_max_xy_error=.15,terminal_track_xy_drift_limit=.05)
             controller['FollowPath']['rpp'].update(lookahead_dist=.75,min_lookahead_dist=.75,max_lookahead_dist=.75,use_velocity_scaled_lookahead_dist=False,rotate_to_heading_angular_vel=.3)
             controller['FollowPath']['max_command_angular_velocity']=.3
             manifest['experimental_rpp_profile']=dict(fixed_lookahead_m=.75,rotate_angular_velocity=.3,pre_sweep_angular_limit=.3)
             manifest['terminal_track_execution_envelope']=dict(enabled=True,pivot_displacement_limit_m=.05,baseline_original_region_preserved=True,
-                original_goal_outer_m=args.xy_tolerance+.05,original_mandatory_track_only=True,admission_scope='initial_goal_shortcut_after_measured_stop',initial_shortcut_max_xy_error_m=.10,
+                original_goal_outer_m=args.xy_tolerance+.05,original_mandatory_track_only=True,admission_scope='initial_goal_shortcut_after_measured_stop',initial_shortcut_max_xy_error_m=.15,
                 final_goal_tolerances_unchanged=True,continuous_collision_tube_certified=False,
                 same_goal_replan='checked zero then original-region .3s measured stop before new admission')
             manifest['terminal_goal_binding']=dict(enabled=True,global_resolution=.01,global_extent=20.,

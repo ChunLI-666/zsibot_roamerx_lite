@@ -380,7 +380,7 @@ stamp 与 lookup 实际结果，供区分接收和消费延迟。Native TF 发�
 
 ### B28 frozen-input profile correction (2026-11-09)
 
-The current official Matrix candidate uses `GridBased.cost_penalty: 1.0` and
+The B16 official Matrix candidate used `GridBased.cost_penalty: 1.0` and
 `FollowPath.initial_goal_region_max_xy_error: 0.10`. Segmented and Hybrid
 profiles retain their existing values. These are configuration changes; the
 B13 C++ build and its complete filled-body, path and command checks are retained.
@@ -404,3 +404,21 @@ at the standard 15 cm XY tolerance. This arithmetic margin is not a bound on
 actual drift: the original live execution guard and filled sweeps still apply,
 and final XY/yaw/stop tolerances remain unchanged. Signed turn direction and
 actual pivot displacement require new closed-loop evidence.
+
+### B17 initial stopped rotation in the original goal region (2026-11-09)
+
+The current official profile keeps cost weight 1.0 and uses a 0.15 m maximum
+initial rotation admission, still clipped to the original goal XY tolerance.
+B29 stopped at F010 with 0.110061 m error: that passed the original 0.15 m
+goal contract but missed B16's additional 0.10 m admission. F011 again executed
+a roughly 246 degree left turn instead of a short right turn.
+
+The initially stopped Pose-goal shortcut may now use the existing completely
+checked shortest actual-origin rotation throughout the standard original goal
+disc. It remains a single unstarted-plan opportunity; active ordered path
+constraints cannot be skipped. Measured stopping, original goal binding,
+remaining-heading and command/body sweeps, final XY/yaw tolerances and the
+existing outside-disc execution permission are unchanged. This does not prove
+a pivot-drift bound. In particular the older B25 start at about 0.128 m can be
+admitted again and can still fail its unchanged live execution guard. New signed
+motion, pivot displacement and complete-route results must be recorded.
