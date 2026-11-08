@@ -29,7 +29,7 @@ from unique_identifier_msgs.msg import UUID
 
 import pilot_scan_timing as frozen
 import message_info_contract
-from waypoint_contract import (ACTION, AsyncEvidenceWriter, OrderedVisits, OwnedGoalIdentity,
+from waypoint_contract import (ACTION, AsyncEvidenceWriter, OrderedVisits, OwnedGoalIdentity, initial_leg_limit,
                                evidence_json, finite_velocity, mission_budget, strict_stopped, validate_ownership, validate_route, waypoint_binding)
 from waypoint_contract import (ReadyReadCapture, ownership_metadata_lease_deviation, validate_settle_budget,
                                producer_scan_confirmation_failure, producer_scan_confirmation_outcome)
@@ -615,7 +615,15 @@ class WaypointPilot(frozen.Pilot):
         if not valid:
             return dict(classification='invalid_final_preflight_not_sent', issues=issues, snapshot=snapshot)
         start_pose = snapshot['last']['pose']
-        if math.hypot(self.route[0]['pose'][0]-start_pose['x'], self.route[0]['pose'][1]-start_pose['y']) >= 8.:
+        try:
+            first_limit = initial_leg_limit(self.args.simulation_first_leg_max_distance_m,
+                self.latest_ready, self.args.simulation_scan_max_age_sec)
+        except ValueError as exc:
+            return dict(classification='invalid_initial_request_window_goal_not_sent',reason=str(exc))
+        first_distance = math.hypot(self.route[0]['pose'][0]-start_pose['x'], self.route[0]['pose'][1]-start_pose['y'])
+        self.emit('first_leg_window_check', distance_m=first_distance, limit_m=first_limit,
+                  source_pose_stamp_ns=start_pose.get('stamp_ns'), final_goal_tolerances_unchanged=True)
+        if first_distance >= first_limit:
             return dict(classification='invalid_first_leg_outside_reviewed_rolling_window_goal_not_sent')
         request = FollowWaypoints.Goal()
         try:
@@ -780,6 +788,8 @@ def main():
     parser.add_argument('--cancel-after', type=float)
     parser.add_argument('--odom-topic', default='/odom/current_pose')
     parser.add_argument('--scan-topic', default='/laser_scan')
+    parser.add_argument('--simulation-first-leg-max-distance-m',type=float,choices=[8.,8.5],default=8.,
+                        help='Simulation-only initial request envelope; original route legs remain <8m')
     parser.add_argument('--simulation-scan-max-age-sec',type=float,choices=[.3,.5],default=.3,
                         help='Explicit simulation-only scan header/receive operational cap; strict original .3 evidence remains FAIL')
     parser.add_argument('--scan-aging-confirm-sec', type=float, default=0.,

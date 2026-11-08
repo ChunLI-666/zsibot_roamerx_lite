@@ -22,10 +22,28 @@ import uuid
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE/'goal_pilot_source'))
-from waypoint_contract import (AsyncEvidenceWriter, OrderedVisits, OwnedGoalIdentity, ReadyReadCapture, WAYPOINT_PARAMETERS,
+from waypoint_contract import (AsyncEvidenceWriter, OrderedVisits, OwnedGoalIdentity, ReadyReadCapture, WAYPOINT_PARAMETERS, initial_leg_limit,
                                simulation_scan_latency_profile, validate_simulation_scan_latency_profile, operational_scan_age_issues, strict_simulation_scan_deviations, producer_scan_signed_age_bounds,
                                evidence_json, exclusive_graph, finite_velocity, mission_budget, strict_stopped,
                                validate_ownership, validate_route, validate_settle_budget, validate_scan_aging_confirmation, waypoint_binding)
+
+
+class InitialLegEnvelope(unittest.TestCase):
+    def test_default_preserves_legacy_limit_without_new_metadata(self):
+        self.assertEqual(initial_leg_limit(8.,{},.3),8.)
+
+    def test_explicit_simulation_window_and_finite_dimensions_are_required(self):
+        ready={'actual_costmaps':{'global_costmap':{'size_x':2000,'size_y':2000,'resolution':.009999999776}}}
+        self.assertEqual(initial_leg_limit(8.5,ready,.5),8.5)
+        for age in [.3,None]:
+            with self.assertRaises(ValueError):initial_leg_limit(8.5,ready,age)
+        for metadata in [{},{'size_x':2000,'size_y':1999,'resolution':.01},
+                         {'size_x':True,'size_y':2000,'resolution':.01},
+                         {'size_x':2000,'size_y':2000,'resolution':math.nan}]:
+            with self.assertRaises(ValueError):
+                initial_leg_limit(8.5,{'actual_costmaps':{'global_costmap':metadata}},.5)
+        for limit in [True,0.,8.1,8.50001,math.nan,math.inf]:
+            with self.assertRaises(ValueError):initial_leg_limit(limit,ready,.5)
 
 
 def route_document():
@@ -348,7 +366,7 @@ class ExitFlowTests(unittest.TestCase):
                 signal=SimpleNamespace(SIGINT=2, SIGTERM=15, signal=lambda number, handler: 'previous'),
                 frozen=SimpleNamespace(validate_numeric_arguments=lambda args: None,
                                        stamp_ns=lambda stamp: stamp.sec*1_000_000_000+stamp.nanosec,error=pure['error']),
-                validate_route=validate_route, validate_settle_budget=validate_settle_budget,
+                validate_route=validate_route, validate_settle_budget=validate_settle_budget, initial_leg_limit=initial_leg_limit,
                 validate_scan_aging_confirmation=validate_scan_aging_confirmation,
                 evidence_json=evidence_json, mission_budget=mission_budget,
                 strict_stopped=strict_stopped,finite_velocity=finite_velocity, OwnedGoalIdentity=OwnedGoalIdentity, ACTION='/follow_waypoints',
