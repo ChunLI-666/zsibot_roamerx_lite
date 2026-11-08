@@ -52,7 +52,7 @@ TEST(TerminalTrackDrift, EntireAccumulatedDisplacementNotPerTickStepIsBounded) {
   Guard g(.05);g.setPlan(goal(),1);ASSERT_TRUE(g.admit(1,.10,0.,.15));
   EXPECT_TRUE(g.permits(1,.08,0.,.15,true,false));
   EXPECT_TRUE(g.permits(1,.06,0.,.15,true,false));
-  EXPECT_FALSE(g.permits(1,.04,0.,.15,true,false)); // still in goal disc, but 6cm from pivot
+  EXPECT_TRUE(g.permits(1,.04,0.,.15,true,false)); // baseline disc remains permitted
   EXPECT_FALSE(g.permits(1,.201,0.,.15,true,false));
   EXPECT_FALSE(g.permits(2,.10,0.,.15,true,false));
   EXPECT_FALSE(g.permits(1,.10,0.,.20,true,false)); // cannot change final geometry
@@ -126,4 +126,15 @@ TEST(TerminalTrackDrift, ReentryRegionExcursionBreaksContinuousStoppedDwell) {
   EXPECT_EQ(observe(g,500),Reentry::HoldZero);
   EXPECT_EQ(observe(g,649),Reentry::HoldZero);
   EXPECT_EQ(observe(g,650),Reentry::Proceed);
+}
+
+TEST(TerminalTrackDrift, CenteredTurnsPreserveOriginalDiscWithoutGrantingOutsideCompletion) {
+  Guard g(.05);g.setPlan(goal(),1);ASSERT_TRUE(g.admit(1,.015,0.,.15));
+  EXPECT_TRUE(g.permits(1,.1078,0.,.15,true,false));
+  EXPECT_TRUE(g.permits(1,.14,0.,.15,false,false));
+  EXPECT_FALSE(g.permits(1,.16,0.,.15,true,false)); // outside rescue exceeds original pivot budget
+  Guard edge(.05);edge.setPlan(goal(),1);ASSERT_TRUE(edge.admit(1,.138,0.,.15));
+  EXPECT_TRUE(edge.permits(1,.18,0.,.15,true,false));
+  EXPECT_FALSE(edge.permits(1,.191,0.,.15,true,false));
+  EXPECT_FALSE(edge.permits(1,.18,0.,.15,false,false));
 }

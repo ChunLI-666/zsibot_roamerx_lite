@@ -21,6 +21,7 @@
 #include "official_lattice_rpp_adapter/initial_goal_rotation.hpp"
 #include "official_lattice_rpp_adapter/terminal_stop_hold.hpp"
 #include "official_lattice_rpp_adapter/terminal_track_drift.hpp"
+#include "official_lattice_rpp_adapter/command_limits.hpp"
 #include "official_lattice_rpp_adapter/planner_failure_snapshot.hpp"
 #include "robot_feasible_navigation/footprint_sweep.hpp"
 
@@ -223,6 +224,8 @@ public:
     const double min_rotation=node->get_parameter(name+".handler.minimum_rotation_angle").as_double();
     require(std::isfinite(min_rotation)&&min_rotation>1e-6&&min_rotation<=0.05,
       "rotation threshold must detect all experimental primitive turns");
+    command_yaw_limit_=parameter(node,name+".max_command_angular_velocity",.3);
+    require(std::isfinite(command_yaw_limit_)&&command_yaw_limit_>0.&&command_yaw_limit_<=.3,"invalid experimental command angular limit");
     horizon_=parameter(node,name+".sweep_horizon",1.0);
     require(std::isfinite(horizon_)&&horizon_>=0.5&&horizon_<=3.,"invalid sweep horizon");
     require(std::isfinite(xy_)&&xy_>0.&&xy_<=0.2,"invalid constraint XY tolerance");
@@ -533,6 +536,8 @@ public:
     require(trigger>0.,"nonpositive original-goal triangle trigger");
     RPPTriggerTolerance proxy(checker,trigger);
     auto cmd=rpp_.computeVelocityCommands(pose,velocity,&proxy);
+    // Validate raw axes first; collision checks and publication use this same bounded command.
+    cmd.twist=limitAngularCommand(cmd.twist,command_yaw_limit_);
     const auto & v=cmd.twist;
     require(std::isfinite(v.linear.x)&&std::isfinite(v.angular.z)&&v.linear.x>=0.&&
       v.linear.y==0.&&v.linear.z==0.&&v.angular.x==0.&&v.angular.y==0.,"invalid command");
@@ -576,6 +581,7 @@ private:
   goal_region::HeadingCursor terminal_headings_,terminal_correction_headings_;
   goal_region::TerminalStopHold terminal_stop_;
   goal_region::TerminalTrackDriftGuard terminal_drift_;
+  double command_yaw_limit_=.3;
   bool terminal_drift_active_=false;
   bool terminal_correction_active_=false;
   bool allow_static_path_transform_=false;

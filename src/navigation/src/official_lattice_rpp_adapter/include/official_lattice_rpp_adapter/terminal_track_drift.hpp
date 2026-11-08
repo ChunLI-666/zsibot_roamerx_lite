@@ -79,9 +79,12 @@ public:
     if (!has_goal_||!coordinates(x,y,tolerance)) {return false;}
     const double original_error=std::hypot(x-goal_.x,y-goal_.y);
     if (!enabled()) {return original_error<=tolerance;}
-    if (!admitted_||reentry_||generation!=generation_||tolerance!=admitted_tolerance_||
-      std::hypot(x-pivot_x_,y-pivot_y_)>limit_||original_error>tolerance+limit_) {return false;}
-    return original_error<=tolerance||(original_mandatory_pending&&!corrective_rotation);
+    if (!admitted_||reentry_||generation!=generation_||tolerance!=admitted_tolerance_) {return false;}
+    // Preserve every position already permitted by the original goal disc.
+    // The fixed-pivot budget restricts only the additional outside-disc rescue.
+    if (original_error<=tolerance) {return true;}
+    return original_mandatory_pending&&!corrective_rotation&&
+      std::hypot(x-pivot_x_,y-pivot_y_)<=limit_&&original_error<=tolerance+limit_;
   }
 private:
   inline static constexpr std::int64_t kReentryDwellNs=300000000;

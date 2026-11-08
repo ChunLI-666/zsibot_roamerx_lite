@@ -354,3 +354,5 @@ geometry/state tests and builds are reported separately from actual Matrix
 closed-loop acceptance, which still requires full-route recordings.
 
 官方实验可用 `FollowPath.terminal_track_xy_drift_limit`，插件默认 0，official Matrix profile 显式选择 0.05 m。它只作用于已在原目标区域内、实测停止后的初始原地旋转：冻结实际中心，原 mandatory heading 尚未完成时允许最多 5 cm 累计位移，且距离原目标不超过原 XY 容差加 5 cm。正常平移到点的制动过程沿用原逻辑；末个 heading 完成当 tick、纠偏旋转及最终验收仍使用原 XY/yaw/停稳标准。同目标重新规划须先完成经过碰撞检查的零指令与原区域内双时基连续 0.3 s 停稳，不能逐 plan 重锚累计漂移。完整机身、剩余旋转和命令 sweep 检查保持；该参数是观测执行边界，不是连续 XY 不确定性 tube 的碰撞证明，也不是仿真或实机验收通过。
+
+区域内的原许可优先保留：5 cm pivot 限制只用于原目标区域外、mandatory 未完成时的额外执行许可，不再拒绝仍在原区域内的居中转向。官方 Matrix 对照 profile 使用固定 0.75 m lookahead 与 0.3 rad/s 名义转向命令；RPP 原始输出先校验，再将角速度限制至同一显式 0.3 上限，随后做 filled command sweep，发布完全相同的受限命令。此顺序避免对一条高曲率轨迹做检查、却在下游裁成另一条轨迹；速度平滑及机体实际响应的瞬态仍须录包验证。
