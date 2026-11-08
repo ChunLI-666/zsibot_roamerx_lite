@@ -136,6 +136,8 @@ SegmentControllerServer::SegmentControllerServer(const rclcpp::NodeOptions & opt
   declare_parameter("segments.odom_timeout", config.odom_timeout, descriptor);
   declare_parameter("segments.rotation_anchor_wait_timeout", config.rotation_anchor_wait_timeout, descriptor);
   declare_parameter("segments.command_sweep_horizon", 1.0, descriptor);
+  declare_parameter("segments.require_next_rotation_clearance", false, descriptor);
+  declare_parameter("segments.track_approach_xy_tolerance", .005, descriptor);
   declare_parameter("segments.max_angular_velocity", kExperimentMaxAngularVelocity, descriptor);
   declare_parameter("segments.terminal_goal_binding", false, descriptor);
   declare_parameter("segments.terminal_global_resolution", .01, descriptor);
@@ -186,6 +188,8 @@ SegmentControllerServer::on_configure(const rclcpp_lifecycle::State & state)
   get_parameter("segments.progress_search_distance", segment_config.progress_search_distance);
   get_parameter("segments.odom_timeout", segment_config.odom_timeout);
   get_parameter("segments.rotation_anchor_wait_timeout", segment_config.rotation_anchor_wait_timeout);
+  get_parameter("segments.require_next_rotation_clearance", require_next_rotation_clearance_);
+  get_parameter("segments.track_approach_xy_tolerance", track_approach_xy_tolerance_);
   try {
     if (!validExperimentAngularLimit(
       get_parameter("segments.max_angular_velocity").as_double()))
@@ -193,9 +197,7 @@ SegmentControllerServer::on_configure(const rclcpp_lifecycle::State & state)
       throw std::invalid_argument("segments.max_angular_velocity must be finite in (0, .3]");
     }
     coordinator_ = SegmentCoordinator(segment_config);
-    intermediate_goal_checker_ = std::make_unique<IntermediateGoalChecker>(segment_config,
-      [this]() {return coordinator_.rotating() ? coordinator_.config().xy_tolerance :
-        originalGoalTolerances().first;});
+    configureIntermediateGoalChecker(segment_config);
   } catch (const std::invalid_argument & e) {
     RCLCPP_ERROR(get_logger(), "Invalid segment configuration: %s", e.what());
     return nav2_util::CallbackReturn::FAILURE;
@@ -799,6 +801,7 @@ void SegmentControllerServer::computeControl()
 
 void SegmentControllerServer::clearSegmentState()
 {
+  track_approach_pending_ = false;
   resetFinalGoalStop();
   final_stop_progress_priority_since_.reset();
   coordinator_.clear();
@@ -857,6 +860,7 @@ void SegmentControllerServer::setPlannerPath(
 
 void SegmentControllerServer::installActiveSegment()
 {
+  track_approach_pending_ = false;
   resetFinalGoalStop();
   current_path_ = coordinator_.active().path;
   for (auto & pose : current_path_.poses) {
@@ -1001,6 +1005,63 @@ void SegmentControllerServer::validateTransformFreshness()
   }
 }
 
+void SegmentControllerServer::configureIntermediateGoalChecker(
+  const SegmentCoordinator::Config & config)
+{
+  if (require_next_rotation_clearance_ && (!std::isfinite(track_approach_xy_tolerance_) ||
+    track_approach_xy_tolerance_ <= 0. || track_approach_xy_tolerance_ > config.xy_tolerance))
+  {
+    throw std::invalid_argument("TRACK approach tolerance must be positive and within the segment XY tolerance");
+  }
+  intermediate_goal_checker_ = std::make_unique<IntermediateGoalChecker>(config,
+    [this]() {return intermediateXYTolerance();});
+}
+
+double SegmentControllerServer::intermediateXYTolerance()
+{
+  if (coordinator_.rotating()) {return coordinator_.config().xy_tolerance;}
+  const double original = originalGoalTolerances().first;
+  const auto * next = coordinator_.next();
+  // This is an RPP branch trigger, not a new handoff or final acceptance region.
+  // Explicit ROTATE still gets its original XY allowance and co-located carrot.
+  return require_next_rotation_clearance_ && next && next->kind == SegmentCoordinator::Kind::Rotation ?
+    std::min(original, track_approach_xy_tolerance_) : original;
+}
+
+void SegmentControllerServer::enforceTrackApproachRegion(
+  const geometry_msgs::msg::PoseStamped & path_pose, double xy_tolerance) const
+{
+  if (track_approach_pending_ &&
+    std::hypot(path_pose.pose.position.x - end_pose_.pose.position.x,
+    path_pose.pose.position.y - end_pose_.pose.position.y) >
+    std::min(xy_tolerance, coordinator_.config().xy_tolerance))
+  {
+    // Do not let continuing forward motion continually reset the progress timer
+    // after an unsafe short-segment handoff. Fail inside the original XY bound.
+    throw nav2_core::NoValidControl("TRACK left its original handoff region before a safe stopped rotation");
+  }
+}
+
+bool SegmentControllerServer::intermediateSegmentReached(
+  const geometry_msgs::msg::PoseStamped & actual,
+  const geometry_msgs::msg::PoseStamped & path_pose, double xy_tolerance)
+{
+  enforceTrackApproachRegion(path_pose, xy_tolerance);
+  const auto * next = coordinator_.next();
+  const bool guarded_track = require_next_rotation_clearance_ && !coordinator_.rotating() &&
+    next && next->kind == SegmentCoordinator::Kind::Rotation;
+  if (!coordinator_.geometryReached(path_pose.pose, xy_tolerance)) {return false;}
+  if (!guarded_track) {return true;}
+  auto target = next->path.poses.back();
+  target.header.frame_id = next->path.header.frame_id;
+  if (!rotationSweepFree(actual, target)) {
+    track_approach_pending_ = true;
+    return false;  // Keep the original TRACK; its next turn is unsafe at this body origin.
+  }
+  // Keep a previous repair latch until actual stop + advance, including braking drift.
+  return true;
+}
+
 bool SegmentControllerServer::rotationSweepFree(
   const geometry_msgs::msg::PoseStamped & actual_pose,
   const geometry_msgs::msg::PoseStamped & requested_target)
@@ -1086,6 +1147,10 @@ void SegmentControllerServer::computeAndPublishVelocity()
     throw nav2_core::ControllerTFError("Failed to obtain robot pose");
   }
 
+  if (track_approach_pending_) {
+    enforceTrackApproachRegion(toPathPose(pose), originalGoalTolerances().first);
+  }
+
   geometry_msgs::msg::Twist measured;
   if (!measuredVelocity(measured) || segment_braking_ || rotation_anchor_waiting_ ||
     !coordinator_.executionReady(measured))
@@ -1107,7 +1172,7 @@ void SegmentControllerServer::computeAndPublishVelocity()
     // check and this call must not let RPP start an implicit end-of-TRACK yaw correction.
     const auto actual = toPathPose(pose);
     coordinator_.observe(actual.pose);
-    if (coordinator_.geometryReached(actual.pose, originalGoalTolerances().first)) {
+    if (intermediateSegmentReached(pose, actual, originalGoalTolerances().first)) {
       segment_braking_ = true;
       publishSegmentStop();
       return;
@@ -1323,6 +1388,8 @@ bool SegmentControllerServer::isGoalReached()
   }
   const auto path_pose=toPathPose(actual);
   coordinator_.observe(path_pose.pose);
+  const auto [xy_tolerance, yaw_tolerance] = originalGoalTolerances();
+  enforceTrackApproachRegion(path_pose, xy_tolerance);
   geometry_msgs::msg::Twist measured;std::int64_t original_odom_stamp=0;
   if (!measuredVelocity(measured,&original_odom_stamp)) {
     resetFinalGoalStop();
@@ -1330,7 +1397,6 @@ bool SegmentControllerServer::isGoalReached()
     publishSegmentStop();
     return false;
   }
-  const auto [xy_tolerance, yaw_tolerance] = originalGoalTolerances();
 
   // A repeated XY location near the original goal is not route completion. Check
   // remaining ordered progress before consulting even a stateful final checker.
@@ -1459,7 +1525,7 @@ bool SegmentControllerServer::isGoalReached()
     throw nav2_core::NoValidControl("Ordered rotation stopped outside its original XY anchor; fresh original-goal replan required");
   }
   if (!coordinator_.finalSegment()) {
-    segment_braking_ = coordinator_.geometryReached(path_pose.pose, xy_tolerance);
+    segment_braking_ = intermediateSegmentReached(actual, path_pose, xy_tolerance);
     if (segment_braking_ && coordinator_.stopped(measured)) {
       if (queued_path_) {
         // This snapshot was generated DURING the completed turn. Its original start

@@ -420,9 +420,12 @@ def prepare(args):
     rpp.pop('plugin',None)
     if args.rotate_threshold is not None:rpp['rotate_to_heading_min_angle']=args.rotate_threshold
     if args.variant=='segmented':
+        if args.rotate_threshold is not None and args.rotate_threshold!=math.pi:
+            raise ValueError('Segmented next-rotation clearance profile requires rotate threshold pi')
         # A8 fixed tracking horizon only; explicit same-XY ROTATE remains enabled.
         rpp.update(lookahead_dist=.75,min_lookahead_dist=.75,max_lookahead_dist=.75,
-          use_velocity_scaled_lookahead_dist=False,rotate_to_heading_angular_vel=.3)
+          use_velocity_scaled_lookahead_dist=False,rotate_to_heading_angular_vel=.3,
+          rotate_to_heading_min_angle=math.pi)
     selected_path=args.segmented_install if args.variant=='segmented' else args.official_install
     if not selected_path:raise ValueError('Provide an explicit --segmented-install or --official-install for the selected variant')
     selected_install=pathlib.Path(selected_path).resolve()
@@ -484,6 +487,7 @@ def prepare(args):
         controller['FollowPath']=dict(rpp,plugin='nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController')
         controller['segments']=dict(xy_tolerance=args.xy_tolerance,yaw_tolerance=args.yaw_tolerance,stopped_linear_velocity=.03,stopped_angular_velocity=.05,final_stop_dwell_sec=.3,
           same_xy_epsilon=.0001,progress_search_distance=.25,odom_timeout=.3,rotation_anchor_wait_timeout=15.,command_sweep_horizon=1.,max_angular_velocity=.3,
+          require_next_rotation_clearance=True,track_approach_xy_tolerance=.005,
           terminal_goal_binding=True,terminal_global_resolution=.01,terminal_global_extent=20.)
     else:
         controller['Checker']['plugin']='official_lattice_rpp_adapter::FeasibleGoalChecker'
@@ -1083,7 +1087,7 @@ def main():
     p.add_argument('--template',default=str(BASE/'matrix_profile.yaml'))
     p.add_argument('--source-snapshot',help='Validated source manifest for a Git-free frozen deployment; defaults to observing canonical Git')
     p.add_argument('--official-install');p.add_argument('--segmented-install')
-    p.add_argument('--rotate-threshold',type=float,help='Explicit RPP heading threshold override; otherwise frozen template value')
+    p.add_argument('--rotate-threshold',type=float,help='RPP heading threshold override; segmented clearance profile requires pi')
     p.add_argument('--xy-tolerance',type=float,default=.15);p.add_argument('--yaw-tolerance',type=float,default=.08)
     p.add_argument('--build-receipt');p.add_argument('--message-install');p.add_argument('--preflight-timeout',type=float,default=30.);p.add_argument('--run',action='store_true')
     p.add_argument('--lifecycle-install',help='Optional isolated lifecycle executable/core pair, shared by all variants')

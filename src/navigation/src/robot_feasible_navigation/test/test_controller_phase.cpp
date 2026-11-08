@@ -30,9 +30,19 @@ nav_msgs::msg::Path approach(std::int64_t stamp) {
   for(int i=18;i>=0;--i)p.poses.push_back(pose(i*.01,pi,stamp));
   p.poses.push_back(pose(0,pi/2,stamp));p.poses.push_back(pose(0,0,stamp));return p;
 }
+nav_msgs::msg::Path microTrack(std::int64_t stamp) {
+  nav_msgs::msg::Path p;p.header=pose(0,0,stamp).header;
+  p.poses={pose(0,0,stamp),pose(.01,0,stamp),pose(.02,0,stamp),
+    pose(.02,pi/4,stamp),pose(.02,pi/2,stamp)};
+  for(int i=1;i<=100;++i) {
+    auto end=pose(.02,pi/2,stamp);end.pose.position.y=i*.01;p.poses.push_back(end);
+  }
+  return p;
+}
 class PlanSink : public nav2_core::Controller {
 public:
   int resets=0,plans=0,unexpected_compute=0;
+  double received_xy=-1.;
   void configure(const rclcpp_lifecycle::LifecycleNode::WeakPtr&,std::string,
     std::shared_ptr<tf2_ros::Buffer>,std::shared_ptr<nav2_costmap_2d::Costmap2DROS>)override{}
   void cleanup()override{} void activate()override{} void deactivate()override{}
@@ -40,7 +50,9 @@ public:
   void reset()override{++resets;}
   void setSpeedLimit(const double&,const bool&)override{}
   geometry_msgs::msg::TwistStamped computeVelocityCommands(const Pose&,
-    const geometry_msgs::msg::Twist&,nav2_core::GoalChecker*)override {
+    const geometry_msgs::msg::Twist&,nav2_core::GoalChecker* checker)override {
+    geometry_msgs::msg::Pose tolerance;geometry_msgs::msg::Twist velocity;
+    if(checker&&checker->getTolerances(tolerance,velocity))received_xy=tolerance.position.x;
     ++unexpected_compute;throw std::runtime_error("Motion compute escaped expected zero branch");
   }
 };
@@ -77,7 +89,7 @@ public:
     current_controller_="FollowPath";current_goal_checker_="Checker";current_progress_checker_="Progress";
     sink=std::make_shared<PlanSink>();goal=std::make_shared<GoalProbe>();progress=std::make_shared<CountedPoseProgress>();
     controllers_[current_controller_]=sink;goal_checkers_[current_goal_checker_]=goal;
-    intermediate_goal_checker_=std::make_unique<GoalProbe>();progress_checkers_[current_progress_checker_]=progress;
+    configureIntermediateGoalChecker(cfg);progress_checkers_[current_progress_checker_]=progress;
     if(rcl_enable_ros_time_override(get_clock()->get_clock_handle())!=RCL_RET_OK)throw std::runtime_error("test ROS clock enable failed");
     progress->bind(get_clock());time(0);
   }
@@ -109,6 +121,15 @@ public:
       std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(elapsed));
   }
   void expireAnchor(){rotation_anchor_wait_since_=std::chrono::steady_clock::now()-std::chrono::seconds(16);}
+  void guardNextTurn(bool enabled){require_next_rotation_clearance_=enabled;}
+  std::size_t segmentIndex()const{return coordinator_.index();}
+  bool repairPending()const{return track_approach_pending_;}
+  double controlXY(){return intermediateXYTolerance();}
+  void configurePhaseXY(double xy,bool enabled) {
+    require_next_rotation_clearance_=enabled;
+    auto cfg=coordinator_.config();cfg.xy_tolerance=xy;coordinator_=SegmentCoordinator(cfg);
+    configureIntermediateGoalChecker(cfg);
+  }
 protected:
   bool getRobotPose(Pose&out)override{out=actual;return true;}
   Pose toPathPose(const Pose&p)override{return p;}
@@ -207,5 +228,64 @@ TEST_F(ControllerPhase, SameGoalFreshPlanEveryTickCannotRegainFirstZeroExemption
   EXPECT_EQ(p->progress->resets,resets);
   ::testing::Test::RecordProperty("compatible_plans_sent",sent);
   ::testing::Test::RecordProperty("bounded_native_progress_failure",bounded_failure?1:0);
+}
+TEST_F(ControllerPhase, LegacyMicroTrackConsumesBeforeTranslation) {
+  s->actual=pose(0,0,s->ns);s->load(microTrack(s->ns));s->sweep_free=false;
+  ASSERT_FALSE(s->tick());EXPECT_EQ(s->segmentIndex(),1U);
+  EXPECT_FALSE(s->repairPending()); // Preserved opt-out behavior reproduces the original handoff.
+}
+TEST_F(ControllerPhase, UnsafeNextTurnKeepsTrackAndSuppliesApproachTriggerToRPP) {
+  s->guardNextTurn(true);s->actual=pose(0,0,s->ns);s->load(microTrack(s->ns));s->sweep_free=false;
+  ASSERT_FALSE(s->tick());EXPECT_EQ(s->segmentIndex(),0U);EXPECT_TRUE(s->repairPending());
+  const int zeros=s->zeros;
+  EXPECT_THROW(s->emitSameCycle(),std::runtime_error);
+  EXPECT_EQ(s->sink->unexpected_compute,1);EXPECT_DOUBLE_EQ(s->sink->received_xy,.005);
+  EXPECT_EQ(s->zeros,zeros);
+  geometry_msgs::msg::Pose tolerance;geometry_msgs::msg::Twist velocity;
+  ASSERT_TRUE(s->goal->getTolerances(tolerance,velocity));EXPECT_DOUBLE_EQ(tolerance.position.x,.15);
+}
+TEST_F(ControllerPhase, SafeNextTurnStillRequiresMeasuredStopBeforeAdvance) {
+  s->guardNextTurn(true);s->actual=pose(0,0,s->ns);s->load(microTrack(s->ns));s->sweep_free=false;s->tick();
+  s->sweep_free=true;s->actual=pose(.02,0,s->ns);s->measured.linear.x=.1;
+  ASSERT_FALSE(s->tick());EXPECT_EQ(s->segmentIndex(),0U);EXPECT_TRUE(s->repairPending());
+  const int zeros=s->zeros;s->emitSameCycle();EXPECT_EQ(s->zeros,zeros+1);
+  s->measured.linear.x=0.;ASSERT_FALSE(s->tick());EXPECT_EQ(s->segmentIndex(),1U);
+  EXPECT_FALSE(s->repairPending());EXPECT_DOUBLE_EQ(s->controlXY(),.15);
+}
+TEST_F(ControllerPhase, SameCycleFreshPoseCannotBypassUnsafeNextTurnGate) {
+  s->guardNextTurn(true);s->actual=pose(-.2,0,s->ns);s->load(microTrack(s->ns));s->sweep_free=false;
+  ASSERT_FALSE(s->tick());EXPECT_FALSE(s->repairPending());
+  s->actual=pose(0,0,s->ns);EXPECT_THROW(s->emitSameCycle(),std::runtime_error);
+  EXPECT_TRUE(s->repairPending());EXPECT_EQ(s->segmentIndex(),0U);
+  EXPECT_EQ(s->sink->unexpected_compute,1);EXPECT_DOUBLE_EQ(s->sink->received_xy,.005);
+}
+TEST_F(ControllerPhase, RepairCannotContinueOutsideOriginalHandoffRegion) {
+  s->guardNextTurn(true);s->actual=pose(0,0,s->ns);s->load(microTrack(s->ns));s->sweep_free=false;s->tick();
+  const int resets=s->progress->resets;s->actual=pose(.18,0,s->ns);
+  EXPECT_THROW(s->tick(),nav2_core::NoValidControl);EXPECT_EQ(s->segmentIndex(),0U);
+  EXPECT_EQ(s->progress->resets,resets);EXPECT_TRUE(s->repairPending());
+}
+TEST_F(ControllerPhase, TemporaryClearanceDuringBrakingDoesNotEraseRepairBound) {
+  s->guardNextTurn(true);s->actual=pose(0,0,s->ns);s->load(microTrack(s->ns));s->sweep_free=false;s->tick();
+  s->sweep_free=true;s->measured.linear.x=.1;s->tick();EXPECT_TRUE(s->repairPending());
+  s->actual=pose(.18,0,s->ns);s->measured.linear.x=0.;
+  EXPECT_THROW(s->tick(),nav2_core::NoValidControl);EXPECT_EQ(s->segmentIndex(),0U);
+}
+TEST_F(ControllerPhase, FreshPoseOutsideRepairBoundCannotHideBehindSameCycleBrakingZero) {
+  s->guardNextTurn(true);s->actual=pose(0,0,s->ns);s->load(microTrack(s->ns));s->sweep_free=false;s->tick();
+  s->sweep_free=true;s->measured.linear.x=.1;s->tick();
+  const int zeros=s->zeros;s->actual=pose(.18,0,s->ns);
+  EXPECT_THROW(s->emitSameCycle(),nav2_core::NoValidControl);
+  EXPECT_EQ(s->zeros,zeros);EXPECT_EQ(s->segmentIndex(),0U);EXPECT_TRUE(s->repairPending());
+}
+TEST_F(ControllerPhase, DisabledGuardKeepsExistingSubFiveMillimeterConfiguration) {
+  ASSERT_NO_THROW(s->configurePhaseXY(.001,false));
+  s->actual=pose(0,0,s->ns);s->load(microTrack(s->ns));s->sweep_free=false;
+  ASSERT_FALSE(s->tick());EXPECT_FALSE(s->repairPending());
+  EXPECT_THROW(s->emitSameCycle(),std::runtime_error);
+  EXPECT_DOUBLE_EQ(s->sink->received_xy,.001);EXPECT_EQ(s->segmentIndex(),0U);
+}
+TEST_F(ControllerPhase, EnabledGuardValidatesItsApproachTriggerAtConfiguration) {
+  EXPECT_THROW(s->configurePhaseXY(.001,true),std::invalid_argument);
 }
 } // namespace

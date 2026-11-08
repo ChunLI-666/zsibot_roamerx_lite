@@ -314,6 +314,16 @@ protected:
   std::unordered_map<std::string, TransformHistory> transform_history_;
   void validateTransformFreshness();
   void installActiveSegment();
+  void configureIntermediateGoalChecker(const SegmentCoordinator::Config & config);
+  double intermediateXYTolerance();
+  void enforceTrackApproachRegion(
+    const geometry_msgs::msg::PoseStamped & path_pose, double xy_tolerance) const;
+  bool intermediateSegmentReached(
+    const geometry_msgs::msg::PoseStamped & actual,
+    const geometry_msgs::msg::PoseStamped & path_pose, double xy_tolerance);
+  bool require_next_rotation_clearance_{false};
+  double track_approach_xy_tolerance_{.005};
+  bool track_approach_pending_{false};
   void clearSegmentState();
   geometry_msgs::msg::PoseStamped actualPathPose();
   virtual geometry_msgs::msg::PoseStamped toPathPose(const geometry_msgs::msg::PoseStamped & actual);

@@ -438,3 +438,28 @@ checks remain the inputs for that recording. Its Python/profile commit must be
 recorded separately from the reused A12 compiled-source commit. The late map
 captured 303 seconds after the failure did not reproduce the rejection and is
 retained as a separate, unsuccessful diagnostic.
+
+## A14: retain short translations until the next rotation is safe
+
+A10 produced valid plans, but the controller consumed a 22 mm translation while
+still inside its original 15 cm handoff region. Cached command samples had zero
+translation. A later full-body rotation was free at the planned anchor and blocked
+at the actual body position on both nearest published costmaps. These are frozen
+publication inputs, not exact controller mutex snapshots.
+
+The optional server flag `segments.require_next_rotation_clearance` defaults to
+false. The Matrix A profile enables it: the immediate ordered rotation must pass
+the existing filled sweep at the actual body origin before TRACK may stop and
+advance. Both phase evaluation and same-cycle velocity computation check it.
+Measured stop and the original XY/ordered progress remain mandatory. A retained
+TRACK that leaves that original handoff region fails with `NoValidControl` for
+the existing single original-goal recovery; moving cannot indefinitely renew it.
+
+For these TRACK segments only, `.005 m` is an RPP endpoint branch trigger, not a
+new acceptance requirement. The Matrix profile also sets the implicit path-heading
+threshold to pi so that a displaced micro-target requests forward tracking rather
+than an unplanned spin. Explicit co-located ROTATE keeps its goal-heading branch.
+The original final goal, .3 second stopped dwell, freshness limits, footprint,
+angular cap and one-second actual-command sweep are unchanged. Frozen A10 inputs
+show possible forward commands and a narrow window for the next rotation; these
+offline checks do not establish dynamic or whole-route acceptance.

@@ -46,6 +46,10 @@ public:
   void setPath(const nav_msgs::msg::Path & path, bool require_entry_stop = true);
   bool empty() const {return segments_.empty();}
   const Segment & active() const;
+  // Ordered successor only: never select or advance a nearest segment.
+  const Segment * next() const {
+    return !empty() && index_ + 1 < segments_.size() ? &segments_[index_ + 1] : nullptr;
+  }
   std::size_t index() const {return index_;}
   std::size_t size() const {return segments_.size();}
   bool finalSegment() const {return !empty() && index_ + 1 == segments_.size();}
