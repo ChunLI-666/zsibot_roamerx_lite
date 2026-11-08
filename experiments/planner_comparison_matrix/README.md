@@ -421,3 +421,20 @@ nominal request and staying within the unchanged .3 rad/s command cap. A8 used
 .15 rad/s. This is an explicit new profile input, not a proven reduction in body
 drift. Goal/TF/scan/footprint thresholds and forward path restrictions retain
 their previous values. All server/header consumers must be rebuilt together.
+
+## A13: prefer obstacle clearance in the segmented simulation profile
+
+The Matrix-only segmented planner now uses `cost_penalty=1` instead of zero.
+On the original A9 bag's nearest global-costmap publications, 2.720 seconds
+before and 12.907 milliseconds after the planner failure, the installed A12
+planner reproduces the same filled-segment rejection at zero cost. Changing only
+this penalty returns a fully swept path on both frozen inputs, in .82 and .91
+seconds. The start is the nearest recorded Native pose to the planner's goal
+acceptance; these publications are not an exact snapshot under its map mutex.
+
+This is a configuration candidate for a new simulation recording. The A12 C++
+artifacts, full-body sweep, original goals, planning deadline and stopped/freshness
+checks remain the inputs for that recording. Its Python/profile commit must be
+recorded separately from the reused A12 compiled-source commit. The late map
+captured 303 seconds after the failure did not reproduce the rejection and is
+retained as a separate, unsuccessful diagnostic.

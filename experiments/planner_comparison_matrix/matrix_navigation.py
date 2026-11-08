@@ -476,7 +476,9 @@ def prepare(args):
       commanded_angular_radps=.01,continuous_final_stop_sec=.3,
       boundary='Measured limits match the existing independent waypoint contract; measured values and original geometry remain unchanged. Native final completion requires continuous stopped geometry after a checked zero.')
     if args.variant=='segmented':
-        planner.update(cost_penalty=0.,terminal_goal_binding=True,terminal_global_resolution=.01)
+        # A9's nearest original bag costmaps reproduce a checked-path rejection
+        # at zero obstacle cost. Keep the full sweep; prefer clearance in search.
+        planner.update(cost_penalty=1.,terminal_goal_binding=True,terminal_global_resolution=.01)
         planner['lattice_filepath']=str(selected_install/'share/robot_feasible_navigation/params/stop_turn_1cm_h16.json')
         controller['Checker']['plugin']='nav2_controller::StoppedGoalChecker'
         controller['FollowPath']=dict(rpp,plugin='nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController')
