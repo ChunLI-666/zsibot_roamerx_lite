@@ -277,6 +277,27 @@ def validate_route(document):
     return result
 
 
+def initial_leg_limit(requested, ready, simulation_scan_age):
+    """Simulation-only request envelope; server body/path checks stay authoritative.
+
+    Original route legs still require <8 m. A failed preceding target can leave
+    the actual start slightly farther away without leaving the 20 m rolling map.
+    """
+    if isinstance(requested, bool) or requested not in (8., 8.5):
+        raise ValueError('Initial leg limit must be 8 or simulation-only 8.5 m')
+    if requested == 8.:
+        return requested
+    metadata = ready.get('actual_costmaps', {}).get('global_costmap', {})
+    resolution = metadata.get('resolution')
+    sizes = [metadata.get('size_x'), metadata.get('size_y')]
+    if (simulation_scan_age != .5 or isinstance(resolution, bool)
+            or not isinstance(resolution, (int, float)) or not math.isfinite(resolution)
+            or resolution <= 0 or any(type(size) is not int or size <= 0 for size in sizes)
+            or any(size * resolution < 20. - 1e-6 for size in sizes)):
+        raise ValueError('8.5 m initial request requires explicit simulation profile and >=20m global window')
+    return requested
+
+
 def waypoint_binding(ready, previous=None):
     """Augment the unchanged single-goal lease checks with native-batch identity."""
     contract = ready.get('waypoint_contract', {})

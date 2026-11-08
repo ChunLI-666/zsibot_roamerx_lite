@@ -360,3 +360,9 @@ command and publishes the same command. This avoids checking a tighter turn whil
 the downstream smoother executes a clipped turn. The fixed lookahead override
 applies only to the segmented variant. Smoother transients and simulator tracking
 still require runtime validation; these settings are not a navigation acceptance.
+
+批量测试客户端的原首段请求上限仍为 8 m。显式仿真选项
+`--simulation-first-leg-max-distance-m 8.5` 只在既有仿真模式且生效 global
+window 至少为 20 m 时放行；各原路线相邻段仍须小于 8 m。它用于原目标失败
+后实际起点的有限偏差，完整机身、地图边界与碰撞可行性仍由规划服务检查。
+首段实测距离、请求上限及原始 pose 时间戳独立记录；TF/停稳/最终目标容差不变。
