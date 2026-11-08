@@ -392,3 +392,32 @@ regression retains the original goal binding and 2 s planning limit; collision,
 signed segment execution, sensor freshness and stopped-goal checks remain.
 This fixes the reproduced search-path defect; complete simulation navigation
 still requires new recordings. Installed official B libraries are unchanged.
+
+## A12: retain same-goal progress across controller phases
+
+A failed FINAL shortcut stays disabled for the same original goal across queued
+and fresh compatible replans. Certified ordered advancement can permit a new
+shortcut. Installing a phase no longer resets the goal's PoseProgressChecker;
+healthy zero/anchor waits now run that checker before returning. A restored phase
+outputs zero for its first cycle so its original anchor is checked on the next
+cycle before motion. The existing 15 second anchor wait survives temporary FINAL
+activation and compatible reinstallation.
+
+Original-goal success still requires the existing geometry, checked zero and
+continuous .3 second original-odometry/steady stopped dwell. A stopped valid
+observation gets a bounded .5 second priority window over the progress deadline;
+compatible replans cannot restart that window. Moving, checker failure and failed
+zero checks do not grant priority. This prevents both repeated replan/dwell-reset
+livelock and premature failure of a legitimate .3 second final stop.
+
+The actual-server regression fixture uses the real PoseProgressChecker with
+protected IO seams and synthetic poses. Negative controls retain failures for
+the exact A11 source and the rejected first design. The final build adds ten
+phase regressions to the existing package tests. No simulation route or physical
+acceptance follows from these software checks.
+
+This new Matrix-only A profile requests .3 rad/s normal rotation, matching B's
+nominal request and staying within the unchanged .3 rad/s command cap. A8 used
+.15 rad/s. This is an explicit new profile input, not a proven reduction in body
+drift. Goal/TF/scan/footprint thresholds and forward path restrictions retain
+their previous values. All server/header consumers must be rebuilt together.

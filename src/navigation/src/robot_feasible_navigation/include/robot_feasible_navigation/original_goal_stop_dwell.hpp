@@ -19,6 +19,7 @@ public:
   }
   void reset() {active_=qualified_=false;last_steady_=last_odom_=since_=first_odom_=zero_epoch_=0;}
   bool active() const {return active_;}
+  bool qualifying() const {return qualified_;}
   // Called only AFTER this cycle's actual-body zero sweep and zero publication.
   // The first zero establishes a baseline, never proof from a pre-zero sample.
   bool observe(std::int64_t steady_ns, std::int64_t odom_ns, std::int64_t zero_command_ns,

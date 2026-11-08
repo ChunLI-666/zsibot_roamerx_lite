@@ -422,7 +422,7 @@ def prepare(args):
     if args.variant=='segmented':
         # A8 fixed tracking horizon only; explicit same-XY ROTATE remains enabled.
         rpp.update(lookahead_dist=.75,min_lookahead_dist=.75,max_lookahead_dist=.75,
-          use_velocity_scaled_lookahead_dist=False)
+          use_velocity_scaled_lookahead_dist=False,rotate_to_heading_angular_vel=.3)
     selected_path=args.segmented_install if args.variant=='segmented' else args.official_install
     if not selected_path:raise ValueError('Provide an explicit --segmented-install or --official-install for the selected variant')
     selected_install=pathlib.Path(selected_path).resolve()

@@ -646,9 +646,6 @@ void SegmentControllerServer::computeControl()
     }
 
     setPlannerPath(goal->path);
-    if (!current_progress_checker_.empty()) {
-      progress_checkers_[current_progress_checker_]->reset();
-    }
 
     last_valid_cmd_time_ = now();
     rclcpp::WallRate loop_rate(controller_frequency_);
@@ -803,12 +800,14 @@ void SegmentControllerServer::computeControl()
 void SegmentControllerServer::clearSegmentState()
 {
   resetFinalGoalStop();
+  final_stop_progress_priority_since_.reset();
   coordinator_.clear();
   queued_path_.reset();
   segment_braking_ = false;
   original_goal_.reset();
   current_wire_path_=nav_msgs::msg::Path{};
   terminal_braking_ = terminal_rotation_active_ = false;
+  terminal_retry_blocked_ = false;
   invalid_odom_since_.reset();
   rotation_anchor_wait_since_.reset();
   rotation_anchor_waiting_ = false;
@@ -839,13 +838,17 @@ void SegmentControllerServer::setPlannerPath(
   if (!preserve_goal) {
     original_goal_ = path.poses.back();
     original_goal_->header.frame_id = path.header.frame_id;
+    final_stop_progress_priority_since_.reset();
     rotation_anchor_wait_since_.reset();
     rotation_anchor_waiting_ = false;
+    terminal_retry_blocked_ = false;
+    if (!current_progress_checker_.empty()) {
+      progress_checkers_[current_progress_checker_]->reset();
+    }
   }
-  if (!coordinator_.rotating()) {
-    rotation_anchor_wait_since_.reset();
-    rotation_anchor_waiting_ = false;
-  }
+  // Same-goal phase/path installation must not erase its lack-of-progress budget.
+  // Clear only the per-cycle hold mode when a fresh plan selects TRACK, not its timer.
+  if (!coordinator_.rotating()) {rotation_anchor_waiting_ = false;}
   terminal_braking_ = terminal_rotation_active_ = false;
   incoming_rotation_snapshot_ = coordinator_.rotating();
   queued_path_.reset();
@@ -866,9 +869,6 @@ void SegmentControllerServer::installActiveSegment()
   goal_checkers_[current_goal_checker_]->reset();
   intermediate_goal_checker_->reset();
   segment_braking_ = false;
-  if (!current_progress_checker_.empty()) {
-    progress_checkers_[current_progress_checker_]->reset();
-  }
   RCLCPP_INFO(get_logger(), "Ordered segment %zu/%zu: %s, endpoint (%.3f, %.3f, %.3f)",
     coordinator_.index() + 1, coordinator_.size(), coordinator_.rotating() ? "ROTATE" : "TRACK",
     end_pose_.pose.position.x, end_pose_.pose.position.y, SegmentCoordinator::yaw(end_pose_.pose));
@@ -1051,7 +1051,7 @@ void SegmentControllerServer::activateTerminalRotation(
   goal_checkers_[current_goal_checker_]->reset();
   terminal_rotation_active_ = true;
   terminal_braking_ = segment_braking_ = false;
-  rotation_anchor_wait_since_.reset();
+  // The original unstarted-anchor wait survives this ephemeral shortcut.
   rotation_anchor_waiting_ = false;
   RCLCPP_INFO(get_logger(), "Goal-tolerance FINAL normal rotation at actual body origin; "
     "original goal (%.4f, %.4f, %.4f) retained for final checking",
@@ -1061,6 +1061,8 @@ void SegmentControllerServer::activateTerminalRotation(
 
 void SegmentControllerServer::restoreOrderedSegment()
 {
+  // Must precede any queued-path install; that older snapshot cannot rearm FINAL.
+  terminal_retry_blocked_ = true;
   resetFinalGoalStop();
   terminal_rotation_active_ = terminal_braking_ = false;
   segment_braking_ = false;
@@ -1071,6 +1073,7 @@ void SegmentControllerServer::restoreOrderedSegment()
     coordinator_.requireEntryStop();
     installActiveSegment();
   }
+  segment_braking_ = true;  // Restore-cycle zero until next tick revalidates the original anchor.
   publishSegmentStop();
 }
 
@@ -1108,12 +1111,6 @@ void SegmentControllerServer::computeAndPublishVelocity()
       segment_braking_ = true;
       publishSegmentStop();
       return;
-    }
-  }
-
-  if (!current_progress_checker_.empty()) {
-    if (!progress_checkers_[current_progress_checker_]->check(pose)) {
-      throw nav2_core::FailedToMakeProgress("Failed to make progress");
     }
   }
 
@@ -1225,13 +1222,18 @@ void SegmentControllerServer::updateGlobalPath()
   if (!action_server_->is_preempt_requested()) {return;}
   auto goal = action_server_->accept_pending_goal();
   if (!goal) {throw nav2_core::InvalidPath("Missing pending FollowPath goal");}
+  installPendingPlannerGoal(*goal);
+}
+
+void SegmentControllerServer::installPendingPlannerGoal(const Action::Goal & goal)
+{
   resetFinalGoalStop();  // Includes compatible replans queued during a turn.
   std::string controller, goal_checker, progress_checker;
-  if (!findControllerId(goal->controller_id, controller)) {
+  if (!findControllerId(goal.controller_id, controller)) {
     throw nav2_core::InvalidController("Invalid controller in preempting path");
   }
-  if (!findGoalCheckerId(goal->goal_checker_id, goal_checker) ||
-    !findProgressCheckerId(goal->progress_checker_id, progress_checker))
+  if (!findGoalCheckerId(goal.goal_checker_id, goal_checker) ||
+    !findProgressCheckerId(goal.progress_checker_id, progress_checker))
   {
     throw nav2_core::ControllerException("Invalid checker in preempting path");
   }
@@ -1239,24 +1241,29 @@ void SegmentControllerServer::updateGlobalPath()
   // same final pose/frame and same plugins within this worker; do not claim task identity.
   const bool compatible = controller == current_controller_ &&
     goal_checker == current_goal_checker_ && progress_checker == current_progress_checker_ &&
-    SegmentCoordinator::compatibleGoal(current_wire_path_, goal->path);
+    SegmentCoordinator::compatibleGoal(current_wire_path_, goal.path);
   SegmentCoordinator validated(coordinator_.config());
-  try {validated.setPath(executionInput(goal->path));} catch (const std::invalid_argument & e) {
+  try {validated.setPath(executionInput(goal.path));} catch (const std::invalid_argument & e) {
     throw nav2_core::InvalidPath(e.what());
   }
   if (compatible && ((coordinator_.rotating() && !coordinator_.entryStopPending()) ||
     terminal_rotation_active_ || terminal_braking_))
   {
-    queued_path_ = goal->path;  // Preserve the unfinished angular phase and its measured progress.
+    queued_path_ = goal.path;  // Preserve the unfinished angular phase and its measured progress.
     RCLCPP_DEBUG(get_logger(), "Queued compatible replan until the current rotation stops");
     return;
   }
+  // A new compatible path is not proof of repair or ordered progress.
+  const bool changed_progress_checker = progress_checker != current_progress_checker_;
   const bool require_stop = !compatible || coordinator_.entryStopPending() || validated.rotating();
   if (require_stop) {publishSegmentStop();}
   current_controller_ = controller;
   current_goal_checker_ = goal_checker;
   current_progress_checker_ = progress_checker;
-  setPlannerPath(goal->path, require_stop);
+  setPlannerPath(goal.path, require_stop);
+  if (changed_progress_checker && !current_progress_checker_.empty()) {
+    progress_checkers_[current_progress_checker_]->reset();
+  }
 }
 
 void SegmentControllerServer::publishVelocity(const geometry_msgs::msg::TwistStamped & velocity)
@@ -1353,9 +1360,29 @@ bool SegmentControllerServer::isGoalReached()
       path_pose.pose,original_goal_->pose,measured);
     const auto steady_ns=std::chrono::duration_cast<std::chrono::nanoseconds>(
       std::chrono::steady_clock::now().time_since_epoch()).count();
-    return final_goal_stop_dwell_.observe(steady_ns,original_odom_stamp,zero_command_stamp,true,
+    const bool reached = final_goal_stop_dwell_.observe(
+      steady_ns,original_odom_stamp,zero_command_stamp,true,
       measured_stopped && checker_reached,true);
+    // The same original goal gets at most .5s priority from its first valid
+    // checked stopped zero, across every compatible replan/dwell reset.
+    bool progress_priority = false;
+    if (measured_stopped && checker_reached && zero_command_stamp > 0) {
+      const auto priority_now = std::chrono::steady_clock::now();
+      if (!final_stop_progress_priority_since_) {final_stop_progress_priority_since_ = priority_now;}
+      progress_priority = std::chrono::duration<double>(
+        priority_now - *final_stop_progress_priority_since_).count() <= .5;
+    }
+    if (!progress_priority && !current_progress_checker_.empty() &&
+      !progress_checkers_[current_progress_checker_]->check(actual))
+    {throw nav2_core::FailedToMakeProgress("Failed to make progress");}
+    return reached;  // Success still needs unchanged .3s original/steady dwell.
   }
+  // Every other healthy zero/phase branch retains the SAME goal progress budget.
+  // Geometry/ordered-eligibility loss ends priority, but NEVER skips this check.
+  final_stop_progress_priority_since_.reset();
+  if (!current_progress_checker_.empty() &&
+    !progress_checkers_[current_progress_checker_]->check(actual))
+  {throw nav2_core::FailedToMakeProgress("Failed to make progress");}
   resetFinalGoalStop();  // XY/yaw/mandatory eligibility loss breaks the continuous dwell.
   if (!terminal_braking_) {segment_braking_ = false;}
 
@@ -1377,7 +1404,7 @@ bool SegmentControllerServer::isGoalReached()
   }
   // Test the full shortest sweep BEFORE braking. A blocked short turn must not repeatedly
   // interrupt an already valid longer ordered route. After measured stop, test it again.
-  if (terminal_eligible && sweep_free) {
+  if (terminal_eligible && sweep_free && !terminal_retry_blocked_) {
     terminal_braking_ = segment_braking_ = true;
     if (coordinator_.stopped(measured)) {
       coordinator_.executionReady(measured);
@@ -1387,6 +1414,7 @@ bool SegmentControllerServer::isGoalReached()
     return false;
   }
   if (terminal_braking_) {
+    terminal_retry_blocked_ = true;
     terminal_braking_ = segment_braking_ = false;
   }
   if (coordinator_.rotating() && coordinator_.entryStopPending()) {
@@ -1441,6 +1469,10 @@ bool SegmentControllerServer::isGoalReached()
         RCLCPP_INFO(get_logger(), "Discarded compatible replan captured during completed ROTATE");
       }
       coordinator_.advance();
+      terminal_retry_blocked_ = false;  // Certified ordered progress can permit one new shortcut.
+      // This is certified ordered geometry + measured stop, not a phase reinstall.
+      rotation_anchor_wait_since_.reset();
+      rotation_anchor_waiting_ = false;
       incoming_rotation_snapshot_ = false;  // An existing route's next turn is not a new snapshot.
       installActiveSegment();
     }

@@ -174,6 +174,7 @@ protected:
    * action server
    */
   void updateGlobalPath();
+  void installPendingPlannerGoal(const Action::Goal & goal);
   /**
    * @brief Calls velocity publisher to publish the velocity on "cmd_vel" topic
    * @param velocity Twist velocity to be published
@@ -194,7 +195,7 @@ protected:
    * @param pose To store current pose of the robot
    * @return true if able to obtain current pose of the robot, else false
    */
-  bool getRobotPose(geometry_msgs::msg::PoseStamped & pose);
+  virtual bool getRobotPose(geometry_msgs::msg::PoseStamped & pose);
 
   /**
    * @brief get the thresholded velocity
@@ -298,6 +299,9 @@ protected:
   std::optional<geometry_msgs::msg::PoseStamped> original_goal_;
   bool terminal_braking_{false};
   bool terminal_rotation_active_{false};
+  // Same original goal: replans cannot rearm a failed FINAL shortcut.
+  // Only certified ordered advance, a completed repair/success, or new worker/goal releases it.
+  bool terminal_retry_blocked_{false};
   geometry_msgs::msg::PoseStamped terminal_target_;
   std::optional<std::chrono::steady_clock::time_point> invalid_odom_since_;
   std::optional<std::chrono::steady_clock::time_point> rotation_anchor_wait_since_;
@@ -312,18 +316,19 @@ protected:
   void installActiveSegment();
   void clearSegmentState();
   geometry_msgs::msg::PoseStamped actualPathPose();
-  geometry_msgs::msg::PoseStamped toPathPose(const geometry_msgs::msg::PoseStamped & actual);
-  bool measuredVelocity(geometry_msgs::msg::Twist & velocity, std::int64_t * original_stamp_ns=nullptr);
+  virtual geometry_msgs::msg::PoseStamped toPathPose(const geometry_msgs::msg::PoseStamped & actual);
+  virtual bool measuredVelocity(geometry_msgs::msg::Twist & velocity, std::int64_t * original_stamp_ns=nullptr);
   OriginalGoalStopDwell final_goal_stop_dwell_;
+  std::optional<std::chrono::steady_clock::time_point> final_stop_progress_priority_since_;
   bool final_stop_zero_this_cycle_{false};
   void resetFinalGoalStop();
-  std::int64_t publishFinalGoalStop(const geometry_msgs::msg::PoseStamped & actual);
+  virtual std::int64_t publishFinalGoalStop(const geometry_msgs::msg::PoseStamped & actual);
   void enforceRotationSweep(const geometry_msgs::msg::PoseStamped & actual_pose);
-  bool rotationSweepFree(const geometry_msgs::msg::PoseStamped & actual_pose,
+  virtual bool rotationSweepFree(const geometry_msgs::msg::PoseStamped & actual_pose,
     const geometry_msgs::msg::PoseStamped & target);
   void activateTerminalRotation(const geometry_msgs::msg::PoseStamped & path_pose);
   void restoreOrderedSegment();
-  void publishSegmentStop();
+  virtual void publishSegmentStop();
 
 private:
   /**
