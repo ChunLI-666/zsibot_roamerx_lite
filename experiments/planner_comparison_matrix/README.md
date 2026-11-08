@@ -356,3 +356,11 @@ closed-loop acceptance, which still requires full-route recordings.
 官方实验可用 `FollowPath.terminal_track_xy_drift_limit`，插件默认 0，official Matrix profile 显式选择 0.05 m。它只作用于已在原目标区域内、实测停止后的初始原地旋转：冻结实际中心，原 mandatory heading 尚未完成时允许最多 5 cm 累计位移，且距离原目标不超过原 XY 容差加 5 cm。正常平移到点的制动过程沿用原逻辑；末个 heading 完成当 tick、纠偏旋转及最终验收仍使用原 XY/yaw/停稳标准。同目标重新规划须先完成经过碰撞检查的零指令与原区域内双时基连续 0.3 s 停稳，不能逐 plan 重锚累计漂移。完整机身、剩余旋转和命令 sweep 检查保持；该参数是观测执行边界，不是连续 XY 不确定性 tube 的碰撞证明，也不是仿真或实机验收通过。
 
 区域内的原许可优先保留：5 cm pivot 限制只用于原目标区域外、mandatory 未完成时的额外执行许可，不再拒绝仍在原区域内的居中转向。官方 Matrix 对照 profile 使用固定 0.75 m lookahead 与 0.3 rad/s 名义转向命令；RPP 原始输出先校验，再将角速度限制至同一显式 0.3 上限，随后做 filled command sweep，发布完全相同的受限命令。此顺序避免对一条高曲率轨迹做检查、却在下游裁成另一条轨迹；速度平滑及机体实际响应的瞬态仍须录包验证。
+
+B13 将初始 Pose-goal 快捷旋转的准入收紧到距原目标中心 0.05 m 内，参数为
+`FollowPath.initial_goal_region_max_xy_error`。插件兼容默认值为 0.25 m，仍与原
+XY 容差取较小值；只有 official Matrix profile 显式选择 0.05 m。B25 从距中心
+约 0.128 m 的停止位置起转，原始 Native 样本显示约 0.052 m 位移后触发执行
+边界，故仅“已经在 0.15 m 目标区域内”不足以保证转向余量。准入之外继续执行
+原规划路径，不跳过路径约束，也不修改目标或最终验收容差。这个内圈是实验
+余量选择，不能证明仿真或实机的漂移上界；完整路线结果仍须单独记录。

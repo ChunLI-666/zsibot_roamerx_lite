@@ -16,7 +16,7 @@ inline std::optional<std::vector<double>> initialGoalRotation(
   nav2_costmap_2d::Costmap2D & map,
   const robot_feasible_navigation::sweep::Footprint & footprint,
   const geometry_msgs::msg::Pose & actual,const geometry_msgs::msg::Pose & goal,
-  double xy_tolerance)
+  double xy_tolerance,double maximum_initial_xy_error=0.25)
 {
   namespace sweep=robot_feasible_navigation::sweep;
   const auto planar=[](const geometry_msgs::msg::Pose & p) {
@@ -28,8 +28,11 @@ inline std::optional<std::vector<double>> initialGoalRotation(
       std::abs(q.x)<1e-5&&std::abs(q.y)<1e-5;
   };
   if (!planar(actual)||!planar(goal)||!std::isfinite(xy_tolerance)||
-    xy_tolerance<=0.||xy_tolerance>0.25||!sweep::validFootprint(footprint)||
-    std::hypot(actual.position.x-goal.position.x,actual.position.y-goal.position.y)>xy_tolerance)
+    xy_tolerance<=0.||xy_tolerance>0.25||
+    !std::isfinite(maximum_initial_xy_error)||maximum_initial_xy_error<=0.||
+    maximum_initial_xy_error>0.25||!sweep::validFootprint(footprint)||
+    std::hypot(actual.position.x-goal.position.x,actual.position.y-goal.position.y)>
+    std::min(xy_tolerance,maximum_initial_xy_error))
   {return std::nullopt;}
   const double start=tf2::getYaw(actual.orientation),end=tf2::getYaw(goal.orientation);
   const double delta=std::atan2(std::sin(end-start),std::cos(end-start));

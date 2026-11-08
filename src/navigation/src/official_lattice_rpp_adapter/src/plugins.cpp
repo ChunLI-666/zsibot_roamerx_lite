@@ -237,6 +237,9 @@ public:
     require(!terminal_drift_.enabled()||terminal_binding_,
       "terminal Track drift requires explicit original-goal binding");
     initial_goal_region_shortcut_=parameter(node,name+".initial_goal_region_shortcut",false);
+    initial_goal_max_xy_error_=parameter(node,name+".initial_goal_region_max_xy_error",.25);
+    require(std::isfinite(initial_goal_max_xy_error_)&&initial_goal_max_xy_error_>0.&&
+      initial_goal_max_xy_error_<=.25,"invalid initial goal-region XY admission radius");
     require(!initial_goal_region_shortcut_||terminal_binding_,
       "initial goal-region shortcut requires explicit original Pose-goal binding");
     terminal_resolution_=parameter(node,name+".terminal_global_resolution",0.01);
@@ -421,7 +424,8 @@ public:
         const double target=yaw(pose.pose)+angle(yaw(path_pose.pose),yaw(binding_->original_goal.pose));
         local_goal.orientation.x=local_goal.orientation.y=0.;
         local_goal.orientation.z=std::sin(target/2.);local_goal.orientation.w=std::cos(target/2.);
-        auto headings=goal_region::initialGoalRotation(*map,fp,pose.pose,local_goal,tolerance.position.x);
+        auto headings=goal_region::initialGoalRotation(*map,fp,pose.pose,local_goal,
+          tolerance.position.x,initial_goal_max_xy_error_);
         if (headings) {
           // The extended Track envelope is only for an initially stopped,
           // already-near-goal rotation. Normal arrival braking is unchanged.
@@ -576,6 +580,7 @@ private:
   double remaining_length_=0.08;
   bool terminal_binding_=false,terminal_armed_=false,terminal_cancelled_=false;
   bool initial_goal_region_shortcut_=false,initial_goal_rotation_pending_=false;
+  double initial_goal_max_xy_error_=.25;
   double terminal_resolution_=0.01,terminal_extent_=20.;
   std::shared_ptr<const goal_region::Binding> binding_;
   goal_region::HeadingCursor terminal_headings_,terminal_correction_headings_;

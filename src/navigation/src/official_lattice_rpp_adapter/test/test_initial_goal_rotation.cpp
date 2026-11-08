@@ -62,6 +62,41 @@ TEST(InitialGoalRotation, AlreadyMatchingGoalStillUsesNormalCompletionCursor) {
   goal_region::HeadingCursor cursor;cursor.reset(*result);cursor.advance(.7,.08);EXPECT_TRUE(cursor.complete());
 }
 
+TEST(InitialGoalRotation, RecordedB25PivotNearBoundaryDeclinesOnlyInitialShortcut) {
+  nav2_costmap_2d::Costmap2D map(600,600,.01,-17.,-14.,0);
+  sweep::ScopedObstacleIndex index(map);
+  const auto actual=pose(-13.883238241,-11.219854257,0.);
+  const auto goal=pose(-13.762097735524787,-11.178221523454763,2.);
+  ASSERT_TRUE(goal_region::initialGoalRotation(map,body(),actual,goal,.15));
+  EXPECT_FALSE(goal_region::initialGoalRotation(map,body(),actual,goal,.15,.05));
+  // This is not a completed goal or a rejected plan: no shortcut means the
+  // caller retains the original ordered planner path.
+}
+TEST(InitialGoalRotation, InnerAdmissionRetainsCenterAndExactBoundary) {
+  nav2_costmap_2d::Costmap2D map(600,600,.01,-3.,-3.,0);
+  sweep::ScopedObstacleIndex index(map);
+  for (const double x:{0.,.049,.05}) {
+    EXPECT_TRUE(goal_region::initialGoalRotation(map,body(),pose(x,0.,0.),pose(0.,0.,2.),.15,.05));
+  }
+  EXPECT_FALSE(goal_region::initialGoalRotation(map,body(),pose(.050001,0.,0.),pose(0.,0.,2.),.15,.05));
+  EXPECT_FALSE(goal_region::initialGoalRotation(map,body(),pose(.045,0.,0.),pose(0.,0.,2.),.04,.05));
+}
+TEST(InitialGoalRotation, InnerAdmissionRejectsInvalidRadius) {
+  nav2_costmap_2d::Costmap2D map(600,600,.01,-3.,-3.,0);
+  sweep::ScopedObstacleIndex index(map);
+  for (const double radius:{0.,-.01,.251,
+    std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()})
+  {
+    EXPECT_FALSE(goal_region::initialGoalRotation(map,body(),pose(0.,0.,0.),pose(0.,0.,2.),.15,radius));
+  }
+}
+TEST(InitialGoalRotation, InnerAdmissionStillChecksIntermediateFilledBody) {
+  nav2_costmap_2d::Costmap2D map(600,600,.01,-3.,-3.,0);
+  unsigned int x,y;ASSERT_TRUE(map.worldToMap(.85,.4,x,y));map.setCost(x,y,254);
+  sweep::ScopedObstacleIndex index(map);
+  EXPECT_FALSE(goal_region::initialGoalRotation(map,body(),pose(0.,0.,0.),pose(0.,0.,M_PI),.15,.05));
+}
+
 
 
 namespace {
