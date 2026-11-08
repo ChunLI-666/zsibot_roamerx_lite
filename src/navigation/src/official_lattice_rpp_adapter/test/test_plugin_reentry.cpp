@@ -25,6 +25,9 @@ geometry_msgs::msg::PoseStamped pose(double x, double heading=M_PI) {
 }
 class PluginReentry : public ::testing::Test {
 protected:
+  virtual double entryRadius() const {return 0.;}
+  virtual double handoffRadius() const {return .15;}
+  virtual bool initialShortcut() const {return true;}
   static void SetUpTestSuite() {
     const char * domain=std::getenv("ROS_DOMAIN_ID");
     if (!domain||std::string(domain)!="190") {
@@ -41,11 +44,12 @@ protected:
     node_->declare_parameter("odom_topic",std::string("reentry_test_odom"));
     node_->declare_parameter("goal_checker.xy_goal_tolerance",.15);
     node_->declare_parameter("goal_checker.yaw_goal_tolerance",.08);
-    node_->declare_parameter("FollowPath.handler.inversion_xy_tolerance",.15);
-    node_->declare_parameter("FollowPath.completion_path_length",.15);
+    node_->declare_parameter("FollowPath.handler.inversion_xy_tolerance",handoffRadius());
+    node_->declare_parameter("FollowPath.completion_path_length",handoffRadius());
+    node_->declare_parameter("FollowPath.terminal_rotation_entry_xy_tolerance",entryRadius());
     node_->declare_parameter("FollowPath.terminal_goal_binding",true);
     node_->declare_parameter("FollowPath.terminal_track_xy_drift_limit",.05);
-    node_->declare_parameter("FollowPath.initial_goal_region_shortcut",true);
+    node_->declare_parameter("FollowPath.initial_goal_region_shortcut",initialShortcut());
     node_->declare_parameter("FollowPath.initial_goal_region_max_xy_error",.15);
     node_->declare_parameter("FollowPath.rpp.desired_linear_vel",.2);
     node_->declare_parameter("FollowPath.rpp.lookahead_dist",.75);
@@ -91,6 +95,10 @@ protected:
     nav_msgs::msg::Path p;p.header.frame_id="map";p.header.stamp=node_->now();
     p.poses={pose(start),pose(0.),pose(0.)};
     for (auto & x:p.poses) {x.header.stamp=p.header.stamp;}
+    return p;
+  }
+  nav_msgs::msg::Path turnPlan(double start) {
+    auto p=plan(start);p.poses.push_back(pose(0.,0.));p.poses.push_back(pose(0.,0.));
     return p;
   }
   geometry_msgs::msg::PoseStamped input(double x,double speed=0.) {
@@ -161,5 +169,97 @@ TEST_F(PluginReentry, OrdinaryRepairRetainsFilledCommandCollisionChecking) {
       message.find("Filled")!=std::string::npos)<<message;
   }
   EXPECT_FALSE(reached(.167));
+}
+
+class CenteredEntry : public PluginReentry {
+protected:
+  double entryRadius() const override {return .05;}
+};
+// Keep the old .15 handler here to make the old-DSO negative control prove
+// premature admission, rather than merely failing its old parameter coupling.
+class CenteredLegacyHandoff : public PluginReentry {
+protected:
+  double entryRadius() const override {return .05;}
+};
+class CenteredNoShortcut : public CenteredLegacyHandoff {
+protected:
+  bool initialShortcut() const override {return false;}
+};
+class LegacyNoShortcut : public PluginReentry {
+protected:
+  bool initialShortcut() const override {return false;}
+};
+
+TEST_F(LegacyNoShortcut, ZeroEntryOptionRetainsQuantizedOriginalHandoff) {
+  publisher_->on_activate();auto p=plan(.3);
+  p.poses[1].pose.position.x=-.008;p.poses.back().pose.position.x=-.004;
+  controller_->setPlan(p);checker_->reset();
+  auto cmd=command(.140); // Original error .144; endpoint distance .148.
+  EXPECT_DOUBLE_EQ(cmd.twist.linear.x,0.);EXPECT_DOUBLE_EQ(cmd.twist.angular.z,0.);
+}
+
+TEST_F(CenteredLegacyHandoff, EdgeOfOriginalGoalFollowsPathBeforeInitialTurn) {
+  publisher_->on_activate();controller_->setPlan(turnPlan(.149));checker_->reset();
+  auto cmd=command(.149);
+  EXPECT_GT(cmd.twist.linear.x,0.);EXPECT_DOUBLE_EQ(cmd.twist.linear.y,0.);
+  EXPECT_NEAR(cmd.twist.angular.z,0.,1e-8);
+}
+
+TEST_F(CenteredNoShortcut, OrdinaryTerminalHandoffDoesNotStopAtOriginalDiscEdge) {
+  publisher_->on_activate();controller_->setPlan(plan(.3));checker_->reset();
+  auto cmd=command(.128);
+  EXPECT_GT(cmd.twist.linear.x,0.);EXPECT_DOUBLE_EQ(cmd.twist.linear.y,0.);
+  EXPECT_NEAR(cmd.twist.angular.z,0.,1e-8);EXPECT_FALSE(reached(.128));
+}
+
+TEST_F(CenteredEntry, FinalRunApproachesCenterWithOriginalHandlerRadius) {
+  publisher_->on_activate();controller_->setPlan(turnPlan(.128));checker_->reset();
+  auto cmd=command(.128);
+  EXPECT_GT(cmd.twist.linear.x,0.);EXPECT_NEAR(cmd.twist.angular.z,0.,1e-8);
+}
+
+TEST_F(CenteredEntry, SamePlanApproachCanHandoffToCheckedTerminalTurn) {
+  publisher_->on_activate();controller_->setPlan(turnPlan(.128));checker_->reset();
+  auto approach=command(.128);ASSERT_GT(approach.twist.linear.x,0.);
+  // The initial shortcut opportunity was consumed above. No setPlan/reset is
+  // allowed between the approach and this ordinary ordered terminal handoff.
+  auto turn=command(.02);
+  EXPECT_DOUBLE_EQ(turn.twist.linear.x,0.);EXPECT_GT(std::abs(turn.twist.angular.z),0.);
+}
+
+TEST_F(CenteredEntry, QuantizedTerminalConstraintApproachesOriginalCenter) {
+  publisher_->on_activate();auto p=turnPlan(.128);
+  for (std::size_t i=1;i+1<p.poses.size();++i) {p.poses[i].pose.position.x=.004;}
+  controller_->setPlan(p);checker_->reset();
+  auto cmd=command(.052); // .048 from the cell endpoint, .052 from the original goal.
+  RecordProperty("command_vx",std::to_string(cmd.twist.linear.x));
+  RecordProperty("command_wz",std::to_string(cmd.twist.angular.z));
+  EXPECT_GT(cmd.twist.linear.x,0.);EXPECT_NEAR(cmd.twist.angular.z,0.,1e-8);
+}
+
+TEST_F(CenteredEntry, InsideCenterRetainsCheckedPureTurnAndOriginalOuterGuard) {
+  publisher_->on_activate();controller_->setPlan(turnPlan(.02));checker_->reset();
+  auto cmd=command(.02);
+  EXPECT_DOUBLE_EQ(cmd.twist.linear.x,0.);EXPECT_GT(std::abs(cmd.twist.angular.z),0.);
+  // Entry radius does not shrink the original execution/acceptance region.
+  EXPECT_NO_THROW(command(.12));
+  EXPECT_THROW(command(.23),nav2_core::NoValidControl);
+}
+
+TEST_F(CenteredEntry, FinalStoppedAcceptanceKeepsOriginalGoalTolerance) {
+  publisher_->on_activate();controller_->setPlan(plan(.02));checker_->reset();
+  auto cmd=command(.02);EXPECT_DOUBLE_EQ(cmd.twist.linear.x,0.);
+  EXPECT_FALSE(reached(.12));
+  bool final=false;
+  for (int i=0;i<12&&!final;++i) {command(.12);final=reached(.12);std::this_thread::sleep_for(50ms);}
+  EXPECT_TRUE(final);
+}
+
+TEST_F(CenteredEntry, CenteringStillRejectsFilledCommandCollision) {
+  publisher_->on_activate();controller_->setPlan(plan(.128));checker_->reset();
+  auto clear=command(.128);ASSERT_GT(clear.twist.linear.x,0.);
+  unsigned int mx,my;ASSERT_TRUE(map_->getCostmap()->worldToMap(-.69,0.,mx,my));
+  map_->getCostmap()->setCost(mx,my,nav2_costmap_2d::LETHAL_OBSTACLE);
+  EXPECT_THROW(command(.128),nav2_core::NoValidControl);EXPECT_FALSE(reached(.128));
 }
 }  // namespace

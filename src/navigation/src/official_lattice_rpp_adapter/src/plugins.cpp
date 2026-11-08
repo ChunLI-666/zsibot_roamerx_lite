@@ -233,6 +233,11 @@ public:
     require(std::isfinite(remaining_length_)&&remaining_length_>0.&&remaining_length_<=0.2,
       "invalid remaining path completion tolerance");
     terminal_binding_=parameter(node,name+".terminal_goal_binding",false);
+    terminal_entry_xy_=parameter(node,name+".terminal_rotation_entry_xy_tolerance",0.);
+    require(std::isfinite(terminal_entry_xy_)&&terminal_entry_xy_>=0.&&terminal_entry_xy_<=.25,
+      "invalid terminal rotation entry XY tolerance");
+    require(terminal_entry_xy_==0.||terminal_binding_,
+      "terminal rotation entry tolerance requires original-goal binding");
     terminal_drift_.configure(parameter(node,name+".terminal_track_xy_drift_limit",0.));
     require(!terminal_drift_.enabled()||terminal_binding_,
       "terminal Track drift requires explicit original-goal binding");
@@ -338,12 +343,17 @@ public:
     if (!has_plan_) {throw nav2_core::InvalidPath("No active feasible plan");}
     geometry_msgs::msg::Pose tolerance;geometry_msgs::msg::Twist velocity_tolerance;
     require(checker && checker->getTolerances(tolerance,velocity_tolerance),"goal tolerance unavailable");
-    require(tolerance.position.x>0. && tolerance.position.x<=xy_,"RPP goal XY exceeds path handoff XY");
+    // Entry precision is a control condition; the original goal checker and
+    // stopped acceptance keep their independent, unchanged geometry.
+    const double entry_xy=terminal_entry_xy_>0.?terminal_entry_xy_:tolerance.position.x;
+    require(tolerance.position.x>0.&&tolerance.position.x<=xy_,"RPP goal XY exceeds path handoff XY");
     require(tolerance.position.x<=remaining_length_,"completion path length is smaller than RPP XY threshold");
+    require(entry_xy>0.&&entry_xy<=tolerance.position.x,"rotation entry XY exceeds original goal XY");
     const double yaw_tolerance=std::abs(yaw(tolerance));
     if (terminal_binding_) {
       require(binding_&&std::isfinite(yaw_tolerance)&&yaw_tolerance>0.,"missing terminal binding/yaw tolerance");
       require(binding_->error<tolerance.position.x,"original XY tolerance does not contain goal-cell endpoint");
+      require(binding_->error<entry_xy,"rotation entry XY does not contain goal-cell endpoint");
     }
     require(pose.header.frame_id==map_->getGlobalFrameID()&&finite(pose.pose),"pose must be in costmap frame");
     require(std::isfinite(velocity.linear.x)&&std::isfinite(velocity.linear.y)&&
@@ -383,7 +393,7 @@ public:
     };
     if (terminal_cancelled_) {return zero_command(false);}
     nav_msgs::msg::Path segment;
-    bool in_original_region=false;
+    bool in_original_region=false,in_entry_region=false;
     geometry_msgs::msg::PoseStamped path_pose=pose;
     if (terminal_binding_) {
       if (!nav2_util::transformPoseInTargetFrame(pose,path_pose,*tf_,path_frame_,map_->getTransformTolerance())) {
@@ -391,6 +401,8 @@ public:
       }
       in_original_region=std::hypot(path_pose.pose.position.x-binding_->original_goal.pose.position.x,
         path_pose.pose.position.y-binding_->original_goal.pose.position.y)<=tolerance.position.x;
+      in_entry_region=std::hypot(path_pose.pose.position.x-binding_->original_goal.pose.position.x,
+        path_pose.pose.position.y-binding_->original_goal.pose.position.y)<=entry_xy;
       if (terminal_armed_&&!in_original_region&&!terminal_drift_active_) {
         throw nav2_core::NoValidControl("Actual body left original goal region during terminal rotation");
       }
@@ -418,7 +430,7 @@ public:
     // body origin in the local map, then retained in the path frame.
     if (initial_goal_rotation_pending_) {
       initial_goal_rotation_pending_=false;
-      if (terminal_binding_&&!terminal_cancelled_&&in_original_region&&
+      if (terminal_binding_&&!terminal_cancelled_&&in_entry_region&&
         !terminal_drift_.reentryRequired()) {
         auto local_goal=pose.pose;
         const double frame_yaw=yaw(pose.pose)-yaw(path_pose.pose);
@@ -430,7 +442,7 @@ public:
         local_goal.orientation.x=local_goal.orientation.y=0.;
         local_goal.orientation.z=std::sin(target/2.);local_goal.orientation.w=std::cos(target/2.);
         auto headings=goal_region::initialGoalRotation(*map,fp,pose.pose,local_goal,
-          tolerance.position.x,initial_goal_max_xy_error_);
+          entry_xy,std::min(entry_xy,initial_goal_max_xy_error_));
         if (headings) {
           // The extended Track envelope is only for an initially stopped,
           // already-near-goal rotation. Normal arrival braking is unchanged.
@@ -462,8 +474,9 @@ public:
           }
         }
       }
-      if (terminal_binding_&&in_original_region&&!terminal_drift_.reentryRequired()&&
-        handler_->terminalHandoffReady(binding_->suffix_begin,tolerance.position.x)) {
+      if (terminal_binding_&&in_entry_region&&!terminal_drift_.reentryRequired()&&
+        handler_->terminalHandoffReady(binding_->suffix_begin,
+          terminal_entry_xy_>0.?entry_xy-binding_->error:tolerance.position.x)) {
         terminal_drift_active_=false;
         terminal_armed_=true;terminal_headings_.reset(binding_->terminal_headings);
       }
@@ -539,9 +552,11 @@ public:
     }
     segment_pub_->publish(segment);
     rpp_.setObservedPlan(segment); // Reset is harmless only with enforced stateful=false.
+    // A terminal rotation run belongs to the final prefix. Narrow only its
+    // endpoint trigger; nonterminal anchors retain their existing tolerances.
     const double trigger=terminal_binding_&&!terminal_armed_&&handler_->finalPrefixActive()?
-      tolerance.position.x-binding_->error-64.*std::numeric_limits<double>::epsilon()*
-      std::max(1.,tolerance.position.x):tolerance.position.x;
+      entry_xy-binding_->error-64.*std::numeric_limits<double>::epsilon()*
+      std::max(1.,entry_xy):tolerance.position.x;
     require(trigger>0.,"nonpositive original-goal triangle trigger");
     RPPTriggerTolerance proxy(checker,trigger);
     auto cmd=rpp_.computeVelocityCommands(pose,velocity,&proxy);
@@ -586,6 +601,7 @@ private:
   bool terminal_binding_=false,terminal_armed_=false,terminal_cancelled_=false;
   bool initial_goal_region_shortcut_=false,initial_goal_rotation_pending_=false;
   double initial_goal_max_xy_error_=.25;
+  double terminal_entry_xy_=0.; // Zero retains the existing goal-radius behavior.
   double terminal_resolution_=0.01,terminal_extent_=20.;
   std::shared_ptr<const goal_region::Binding> binding_;
   goal_region::HeadingCursor terminal_headings_,terminal_correction_headings_;

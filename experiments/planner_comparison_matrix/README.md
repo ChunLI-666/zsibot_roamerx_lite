@@ -440,3 +440,27 @@ inputs exercise recovery, collision rejection, no premature completion and final
 stop dwell. They do not reproduce B30's exact controller request or certify a
 simulation route or physical robot. Tests use the official Jazzy library path to
 avoid mixing the fork costmap ABI from an inherited workspace environment.
+## B19: approach the goal center before terminal rotation
+
+B33's last target began its two terminal rotations at .12825 m and .14915 m
+from the original goal. The latter left less than 1 mm radial headroom inside
+the .15 m goal region before the simulator's observed body motion during turns.
+The official Matrix candidate now requires .05 m position error before an
+initial goal-region rotation or an ordered terminal handoff. RPP's final-prefix
+endpoint trigger subtracts the retained goal-cell error from this inner radius,
+so ordinary approach can continue until the original goal center is close.
+
+`terminal_rotation_entry_xy_tolerance` is an explicit controller opt-in; zero
+keeps the previous behavior. The original .15 m/.08 rad final goal checker,
+continuous .3 second measured stop, terminal execution envelope and filled body
+checks retain their original meanings. Nonterminal handler anchors, completion
+length and RPP endpoint tolerances keep the B33 settings. The existing handler
+recognizes an ending rotation run as the final prefix, so no new cursor or
+handler state is added.
+
+Public plugin tests distinguish the old installed DSO's early turn/zero command
+from an ordinary approach, exercise approach-to-turn within the same plan,
+retain original-region stopped acceptance, and reject a filled collision.
+Separate nonzero goal-cell fixtures cover the new final trigger and the default
+zero option's previous handoff behavior. These software checks do not establish
+full-route simulation or physical acceptance.
