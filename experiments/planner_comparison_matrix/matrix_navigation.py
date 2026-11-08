@@ -486,17 +486,20 @@ def prepare(args):
             manifest['control_only']='Hybrid is auxiliary control; primary comparison is segmented versus official Lattice.'
         else:
             planner['lattice_filepath']=str(selected_install/'share/official_lattice_rpp_adapter/params/stop_turn_1cm_h16_small_radius.json')
-            planner.update(terminal_goal_binding=True,terminal_global_resolution=.01)
-            controller['FollowPath'].update(terminal_goal_binding=True,terminal_global_resolution=.01,terminal_global_extent=20.,initial_goal_region_shortcut=True,initial_goal_region_max_xy_error=.05,terminal_track_xy_drift_limit=.05)
+            planner.update(terminal_goal_binding=True,terminal_global_resolution=.01,cost_penalty=1.)
+            controller['FollowPath'].update(terminal_goal_binding=True,terminal_global_resolution=.01,terminal_global_extent=20.,initial_goal_region_shortcut=True,initial_goal_region_max_xy_error=.10,terminal_track_xy_drift_limit=.05)
             controller['FollowPath']['rpp'].update(lookahead_dist=.75,min_lookahead_dist=.75,max_lookahead_dist=.75,use_velocity_scaled_lookahead_dist=False,rotate_to_heading_angular_vel=.3)
             controller['FollowPath']['max_command_angular_velocity']=.3
             manifest['experimental_rpp_profile']=dict(fixed_lookahead_m=.75,rotate_angular_velocity=.3,pre_sweep_angular_limit=.3)
             manifest['terminal_track_execution_envelope']=dict(enabled=True,pivot_displacement_limit_m=.05,baseline_original_region_preserved=True,
-                original_goal_outer_m=args.xy_tolerance+.05,original_mandatory_track_only=True,admission_scope='initial_goal_shortcut_after_measured_stop',initial_shortcut_max_xy_error_m=.05,
+                original_goal_outer_m=args.xy_tolerance+.05,original_mandatory_track_only=True,admission_scope='initial_goal_shortcut_after_measured_stop',initial_shortcut_max_xy_error_m=.10,
                 final_goal_tolerances_unchanged=True,continuous_collision_tube_certified=False,
                 same_goal_replan='checked zero then original-region .3s measured stop before new admission')
             manifest['terminal_goal_binding']=dict(enabled=True,global_resolution=.01,global_extent=20.,
                 semantics='Original path.back goal is retained for server acceptance; RPP executes checked prefix and ordered actual-origin terminal headings, never an artificial quantization tail.')
+            manifest['experimental_planner_profile']=dict(cost_penalty=1.,max_planning_time_sec=2.,
+                filled_output_validation_unchanged=True,
+                evidence='B28 exact locked-grid F016: weight .2 returned an unsafe rotation; weight 1 passed the same filled checks. Offline evidence is not full-route acceptance.')
     # Freeze the actual primitive input instead of depending on subsequent canonical branch switches.
     if 'lattice_filepath' in planner:
         source=pathlib.Path(planner['lattice_filepath']);shutil.copy2(source,out/'lattice.json')

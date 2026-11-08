@@ -377,3 +377,30 @@ B27 录包在拒绝前已收到约 102 ms 时间龄的连续 Native TF，但 lau
 自身缓存超限。这个候选减少监听旧队列，并逐次记录 callback/DDS 时间、原 TF
 stamp 与 lookup 实际结果，供区分接收和消费延迟。Native TF 发布、控制器、
 原 300 ms 判断和导航取消条件均保持，首次错误不会被延后或改判为健康。
+
+### B28 frozen-input profile correction (2026-11-09)
+
+The current official Matrix candidate uses `GridBased.cost_penalty: 1.0` and
+`FollowPath.initial_goal_region_max_xy_error: 0.10`. Segmented and Hybrid
+profiles retain their existing values. These are configuration changes; the
+B13 C++ build and its complete filled-body, path and command checks are retained.
+
+B28's F016 search returned 9,319 poses in 33 ms, but the filled output check
+rejected its rotation near (-11.875, 12.953). Replaying the exact locked grid,
+request and primitives reproduced 97 blocked poses and 98 blocked intervals.
+Weight 0.5 still failed; weight 1.0 passed in 142 ms and also passed the older
+B7 frozen fixture with the current omni heuristic in 219 ms. The 2 s planning
+budget, original map, footprint, padding and collision rejection stay fixed.
+The fixture and measured outputs are in `native_B28_exact_planner_replay_root_v1`
+under the comparison analysis directory. These offline checks do not establish
+full-route timing or navigation acceptance.
+
+B28 also reached F010 with 7.68 cm XY error, inside the original 15 cm goal
+region but outside the prior 5 cm shortcut admission. F011 then followed an
+ordered path that turned left about 245 degrees instead of a short right turn.
+The new 10 cm admission permits the existing checked, initially stopped
+actual-origin rotation in that case. It leaves 5 cm to the original goal disc
+at the standard 15 cm XY tolerance. This arithmetic margin is not a bound on
+actual drift: the original live execution guard and filled sweeps still apply,
+and final XY/yaw/stop tolerances remain unchanged. Signed turn direction and
+actual pivot displacement require new closed-loop evidence.
