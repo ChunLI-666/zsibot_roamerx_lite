@@ -67,6 +67,7 @@ void NodeBasic<NodeLattice>::populateSearchNode(NodeLattice * & node)
 {
   this->pose = node->pose;
   this->graph_node_ptr = node;
+  this->lattice_queued_g = node->getAccumulatedCost();
   this->prim_ptr = node->getMotionPrimitive();
   this->backward = node->isBackward();
 }

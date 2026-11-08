@@ -373,3 +373,22 @@ B27 录包在拒绝前已收到约 102 ms 时间龄的连续 Native TF，但 lau
 自身缓存超限。这个候选减少监听旧队列，并逐次记录 callback/DDS 时间、原 TF
 stamp 与 lookup 实际结果，供区分接收和消费延迟。Native TF 发布、控制器、
 原 300 ms 判断和导航取消条件均保持，首次错误不会被延后或改判为健康。
+
+### A11 accepted queue-state consistency (2026-11-09)
+
+A7's raw search path contained a 2.236 cm backwards moving turn. A synthetic
+all-free near-goal replay reproduced the same failure with the A8 binary. Two
+accepted entries for one Lattice node had identical float `f` priorities but
+different `g` values (11.1425276 versus 11.1425266). Restoring the older queued
+pose and primitive left the newer graph parent in place, producing that invalid
+edge. Independent instrumented replay recorded the exact mismatched chain.
+
+The private segmented search now snapshots the accepted Lattice `g` and discards
+an entry whose exact value has changed before restoring its pose or primitive.
+The start cost is initialized before enqueueing, so the start is not mistaken
+for a stale entry. This is a queue-state version check, with no numeric tolerance
+change. Other node types keep their queue behavior. The full near-goal planner
+regression retains the original goal binding and 2 s planning limit; collision,
+signed segment execution, sensor freshness and stopped-goal checks remain.
+This fixes the reproduced search-path defect; complete simulation navigation
+still requires new recordings. Installed official B libraries are unchanged.

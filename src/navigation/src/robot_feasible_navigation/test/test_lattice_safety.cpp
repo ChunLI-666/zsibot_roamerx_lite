@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 #include "nav2_core/planner_exceptions.hpp"
 #include "robot_feasible_navigation/safe_lattice_planner.hpp"
+#include "robot_feasible_navigation/goal_cell_binding.hpp"
 
 using robot_feasible_navigation::SafeLatticePlanner;
 namespace sweep = robot_feasible_navigation::sweep;
@@ -315,4 +316,54 @@ TEST(LatticeSafety, RestoreWholeEndpointRotationClustersWithoutInventingMovingTu
   auto wrong = searched;
   wrong.poses.front().pose.position.x += .003;
   EXPECT_THROW(SafeLatticePlanner::restoreSearchRoundoff(wrong, start, goal, map), std::runtime_error);
+}
+
+TEST(LatticeSafety, NearGoalFloatPriorityTieKeepsAcceptedParentAndPrimitiveTogether)
+{
+  if (!rclcpp::ok()) {rclcpp::init(0, nullptr);}
+  const auto file = std::filesystem::path(__FILE__).parent_path().parent_path() /
+    "params/stop_turn_1cm_h16.json";
+  rclcpp::NodeOptions options;
+  options.parameter_overrides({
+      rclcpp::Parameter("GridBased.lattice_filepath", file.string()),
+      rclcpp::Parameter("GridBased.smooth_path", false),
+      rclcpp::Parameter("GridBased.allow_unknown", false),
+      rclcpp::Parameter("GridBased.allow_reverse_expansion", false),
+      rclcpp::Parameter("GridBased.analytic_expansion_max_length", 0.0),
+      rclcpp::Parameter("GridBased.rotation_penalty", 1.0),
+      rclcpp::Parameter("GridBased.cost_penalty", 0.0),
+      rclcpp::Parameter("GridBased.lookup_table_size", 1.0),
+      rclcpp::Parameter("GridBased.max_planning_time", 2.0),
+      rclcpp::Parameter("GridBased.max_iterations", 1000000),
+      rclcpp::Parameter("GridBased.terminal_goal_binding", true),
+      rclcpp::Parameter("GridBased.terminal_global_resolution", .01)});
+  auto parent = std::make_shared<rclcpp_lifecycle::LifecycleNode>("near_goal_parent", options);
+  auto costmap = std::make_shared<nav2_costmap_2d::Costmap2DROS>("near_goal_map");
+  ASSERT_TRUE(costmap->set_parameter(rclcpp::Parameter("plugins", std::vector<std::string>{})).successful);
+  ASSERT_TRUE(costmap->set_parameter(rclcpp::Parameter("resolution", .01)).successful);
+  ASSERT_TRUE(costmap->set_parameter(rclcpp::Parameter("width", 20)).successful);
+  ASSERT_TRUE(costmap->set_parameter(rclcpp::Parameter("height", 20)).successful);
+  ASSERT_TRUE(costmap->set_parameter(rclcpp::Parameter("footprint",
+    "[[-0.647,-0.530],[0.647,-0.530],[0.647,0.530],[-0.647,0.530]]")).successful);
+  ASSERT_TRUE(costmap->set_parameter(rclcpp::Parameter("footprint_padding", .15)).successful);
+  ASSERT_EQ(costmap->on_configure(rclcpp_lifecycle::State()), nav2_util::CallbackReturn::SUCCESS);
+  costmap->getLayeredCostmap()->resizeMap(2000, 2000, .01, -6.28, -5.53, true);
+  auto * grid = costmap->getCostmap();
+  std::fill(grid->getCharMap(), grid->getCharMap() + 4000000, 0);
+  SafeLatticePlanner planner;
+  planner.configure(parent, "GridBased", nullptr, costmap);
+  // Derived from A7's raw start on an all-free synthetic map. The old binary
+  // produced a backwards moving turn here: two accepted g values differ by
+  // one float ULP but have the same f priority. This is not a spatial epsilon.
+  const auto start = pose(3.7146067237854012, 4.473530673980713, .0245255);
+  const auto goal = pose(3.724999519389449, 4.4150007919562455, 0.);
+  nav_msgs::msg::Path path;
+  EXPECT_NO_THROW(path = planner.createPlan(start, goal, [] {return false;}));
+  EXPECT_GT(path.poses.size(), 2u);
+  if (!path.poses.empty()) {
+    EXPECT_EQ(path.poses.back().pose, goal.pose);
+    EXPECT_NO_THROW(robot_feasible_navigation::goal_region::splitBinding(path, .01, 20.));
+  }
+  planner.cleanup();
+  costmap->on_cleanup(rclcpp_lifecycle::State());
 }

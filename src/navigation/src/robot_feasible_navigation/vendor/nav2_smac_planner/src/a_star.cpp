@@ -274,8 +274,8 @@ bool AStarAlgorithm<NodeT>::createPath(
   }
 
   // 0) Add starting point to the open set
-  addNode(0.0, getStart());
   getStart()->setAccumulatedCost(0.0);
+  addNode(0.0, getStart());
 
   // Optimization: preallocate all variables
   NodePtr current_node = nullptr;
@@ -318,6 +318,7 @@ bool AStarAlgorithm<NodeT>::createPath(
 
     // 1) Pick Nbest from O s.t. min(f(Nbest)), remove from queue
     current_node = getNextNode();
+    if (!current_node) {continue;}  // A stale Lattice snapshot was discarded before restoration.
 
     // Save current node coordinates for debug
     if (expansions_log) {
@@ -409,6 +410,14 @@ typename AStarAlgorithm<NodeT>::NodePtr AStarAlgorithm<NodeT>::getNextNode()
 {
   NodeBasic<NodeT> node = _queue.top().second;
   _queue.pop();
+  if constexpr (std::is_same_v<NodeT, NodeLattice>) {
+    // Equal float f-priorities can pop an older accepted entry first. Its
+    // pose/primitive belongs to its old g, while the graph parent already
+    // belongs to a better g. Never combine those two different transitions.
+    if (node.lattice_queued_g != node.graph_node_ptr->getAccumulatedCost()) {
+      return nullptr;
+    }
+  }
   node.processSearchNode();
   return node.graph_node_ptr;
 }

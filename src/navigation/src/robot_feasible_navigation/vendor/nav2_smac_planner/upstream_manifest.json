@@ -66,7 +66,7 @@
       "upstream_git_blob_sha1": "dfb26c5ddaf7d188189c6eb04d42377f6ee57653",
       "directory_listing_git_blob_sha1": "dfb26c5ddaf7d188189c6eb04d42377f6ee57653",
       "namespace_only_sha256": "f3a1ef5357ff34889d89f9d871d115a588c7656903e3b12ef5f1dc74acb7460d",
-      "vendored_sha256": "f3a1ef5357ff34889d89f9d871d115a588c7656903e3b12ef5f1dc74acb7460d"
+      "vendored_sha256": "31d88b6f48ada8ec973d4adf9c942c0dc473a2441cff95e0a1d9a0d18a9eee5c"
     },
     {
       "path": "include/nav2_smac_planner/node_hybrid.hpp",
@@ -147,7 +147,7 @@
       "upstream_git_blob_sha1": "112fcfedb5f21f291886dc74cbf3ce234598e406",
       "directory_listing_git_blob_sha1": null,
       "namespace_only_sha256": "c8058d727fb9462bc632d74515f08791a0795fc5127b8beee9cc45ce5e60579e",
-      "vendored_sha256": "33f6ec081117ae7367c68b902975e481b9ab87e4d9e9f249454a0feed0aebde9"
+      "vendored_sha256": "92130233668d0619f3e791807f68395d778807572e4fc20f29d52a971997d06c"
     },
     {
       "path": "src/a_star.cpp",
@@ -156,7 +156,7 @@
       "upstream_git_blob_sha1": "52b94db14afa6bb2f9019069e3c214096aaa1c42",
       "directory_listing_git_blob_sha1": null,
       "namespace_only_sha256": "ec656ad8b9835541dc161d5abc11ccfbe66f6510052a9d8e4f58a375b7dd34ef",
-      "vendored_sha256": "ec656ad8b9835541dc161d5abc11ccfbe66f6510052a9d8e4f58a375b7dd34ef"
+      "vendored_sha256": "428768bcb61ce33f80c4b0fc398190df3f362c0018ca3466c1ee9631fdf24a5a"
     },
     {
       "path": "src/collision_checker.cpp",
@@ -201,7 +201,7 @@
       "upstream_git_blob_sha1": "bece0f833d465654c7b9d2a08b3143e75832b15f",
       "directory_listing_git_blob_sha1": null,
       "namespace_only_sha256": "fbe3b95ff8d514d0fe382b6e4795ebbe9a46f1050d933e2b5c47da87d8201b75",
-      "vendored_sha256": "320108e802ae6d357e30a2be0ddf1e6d4f2e8b8ec6b47cb18b06caa1a8b671c1"
+      "vendored_sha256": "6173807ca17a68ce3ba0451f21d577d9d1622a94a0014331de44ac0650bdd873"
     },
     {
       "path": "src/costmap_downsampler.cpp",
@@ -228,7 +228,7 @@
       "upstream_git_blob_sha1": "616154e096fcd54e725d5fae67a62d75059c197f",
       "directory_listing_git_blob_sha1": null,
       "namespace_only_sha256": "f7962fda1cc13eaae354c2b925252a9f2aa2b98c1781bcf372f19c55068b29c9",
-      "vendored_sha256": "f7962fda1cc13eaae354c2b925252a9f2aa2b98c1781bcf372f19c55068b29c9"
+      "vendored_sha256": "b984139435b75b55d22e7ef9490444eb62bc590eb7bfa2dee9b70b9d8446b752"
     },
     {
       "path": "include/nav2_smac_planner/thirdparty/robin_hood.h",
@@ -289,6 +289,15 @@
         "src/node_lattice.cpp"
       ],
       "reason": "Only after verifying monotonic sameXY shortest rotation or constant-heading monotonic collinear translation, one full shared corner-displacement sweep covers the exact edge continuously. Generic paths retain per-subsegment sweeps. Original primitive bytes and center-cost maximum retained."
+    },
+    {
+      "id": "lattice-accepted-queue-version",
+      "files": [
+        "include/nav2_smac_planner/node_basic.hpp",
+        "src/a_star.cpp",
+        "src/node_basic.cpp"
+      ],
+      "reason": "A7 near-goal replay showed equal float f priorities for distinct accepted g values. Snapshot exact Lattice g and skip stale entries before restoring pose/primitive, retaining the matching graph parent. Initialize start g before enqueue. Other node-type queues unchanged; collision and path checks retained."
     }
   ]
 }
