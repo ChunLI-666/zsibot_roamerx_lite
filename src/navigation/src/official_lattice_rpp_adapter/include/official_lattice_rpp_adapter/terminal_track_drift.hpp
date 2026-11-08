@@ -11,7 +11,7 @@ namespace official_lattice_rpp_adapter::goal_region {
 class TerminalTrackDriftGuard {
 public:
   struct Goal {double x=0.,y=0.,yaw=0.;std::string frame;};
-  enum class Reentry {Proceed,HoldZero,Reject};
+  enum class Reentry {Proceed,HoldZero,FollowPath,Reject};
   explicit TerminalTrackDriftGuard(double limit=0.) {configure(limit);}
   void configure(double limit) {
     if (!std::isfinite(limit)||limit<0.||limit>0.05) {
@@ -48,9 +48,14 @@ public:
   Reentry observeReentry(double x,double y,double tolerance,bool measured_stopped,
     std::int64_t odom_stamp,std::int64_t steady_ns) {
     if (!reentry_) {return Reentry::Proceed;}
-    if (!inside(x,y,tolerance)||tolerance!=admitted_tolerance_||
+    if (!coordinates(x,y,tolerance)||tolerance!=admitted_tolerance_||
       odom_stamp<=0||steady_ns<=0) {
       resetDwell();last_observation_=0;return Reentry::Reject;
+    }
+    if (!inside(x,y,tolerance)) {
+      // The old pivot grants no new terminal permission. A newly validated
+      // ordinary path may still bring the body back to the original region.
+      resetReentry();return Reentry::FollowPath;
     }
     if (!zero_) {return Reentry::HoldZero;}
     if (last_observation_>0&&(steady_ns<last_observation_||

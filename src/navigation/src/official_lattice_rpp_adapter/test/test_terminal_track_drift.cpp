@@ -64,7 +64,7 @@ TEST(TerminalTrackDrift, NonfiniteObservationCannotUseTrackPermission) {
 }
 TEST(TerminalTrackDrift, SameGoalReplanCannotReanchorOutsideOriginalRegion) {
   Guard g(.05);replan(g);EXPECT_FALSE(g.admit(2,.17,0.,.15));
-  EXPECT_EQ(observe(g,0,true,.17),Reentry::Reject);
+  EXPECT_EQ(observe(g,0,true,.17),Reentry::FollowPath);
   EXPECT_EQ(g.observeReentry(.17,0.,.20,true,1000000000,2000000000),Reentry::Reject);
   EXPECT_TRUE(g.reentryRequired());
   g.setPlan(goal(),3);EXPECT_TRUE(g.reentryRequired());
@@ -121,11 +121,33 @@ TEST(TerminalTrackDrift, ReentryRegionExcursionBreaksContinuousStoppedDwell) {
   EXPECT_EQ(observe(g,0),Reentry::HoldZero);
   EXPECT_EQ(observe(g,50),Reentry::HoldZero);
   EXPECT_EQ(observe(g,200),Reentry::HoldZero);
-  EXPECT_EQ(observe(g,250,true,.16),Reentry::Reject);
+  EXPECT_EQ(observe(g,250,true,.16),Reentry::FollowPath);
   EXPECT_EQ(observe(g,350),Reentry::HoldZero);
-  EXPECT_EQ(observe(g,500),Reentry::HoldZero);
-  EXPECT_EQ(observe(g,649),Reentry::HoldZero);
-  EXPECT_EQ(observe(g,650),Reentry::Proceed);
+  EXPECT_EQ(observe(g,400),Reentry::HoldZero);
+  EXPECT_EQ(observe(g,699),Reentry::HoldZero);
+  EXPECT_EQ(observe(g,700),Reentry::Proceed);
+}
+
+TEST(TerminalTrackDrift, OutsideRepairRetainsObligationAndCannotRenewThePivot) {
+  Guard g(.05);replan(g);
+  EXPECT_EQ(observe(g,0,true,.167),Reentry::FollowPath);
+  EXPECT_TRUE(g.reentryRequired());
+  EXPECT_FALSE(g.admit(2,.14,0.,.15));
+  EXPECT_FALSE(g.permits(2,.167,0.,.15,true,false));
+  EXPECT_EQ(observe(g,50,false,.149),Reentry::HoldZero);
+  EXPECT_EQ(observe(g,100),Reentry::HoldZero);
+  EXPECT_EQ(observe(g,399),Reentry::HoldZero);
+  EXPECT_EQ(observe(g,400),Reentry::Proceed);
+  EXPECT_TRUE(g.admit(2,.14,0.,.15));
+}
+
+TEST(TerminalTrackDrift, InvalidContextNeverGrantsOrdinaryRepairPermission) {
+  Guard g(.05);replan(g);
+  EXPECT_EQ(g.observeReentry(.167,0.,.20,true,1000000000,2000000000),Reentry::Reject);
+  EXPECT_EQ(g.observeReentry(.167,0.,.15,true,0,2000000000),Reentry::Reject);
+  EXPECT_EQ(g.observeReentry(.167,0.,.15,true,1000000000,0),Reentry::Reject);
+  EXPECT_EQ(observe(g,0,true,std::numeric_limits<double>::quiet_NaN()),Reentry::Reject);
+  EXPECT_TRUE(g.reentryRequired());
 }
 
 TEST(TerminalTrackDrift, CenteredTurnsPreserveOriginalDiscWithoutGrantingOutsideCompletion) {

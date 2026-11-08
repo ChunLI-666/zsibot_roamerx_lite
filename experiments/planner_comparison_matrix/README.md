@@ -422,3 +422,21 @@ existing outside-disc execution permission are unchanged. This does not prove
 a pivot-drift bound. In particular the older B25 start at about 0.128 m can be
 admitted again and can still fail its unchanged live execution guard. New signed
 motion, pivot displacement and complete-route results must be recorded.
+# B18: normal path recovery after terminal-region escape
+
+The optional official adapter distinguishes a valid observation outside the
+original goal disc from invalid reentry evidence. After a fresh compatible plan,
+the ordinary checked path may drive back toward the original goal. This does not
+renew terminal drift permission: initial shortcuts and terminal handoff remain
+disabled until a checked zero and the existing stopped .3 second dual-clock
+reentry dwell complete. An excursion clears the old checked-zero proof.
+
+An already active terminal rotation still fails when it loses its allowed
+execution region. Original goal tolerance, fixed-pivot rescue, TF/odometry guards,
+ordered constraints and filled body/path/command sweeps retain their thresholds.
+The actual-plugin regression loads the real adapter DSO through public Jazzy
+interfaces; the prior B13 DSO rejects its ordinary recovery command. Synthetic
+inputs exercise recovery, collision rejection, no premature completion and final
+stop dwell. They do not reproduce B30's exact controller request or certify a
+simulation route or physical robot. Tests use the official Jazzy library path to
+avoid mixing the fork costmap ABI from an inherited workspace environment.

@@ -401,7 +401,11 @@ public:
       const auto reentry=terminal_drift_.observeReentry(path_pose.pose.position.x,
         path_pose.pose.position.y,tolerance.position.x,measured_stopped,measured_odom_stamp,steady_ns);
       if (reentry==goal_region::TerminalTrackDriftGuard::Reentry::Reject) {
-        throw nav2_core::NoValidControl("Replanned terminal Track requires stopped reentry inside original goal region");
+        throw nav2_core::NoValidControl("Invalid observation for replanned terminal Track reentry");
+      }
+      if (reentry==goal_region::TerminalTrackDriftGuard::Reentry::FollowPath&&
+        (terminal_armed_||terminal_drift_active_)) {
+        throw nav2_core::NoValidControl("Terminal reentry requires a newly installed ordinary path");
       }
       if (reentry==goal_region::TerminalTrackDriftGuard::Reentry::HoldZero) {
         auto zero=zero_command(false); // Record permission only after the filled zero sweep succeeds.
@@ -414,7 +418,8 @@ public:
     // body origin in the local map, then retained in the path frame.
     if (initial_goal_rotation_pending_) {
       initial_goal_rotation_pending_=false;
-      if (terminal_binding_&&!terminal_cancelled_&&in_original_region) {
+      if (terminal_binding_&&!terminal_cancelled_&&in_original_region&&
+        !terminal_drift_.reentryRequired()) {
         auto local_goal=pose.pose;
         const double frame_yaw=yaw(pose.pose)-yaw(path_pose.pose);
         const double dx=binding_->original_goal.pose.position.x-path_pose.pose.position.x;
@@ -457,7 +462,7 @@ public:
           }
         }
       }
-      if (terminal_binding_&&in_original_region&&
+      if (terminal_binding_&&in_original_region&&!terminal_drift_.reentryRequired()&&
         handler_->terminalHandoffReady(binding_->suffix_begin,tolerance.position.x)) {
         terminal_drift_active_=false;
         terminal_armed_=true;terminal_headings_.reset(binding_->terminal_headings);
