@@ -19,7 +19,7 @@ class SimulationScanProfileTests(unittest.TestCase):
                        '/lightning/pose_valid':(.99,NS(data=True))})
         ns=dict(args=NS(odom_topic='odom',scan_topic='scan',camera_topic='camera',simulation_scan_max_age_sec=limit),
                 latest=latest,time=NS(monotonic=lambda:1.),node=NS(get_clock=lambda:NS(now=lambda:NS(nanoseconds=1_000_000_000))),
-                tf=NS(lookup_transform=lambda *args:stamp(tf_age)),Time=lambda:None)
+                tf=NS(lookup_transform=lambda *args:stamp(tf_age)),Time=lambda:None,health_tf_lookups={})
         exec(compile(ast.Module(body=[profile,health],type_ignores=[]),str(SOURCE),'exec'),ns)
         return ns
     def test_default_profile_and_invalid_limits(self):
