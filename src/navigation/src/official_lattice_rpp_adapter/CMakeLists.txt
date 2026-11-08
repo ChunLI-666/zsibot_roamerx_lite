@@ -22,6 +22,8 @@ install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../robot_feasible_navigation/vendor/na
   DESTINATION share/${PROJECT_NAME})
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_terminal_track_drift test/test_terminal_track_drift.cpp)
+  target_include_directories(test_terminal_track_drift PRIVATE include)
   ament_add_gtest(test_rotation_constraints test/test_rotation_constraints.cpp src/rotation_constraints.cpp)
   target_include_directories(test_rotation_constraints PRIVATE include)
   ament_target_dependencies(test_rotation_constraints nav_msgs angles tf2_geometry_msgs)

@@ -79,6 +79,8 @@ controller_server:
         max_robot_pose_search_dist: 3.0
         cost_scaling_dist: 0.3
         inflation_cost_scaling_factor: 3.0
+      # Default remains off; the official Matrix run explicitly opts in.
+      terminal_track_xy_drift_limit: 0.0
       odom_timeout: 0.3
       sweep_horizon: 1.0
       allow_static_path_transform: true

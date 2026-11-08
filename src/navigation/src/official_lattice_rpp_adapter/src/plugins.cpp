@@ -20,6 +20,7 @@
 #include "official_lattice_rpp_adapter/terminal_goal_binding.hpp"
 #include "official_lattice_rpp_adapter/initial_goal_rotation.hpp"
 #include "official_lattice_rpp_adapter/terminal_stop_hold.hpp"
+#include "official_lattice_rpp_adapter/terminal_track_drift.hpp"
 #include "official_lattice_rpp_adapter/planner_failure_snapshot.hpp"
 #include "robot_feasible_navigation/footprint_sweep.hpp"
 
@@ -229,6 +230,9 @@ public:
     require(std::isfinite(remaining_length_)&&remaining_length_>0.&&remaining_length_<=0.2,
       "invalid remaining path completion tolerance");
     terminal_binding_=parameter(node,name+".terminal_goal_binding",false);
+    terminal_drift_.configure(parameter(node,name+".terminal_track_xy_drift_limit",0.));
+    require(!terminal_drift_.enabled()||terminal_binding_,
+      "terminal Track drift requires explicit original-goal binding");
     initial_goal_region_shortcut_=parameter(node,name+".initial_goal_region_shortcut",false);
     require(!initial_goal_region_shortcut_||terminal_binding_,
       "initial goal-region shortcut requires explicit original Pose-goal binding");
@@ -258,13 +262,13 @@ public:
       });
     guard_=freeze(node,name);
   }
-  void cleanup() override {completion_->clearPlan();rpp_.cleanup();handler_.reset();segment_pub_.reset();guard_.reset();odom_sub_.reset();completion_.reset();}
+  void cleanup() override {completion_->clearPlan();terminal_drift_.clear();terminal_drift_active_=false;rpp_.cleanup();handler_.reset();segment_pub_.reset();guard_.reset();odom_sub_.reset();completion_.reset();}
   void activate() override {rpp_.activate();segment_pub_->on_activate();}
-  void deactivate() override {completion_->invalidate();terminal_stop_.reset();
+  void deactivate() override {completion_->invalidate();terminal_stop_.reset();terminal_drift_.invalidate();terminal_drift_active_=false;
     terminal_correction_active_=false;rpp_.deactivate();segment_pub_->on_deactivate();}
   void setPlan(const nav_msgs::msg::Path & path) override {
     const auto plan_generation=completion_->bindPlan();has_plan_=false;
-    terminal_armed_=terminal_cancelled_=false;binding_.reset();
+    terminal_armed_=terminal_cancelled_=terminal_drift_active_=false;binding_.reset();
     terminal_stop_.reset();terminal_correction_active_=false;terminal_correction_headings_.reset({});
     initial_goal_rotation_pending_=initial_goal_region_shortcut_;
     require(!path.poses.empty()&&!path.header.frame_id.empty(),"empty path/frame");
@@ -306,15 +310,17 @@ public:
       auto binding=goal_region::splitBinding(wire,terminal_resolution_,terminal_extent_);
       binding.generation=plan_generation;
       binding_=std::make_shared<const goal_region::Binding>(std::move(binding));
+      const auto & original=binding_->original_goal.pose;
+      terminal_drift_.setPlan({original.position.x,original.position.y,yaw(original),path_frame_},plan_generation);
     }
     // This is the only place that resets upstream constraint progression.
     handler_->setPlan(dense);rpp_.reset();has_plan_=true;
     if (binding_) {completion_->installBinding(binding_);}
   }
-  void reset() override {completion_->clearPlan();rpp_.reset();has_plan_=false;binding_.reset();
-    terminal_armed_=false;initial_goal_rotation_pending_=false;terminal_stop_.reset();
+  void reset() override {completion_->clearPlan();terminal_drift_.invalidate();rpp_.reset();has_plan_=false;binding_.reset();
+    terminal_armed_=false;terminal_drift_active_=false;initial_goal_rotation_pending_=false;terminal_stop_.reset();
     terminal_correction_active_=false;terminal_correction_headings_.reset({});}
-  bool cancel() override {completion_->invalidate();terminal_cancelled_=true;initial_goal_rotation_pending_=false;
+  bool cancel() override {completion_->invalidate();terminal_drift_.invalidate();terminal_cancelled_=true;terminal_drift_active_=false;initial_goal_rotation_pending_=false;
     terminal_stop_.reset();terminal_correction_active_=false;terminal_correction_headings_.reset({});return rpp_.cancel();}
   void setSpeedLimit(const double & limit,const bool & percentage) override {rpp_.setSpeedLimit(limit,percentage);}
   geometry_msgs::msg::TwistStamped computeVelocityCommands(const geometry_msgs::msg::PoseStamped & pose,
@@ -379,8 +385,21 @@ public:
       }
       in_original_region=std::hypot(path_pose.pose.position.x-binding_->original_goal.pose.position.x,
         path_pose.pose.position.y-binding_->original_goal.pose.position.y)<=tolerance.position.x;
-      if (terminal_armed_&&!in_original_region) {
+      if (terminal_armed_&&!in_original_region&&!terminal_drift_active_) {
         throw nav2_core::NoValidControl("Actual body left original goal region during terminal rotation");
+      }
+    }
+    if (terminal_binding_&&terminal_drift_.reentryRequired()) {
+      const auto steady_ns=std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+      const auto reentry=terminal_drift_.observeReentry(path_pose.pose.position.x,
+        path_pose.pose.position.y,tolerance.position.x,measured_stopped,measured_odom_stamp,steady_ns);
+      if (reentry==goal_region::TerminalTrackDriftGuard::Reentry::Reject) {
+        throw nav2_core::NoValidControl("Replanned terminal Track requires stopped reentry inside original goal region");
+      }
+      if (reentry==goal_region::TerminalTrackDriftGuard::Reentry::HoldZero) {
+        auto zero=zero_command(false); // Record permission only after the filled zero sweep succeeds.
+        terminal_drift_.checkedZero(measured_odom_stamp,steady_ns);return zero;
       }
     }
     // One initial Pose-goal opportunity, never a later proximity-based jump over
@@ -401,8 +420,15 @@ public:
         local_goal.orientation.z=std::sin(target/2.);local_goal.orientation.w=std::cos(target/2.);
         auto headings=goal_region::initialGoalRotation(*map,fp,pose.pose,local_goal,tolerance.position.x);
         if (headings) {
+          // The extended Track envelope is only for an initially stopped,
+          // already-near-goal rotation. Normal arrival braking is unchanged.
+          if (terminal_drift_.enabled()&&!measured_stopped) {
+            initial_goal_rotation_pending_=true;return zero_command(false);
+          }
           const double local_start=yaw(pose.pose),path_start=yaw(path_pose.pose);
           for (auto & heading:*headings) {heading=path_start+angle(local_start,heading);}
+          admitTerminalPivot(path_pose,tolerance.position.x);
+          terminal_drift_active_=terminal_drift_.enabled();
           terminal_headings_.reset(std::move(*headings));terminal_armed_=true;
           if (auto node=node_.lock()) {
             RCLCPP_INFO(node->get_logger(),"Initial Pose-goal region: checked shortest actual-origin rotation; ordered prefix not started");
@@ -426,12 +452,23 @@ public:
       }
       if (terminal_binding_&&in_original_region&&
         handler_->terminalHandoffReady(binding_->suffix_begin,tolerance.position.x)) {
+        terminal_drift_active_=false;
         terminal_armed_=true;terminal_headings_.reset(binding_->terminal_headings);
       }
     }
     if (terminal_armed_) {
       auto & headings=terminal_correction_active_?terminal_correction_headings_:terminal_headings_;
       headings.advance(yaw(path_pose.pose),yaw_tolerance);
+      // Evaluate AFTER current yaw advances the original cursor. No extra XY
+      // permission survives its final checkpoint, or applies to corrective yaw.
+      if (terminal_drift_active_&&!terminal_drift_.permits(binding_->generation,
+        path_pose.pose.position.x,path_pose.pose.position.y,tolerance.position.x,
+        !terminal_headings_.complete(),terminal_correction_active_)) {
+        if (!in_original_region&&(terminal_headings_.complete()||terminal_correction_active_)) {
+          throw nav2_core::NoValidControl("Actual body left original goal region during terminal rotation");
+        }
+        throw nav2_core::NoValidControl("Terminal Track exceeded fixed-pivot or original-goal execution envelope");
+      }
       segment=nav_msgs::msg::Path();
       segment.header=pose.header;segment.poses.push_back(pose);
       auto target=pose;
@@ -538,6 +575,8 @@ private:
   std::shared_ptr<const goal_region::Binding> binding_;
   goal_region::HeadingCursor terminal_headings_,terminal_correction_headings_;
   goal_region::TerminalStopHold terminal_stop_;
+  goal_region::TerminalTrackDriftGuard terminal_drift_;
+  bool terminal_drift_active_=false;
   bool terminal_correction_active_=false;
   bool allow_static_path_transform_=false;
   struct TransformHistory {
@@ -554,6 +593,19 @@ private:
   std::chrono::steady_clock::time_point odom_receipt_;
   rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Path>::SharedPtr segment_pub_;
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr guard_;
+  void admitTerminalPivot(const geometry_msgs::msg::PoseStamped & actual,double tolerance) {
+    if (!terminal_drift_.admit(binding_->generation,actual.pose.position.x,actual.pose.position.y,tolerance)) {
+      throw nav2_core::NoValidControl("Terminal Track pivot requires fresh original-region admission");
+    }
+    if (terminal_drift_.enabled()) {
+      if (auto node=node_.lock()) {
+        RCLCPP_INFO(node->get_logger(),
+          "Terminal Track actual pivot admitted: generation=%llu frame=%s x=%.9f y=%.9f limit=%.3f original_outer=%.3f",
+          static_cast<unsigned long long>(binding_->generation),path_frame_.c_str(),
+          actual.pose.position.x,actual.pose.position.y,terminal_drift_.limit(),tolerance+terminal_drift_.limit());
+      }
+    }
+  }
   void checkTransformFresh(const std::string & target,const std::string & source,bool allow_static) {
     try {
       const auto transform=tf_->lookupTransform(target,source,tf2::TimePointZero);
