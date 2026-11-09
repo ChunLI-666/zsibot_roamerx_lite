@@ -492,6 +492,7 @@ def prepare(args):
                 terminal_global_extent=20.,initial_goal_region_shortcut=True,
                 initial_goal_region_max_xy_error=entry_xy,terminal_track_xy_drift_limit=.05,
                 terminal_rotation_entry_xy_tolerance=entry_xy)
+            controller['FollowPath']['terminal_stop_before_rotation']=True
             controller['FollowPath']['rpp'].update(lookahead_dist=.75,min_lookahead_dist=.75,max_lookahead_dist=.75,use_velocity_scaled_lookahead_dist=False,rotate_to_heading_angular_vel=.3)
             controller['FollowPath']['max_command_angular_velocity']=.3
             manifest['experimental_rpp_profile']=dict(fixed_lookahead_m=.75,rotate_angular_velocity=.3,pre_sweep_angular_limit=.3)

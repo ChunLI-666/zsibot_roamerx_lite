@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Exercise the real plugin DSO through its public Jazzy interfaces. The input
-// poses are synthetic, not a replay of B30's unrecorded controller requests.
+// poses are synthetic except for the explicitly cached B34 geometry below.
+// All use current fixture clocks; none is raw DDS replay or freshness proof.
 #include <gtest/gtest.h>
 #include <class_loader/class_loader.hpp>
 #include <nav2_core/controller.hpp>
@@ -14,6 +15,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <thread>
+#include "fixtures/b34_terminal_approaches.hpp"
 
 using namespace std::chrono_literals;
 namespace {
@@ -28,6 +30,10 @@ protected:
   virtual double entryRadius() const {return 0.;}
   virtual double handoffRadius() const {return .15;}
   virtual bool initialShortcut() const {return true;}
+  virtual bool stoppedEntry() const {return false;}
+  virtual double driftLimit() const {return .05;}
+  virtual double mapOrigin() const {return -3.;}
+  virtual void configureExtra() {}
   static void SetUpTestSuite() {
     const char * domain=std::getenv("ROS_DOMAIN_ID");
     if (!domain||std::string(domain)!="190") {
@@ -48,18 +54,20 @@ protected:
     node_->declare_parameter("FollowPath.completion_path_length",handoffRadius());
     node_->declare_parameter("FollowPath.terminal_rotation_entry_xy_tolerance",entryRadius());
     node_->declare_parameter("FollowPath.terminal_goal_binding",true);
-    node_->declare_parameter("FollowPath.terminal_track_xy_drift_limit",.05);
+    node_->declare_parameter("FollowPath.terminal_track_xy_drift_limit",driftLimit());
+    node_->declare_parameter("FollowPath.terminal_stop_before_rotation",stoppedEntry());
     node_->declare_parameter("FollowPath.initial_goal_region_shortcut",initialShortcut());
     node_->declare_parameter("FollowPath.initial_goal_region_max_xy_error",.15);
     node_->declare_parameter("FollowPath.rpp.desired_linear_vel",.2);
     node_->declare_parameter("FollowPath.rpp.lookahead_dist",.75);
+    configureExtra();
     map_=std::make_shared<nav2_costmap_2d::Costmap2DROS>("reentry_test_costmap");
     const auto changed=map_->set_parameters({
       rclcpp::Parameter("plugins",std::vector<std::string>{}),
       rclcpp::Parameter("global_frame","map"),
       rclcpp::Parameter("robot_base_frame","base_link"),
       rclcpp::Parameter("width",6),rclcpp::Parameter("height",6),
-      rclcpp::Parameter("origin_x",-3.),rclcpp::Parameter("origin_y",-3.),
+      rclcpp::Parameter("origin_x",mapOrigin()),rclcpp::Parameter("origin_y",mapOrigin()),
       rclcpp::Parameter("resolution",.01),rclcpp::Parameter("footprint_padding",.15),
       rclcpp::Parameter("footprint",std::string(
         "[[-0.647,-0.530],[0.647,-0.530],[0.647,0.530],[-0.647,0.530]]"))});
@@ -102,17 +110,28 @@ protected:
     return p;
   }
   geometry_msgs::msg::PoseStamped input(double x,double speed=0.) {
-    auto p=pose(x);p.header.stamp=node_->now();
+    return inputAt(x,0.,M_PI,speed);
+  }
+  geometry_msgs::msg::PoseStamped inputAt(double x,double y,double heading,
+    double speed=0.,double lateral=0.,double angular=0.) {
+    auto p=pose(x,heading);p.pose.position.y=y;p.header.stamp=node_->now();
     geometry_msgs::msg::TransformStamped t;t.header=p.header;t.child_frame_id="base_link";
-    t.transform.translation.x=x;t.transform.rotation=p.pose.orientation;
+    t.transform.translation.x=x;t.transform.translation.y=y;t.transform.rotation=p.pose.orientation;
     EXPECT_TRUE(map_->getTfBuffer()->setTransform(t,"synthetic_test_input",false));
     nav_msgs::msg::Odometry o;o.header=p.header;o.child_frame_id="base_link";
-    o.pose.pose=p.pose;o.twist.twist.linear.x=speed;
+    o.pose.pose=p.pose;o.twist.twist.linear.x=speed;o.twist.twist.linear.y=lateral;
+    o.twist.twist.angular.z=angular;
     for (int i=0;i<5;++i) {publisher_->publish(o);executor_.spin_some();std::this_thread::sleep_for(2ms);}
     return p;
   }
   geometry_msgs::msg::TwistStamped command(double x,double speed=0.) {
     auto p=input(x,speed);geometry_msgs::msg::Twist v;v.linear.x=speed;
+    return controller_->computeVelocityCommands(p,v,checker_.get());
+  }
+  geometry_msgs::msg::TwistStamped commandAt(double x,double y,double heading,
+    double speed=0.,double lateral=0.,double angular=0.) {
+    auto p=inputAt(x,y,heading,speed,lateral,angular);geometry_msgs::msg::Twist v;
+    v.linear.x=speed;v.linear.y=lateral;v.angular.z=angular;
     return controller_->computeVelocityCommands(p,v,checker_.get());
   }
   void escapedTerminalAndFreshPlan() {
@@ -261,5 +280,143 @@ TEST_F(CenteredEntry, CenteringStillRejectsFilledCommandCollision) {
   unsigned int mx,my;ASSERT_TRUE(map_->getCostmap()->worldToMap(-.69,0.,mx,my));
   map_->getCostmap()->setCost(mx,my,nav2_costmap_2d::LETHAL_OBSTACLE);
   EXPECT_THROW(command(.128),nav2_core::NoValidControl);EXPECT_FALSE(reached(.128));
+}
+
+class StoppedTerminal : public CenteredEntry {
+protected:
+  bool stoppedEntry() const override {return true;}
+  bool initialShortcut() const override {return false;}
+  void configureExtra() override {
+    node_->set_parameter(rclcpp::Parameter("FollowPath.rpp.desired_linear_vel",.4));
+    node_->declare_parameter("FollowPath.rpp.min_approach_linear_velocity",.4);
+    node_->declare_parameter("FollowPath.rpp.regulated_linear_scaling_min_speed",.4);
+    node_->declare_parameter("FollowPath.rpp.rotate_to_heading_angular_vel",.3);
+    node_->declare_parameter("FollowPath.rpp.max_angular_accel",6.);
+  }
+};
+class StoppedInitial : public StoppedTerminal {
+protected:
+  bool initialShortcut() const override {return true;}
+  double driftLimit() const override {return 0.;}
+};
+class StoppedB34Geometry : public StoppedTerminal {
+protected:
+  double mapOrigin() const override {return 1.;}
+};
+
+TEST_F(CenteredNoShortcut, DefaultOffRetainsB19MovingTerminalTurn) {
+  publisher_->on_activate();controller_->setPlan(turnPlan(.3));checker_->reset();
+  auto cmd=command(.04166,.6508);
+  EXPECT_DOUBLE_EQ(cmd.twist.linear.x,0.);EXPECT_GT(std::abs(cmd.twist.angular.z),0.);
+}
+
+TEST_F(StoppedB34Geometry, RecordedLastTracksReachEarlyBrakeAndMovingTurnGate) {
+  publisher_->on_activate();
+  for (const auto & recorded:b34TerminalApproaches()) {
+    SCOPED_TRACE(recorded.plan_header_ns);
+    nav_msgs::msg::Path p;p.header.frame_id="map";p.header.stamp=node_->now();
+    for (const auto & row:recorded.wire_poses) {
+      auto x=pose(row[0],row[2]);x.pose.position.y=row[1];x.header=p.header;p.poses.push_back(x);
+    }
+    // Exact recorded final TRACK + terminal ROTATE + immutable wire goal.
+    // The clock is current fixture time; body velocity below is a controlled
+    // combination, not a claim that the planned anchor was the actual body.
+    for (const auto & actual:{recorded.planned_track_start,recorded.native_pose}) {
+      controller_->reset();controller_->setPlan(p);checker_->reset();
+      auto cmd=commandAt(actual[0],actual[1],actual[2],recorded.body_twist[0],
+        recorded.body_twist[1],recorded.body_twist[2]);
+      EXPECT_DOUBLE_EQ(cmd.twist.linear.x,0.);EXPECT_DOUBLE_EQ(cmd.twist.angular.z,0.);
+    }
+  }
+}
+
+TEST_F(StoppedTerminal, BrakeInOuterWindowThenRequireFullStopAtCenter) {
+  publisher_->on_activate();controller_->setPlan(turnPlan(.3));checker_->reset();
+  auto brake=command(.14,.4);
+  EXPECT_DOUBLE_EQ(brake.twist.linear.x,0.);EXPECT_DOUBLE_EQ(brake.twist.angular.z,0.);
+  // Small linear velocity alone is insufficient while angular motion persists.
+  auto still=commandAt(.04,0.,M_PI,.02,0.,.1);
+  EXPECT_DOUBLE_EQ(still.twist.linear.x,0.);EXPECT_DOUBLE_EQ(still.twist.angular.z,0.);
+  auto turn=command(.04);
+  EXPECT_DOUBLE_EQ(turn.twist.linear.x,0.);EXPECT_GT(std::abs(turn.twist.angular.z),0.);
+  // Once the checked run starts, retain the original .15 execution region.
+  auto active=command(.10);
+  EXPECT_DOUBLE_EQ(active.twist.linear.x,0.);EXPECT_GT(std::abs(active.twist.angular.z),0.);
+}
+
+TEST_F(StoppedTerminal, StopShortOfCenterRequestsFiniteFreshPath) {
+  publisher_->on_activate();controller_->setPlan(turnPlan(.3));checker_->reset();
+  command(.14,.4);
+  try {command(.10);FAIL()<<"An off-center braking stop needs a fresh path";}
+  catch (const nav2_core::NoValidControl & error) {
+    EXPECT_NE(std::string(error.what()).find("fresh original-goal path"),std::string::npos);
+  }
+  controller_->setPlan(turnPlan(.10));checker_->reset();
+  auto repair=command(.10);EXPECT_GT(repair.twist.linear.x,0.);
+}
+
+TEST_F(StoppedTerminal, CompatibleBrakingPlanCannotResetMandatoryPrefix) {
+  publisher_->on_activate();controller_->setPlan(turnPlan(.3));checker_->reset();
+  command(.14,.4);
+  // A compatible replacement contains an unrelated loop. While braking it must
+  // validate completely, but cannot replace the current mandatory cursor.
+  auto replacement=turnPlan(.3);
+  replacement.poses={pose(.3),pose(.3,M_PI_2),pose(.3,M_PI_2),
+    pose(.3,M_PI),pose(0.),pose(0.,0.),pose(0.,0.)};
+  for (auto & p:replacement.poses) {p.header=replacement.header;}
+  controller_->setPlan(replacement);
+  auto waiting=command(.12,.2);
+  EXPECT_DOUBLE_EQ(waiting.twist.linear.x,0.);EXPECT_DOUBLE_EQ(waiting.twist.angular.z,0.);
+  EXPECT_FALSE(reached(.12));
+}
+
+TEST_F(StoppedInitial, InitialTurnNeedsStopEvenWithoutDriftExtension) {
+  publisher_->on_activate();controller_->setPlan(turnPlan(.3));checker_->reset();
+  auto moving=command(.03367,.5577);
+  EXPECT_DOUBLE_EQ(moving.twist.linear.x,0.);EXPECT_DOUBLE_EQ(moving.twist.angular.z,0.);
+  auto stopped=command(.03367);
+  EXPECT_DOUBLE_EQ(stopped.twist.linear.x,0.);EXPECT_GT(std::abs(stopped.twist.angular.z),0.);
+}
+
+TEST_F(StoppedTerminal, FirstCommandRechecksFreshCenterWithoutFreezingTFHeaders) {
+  publisher_->on_activate();controller_->setPlan(turnPlan(.3));checker_->reset();
+  auto old=input(.04);auto fresh=input(.06);
+  EXPECT_GT(rclcpp::Time(fresh.header.stamp).nanoseconds(),rclcpp::Time(old.header.stamp).nanoseconds());
+  EXPECT_THROW(controller_->computeVelocityCommands(old,geometry_msgs::msg::Twist{},checker_.get()),
+    nav2_core::NoValidControl);
+  controller_->reset();controller_->setPlan(turnPlan(.3));checker_->reset();
+  old=input(.04);fresh=input(.0401);
+  geometry_msgs::msg::TwistStamped cmd;
+  ASSERT_NO_THROW(cmd=controller_->computeVelocityCommands(old,geometry_msgs::msg::Twist{},checker_.get()));
+  EXPECT_DOUBLE_EQ(cmd.twist.linear.x,0.);EXPECT_GT(std::abs(cmd.twist.angular.z),0.);
+  EXPECT_EQ(cmd.header.stamp,fresh.header.stamp);
+}
+
+TEST_F(StoppedTerminal, FailedFreshCheckedZeroNeverConsumesRotationEntry) {
+  publisher_->on_activate();controller_->setPlan(turnPlan(.3));checker_->reset();
+  auto old=input(.04);
+  // This corner is outside the old origin's entire rotation radius, but inside
+  // the newly sampled stationary footprint. A fresh yaw sign change must take
+  // the checked-zero path; failure cannot authorize a later off-center turn.
+  inputAt(.049,0.,std::atan2(.68,.797));
+  unsigned int mx,my;ASSERT_TRUE(map_->getCostmap()->worldToMap(1.105,0.,mx,my));
+  map_->getCostmap()->setCost(mx,my,nav2_costmap_2d::LETHAL_OBSTACLE);
+  try {
+    controller_->computeVelocityCommands(old,geometry_msgs::msg::Twist{},checker_.get());
+    FAIL()<<"A blocked fresh checked zero must fail";
+  } catch (const nav2_core::NoValidControl & error) {
+    EXPECT_NE(std::string(error.what()).find("Filled terminal stop sweep blocked"),std::string::npos)
+      <<error.what();
+  }
+  map_->getCostmap()->setCost(mx,my,nav2_costmap_2d::FREE_SPACE);
+  EXPECT_THROW(command(.10),nav2_core::NoValidControl);
+}
+
+TEST_F(StoppedTerminal, FarFinalTrackPathAlignmentIsNotTerminalBraking) {
+  publisher_->on_activate();controller_->setPlan(plan(2.));checker_->reset();
+  // finalPrefixActive also includes ordinary final TRACK. Goal is still1m
+  // away: this RPP pure-yaw command aligns to the path, not to final heading.
+  auto cmd=commandAt(1.,0.,M_PI_2,0.,0.,.1);
+  EXPECT_DOUBLE_EQ(cmd.twist.linear.x,0.);EXPECT_GT(std::abs(cmd.twist.angular.z),0.);
 }
 }  // namespace

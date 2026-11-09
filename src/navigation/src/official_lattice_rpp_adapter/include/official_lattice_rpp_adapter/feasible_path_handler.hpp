@@ -108,6 +108,10 @@ public:
   bool terminalHandoffReady(std::size_t suffix_begin,double limit) const {
     return prefix_offset_>=suffix_begin && finalPrefixWithin(limit);
   }
+  // Current ordered final TRACK, not a later repeated occurrence of this XY.
+  bool terminalTrackActive(std::size_t suffix_begin,std::size_t rotation_begin) const {
+    return finalPrefixActive() && prefix_offset_>=suffix_begin && prefix_offset_<rotation_begin;
+  }
 
 protected:
   void refreshConstraintHeadings();

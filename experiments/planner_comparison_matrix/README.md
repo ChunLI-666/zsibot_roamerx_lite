@@ -464,3 +464,22 @@ retain original-region stopped acceptance, and reject a filled collision.
 Separate nonzero goal-cell fixtures cover the new final trigger and the default
 zero option's previous handoff behavior. These software checks do not establish
 full-route simulation or physical acceptance.
+
+## B20: stop the measured body before terminal rotation
+
+The official Matrix profile enables `terminal_stop_before_rotation`; its
+default is false. B34 entered the .05 m center while measured body translation
+was still about .65/.56 m/s. The new gate requires the existing full measured
+stop (.03 m/s and .05 rad/s), then rechecks the .05 m center and all remaining
+filled rotation/command sweeps at one fresh actual pose before the first
+nonzero terminal angular command. Ordinary RPP path alignment retains its
+previous behavior. An admitted rotation keeps the original .15 m execution
+region and final .15 m/.08 rad goal plus .3 second checked stop.
+
+Only an ordered last TRACK can begin braking in the original .15 m window.
+Checked zero commands continue until measured stopping; a stop outside the
+center requests a fresh ordinary path instead of holding zero forever. A
+compatible same-goal plan cannot discard the pending brake or mandatory cursor.
+No smoother, speed, SDK or collision thresholds change. Public DSO fixtures
+include both cached B34 terminal approaches with a separate fixture clock;
+these checks do not prove sufficient physical stopping distance or route success.
