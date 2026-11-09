@@ -488,6 +488,7 @@ def prepare(args):
         controller['segments']=dict(xy_tolerance=args.xy_tolerance,yaw_tolerance=args.yaw_tolerance,stopped_linear_velocity=.03,stopped_angular_velocity=.05,final_stop_dwell_sec=.3,
           same_xy_epsilon=.0001,progress_search_distance=.25,odom_timeout=.3,rotation_anchor_wait_timeout=15.,command_sweep_horizon=1.,max_angular_velocity=.3,
           require_next_rotation_clearance=True,track_approach_xy_tolerance=.005,
+          terminal_rotation_entry_xy_tolerance=min(.05,args.xy_tolerance),
           terminal_goal_binding=True,terminal_global_resolution=.01,terminal_global_extent=20.)
     else:
         controller['Checker']['plugin']='official_lattice_rpp_adapter::FeasibleGoalChecker'

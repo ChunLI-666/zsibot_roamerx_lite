@@ -138,6 +138,7 @@ SegmentControllerServer::SegmentControllerServer(const rclcpp::NodeOptions & opt
   declare_parameter("segments.command_sweep_horizon", 1.0, descriptor);
   declare_parameter("segments.require_next_rotation_clearance", false, descriptor);
   declare_parameter("segments.track_approach_xy_tolerance", .005, descriptor);
+  declare_parameter("segments.terminal_rotation_entry_xy_tolerance", 0., descriptor);
   declare_parameter("segments.max_angular_velocity", kExperimentMaxAngularVelocity, descriptor);
   declare_parameter("segments.terminal_goal_binding", false, descriptor);
   declare_parameter("segments.terminal_global_resolution", .01, descriptor);
@@ -190,6 +191,7 @@ SegmentControllerServer::on_configure(const rclcpp_lifecycle::State & state)
   get_parameter("segments.rotation_anchor_wait_timeout", segment_config.rotation_anchor_wait_timeout);
   get_parameter("segments.require_next_rotation_clearance", require_next_rotation_clearance_);
   get_parameter("segments.track_approach_xy_tolerance", track_approach_xy_tolerance_);
+  get_parameter("segments.terminal_rotation_entry_xy_tolerance", terminal_rotation_entry_xy_tolerance_);
   try {
     if (!validExperimentAngularLimit(
       get_parameter("segments.max_angular_velocity").as_double()))
@@ -802,6 +804,8 @@ void SegmentControllerServer::computeControl()
 void SegmentControllerServer::clearSegmentState()
 {
   track_approach_pending_ = false;
+  terminal_center_approach_pending_ = terminal_rotation_started_ = false;
+  goal_binding_error_ = 0.;
   resetFinalGoalStop();
   final_stop_progress_priority_since_.reset();
   coordinator_.clear();
@@ -832,12 +836,32 @@ void SegmentControllerServer::setPlannerPath(
   resetFinalGoalStop();  // Every newly installed plan starts a new final-stop observation.
   const bool preserve_goal = original_goal_ &&
     SegmentCoordinator::compatibleGoal(current_wire_path_, path);
+  double binding_error = 0.;
   try {
-    coordinator_.setPath(executionInput(path), require_entry_stop);
+    const auto executable = executionInput(path);
+    if (terminal_goal_binding_ && !executable.poses.empty()) {
+      const auto & goal = preserve_goal ? original_goal_->pose : path.poses.back().pose;
+      binding_error = std::hypot(executable.poses.back().pose.position.x - goal.position.x,
+        executable.poses.back().pose.position.y - goal.position.y);
+    }
+    if (terminal_rotation_entry_xy_tolerance_ > 0. &&
+      binding_error >= terminalEntryXY(originalGoalTolerances().first) -
+      64. * std::numeric_limits<double>::epsilon())
+    {
+      throw std::invalid_argument("Terminal entry region must contain the original goal-cell endpoint");
+    }
+    SegmentCoordinator candidate(coordinator_.config());
+    candidate.setPath(executable, require_entry_stop);
+    if (terminal_rotation_entry_xy_tolerance_ > 0. && !candidate.trailingRotationsShareAnchor()) {
+      throw std::invalid_argument("Terminal rotation run must retain one XY anchor across every chunk");
+    }
+    coordinator_ = std::move(candidate);
   } catch (const std::invalid_argument & e) {
     throw nav2_core::InvalidPath(e.what());
   }
   current_wire_path_=path;
+  goal_binding_error_ = binding_error;
+  terminal_rotation_started_ = false;  // Even a compatible external plan needs fresh admission.
   if (!preserve_goal) {
     original_goal_ = path.poses.back();
     original_goal_->header.frame_id = path.header.frame_id;
@@ -861,6 +885,8 @@ void SegmentControllerServer::setPlannerPath(
 void SegmentControllerServer::installActiveSegment()
 {
   track_approach_pending_ = false;
+  terminal_center_approach_pending_ = false;
+  if (!coordinator_.terminalRotationRun()) {terminal_rotation_started_ = false;}
   resetFinalGoalStop();
   current_path_ = coordinator_.active().path;
   for (auto & pose : current_path_.poses) {
@@ -1008,6 +1034,12 @@ void SegmentControllerServer::validateTransformFreshness()
 void SegmentControllerServer::configureIntermediateGoalChecker(
   const SegmentCoordinator::Config & config)
 {
+  if (!std::isfinite(terminal_rotation_entry_xy_tolerance_) ||
+    terminal_rotation_entry_xy_tolerance_ < 0. ||
+    terminal_rotation_entry_xy_tolerance_ > config.xy_tolerance)
+  {
+    throw std::invalid_argument("Terminal rotation entry tolerance must be zero or within segment XY tolerance");
+  }
   if (require_next_rotation_clearance_ && (!std::isfinite(track_approach_xy_tolerance_) ||
     track_approach_xy_tolerance_ <= 0. || track_approach_xy_tolerance_ > config.xy_tolerance))
   {
@@ -1021,20 +1053,59 @@ double SegmentControllerServer::intermediateXYTolerance()
 {
   if (coordinator_.rotating()) {return coordinator_.config().xy_tolerance;}
   const double original = originalGoalTolerances().first;
+  const double terminal = terminal_rotation_entry_xy_tolerance_ > 0. && coordinator_.finalApproachTrack() ?
+    terminalRPPXY(original) : original;
   const auto * next = coordinator_.next();
   // This is an RPP branch trigger, not a new handoff or final acceptance region.
   // Explicit ROTATE still gets its original XY allowance and co-located carrot.
   return require_next_rotation_clearance_ && next && next->kind == SegmentCoordinator::Kind::Rotation ?
-    std::min(original, track_approach_xy_tolerance_) : original;
+    std::min(terminal, track_approach_xy_tolerance_) : terminal;
+}
+
+double SegmentControllerServer::terminalEntryXY(double original_xy) const
+{
+  return terminal_rotation_entry_xy_tolerance_ > 0. ?
+    std::min(original_xy, terminal_rotation_entry_xy_tolerance_) : original_xy;
+}
+
+double SegmentControllerServer::terminalRPPXY(double original_xy) const
+{
+  const double entry = terminalEntryXY(original_xy);
+  const double trigger = entry - goal_binding_error_ -
+    64. * std::numeric_limits<double>::epsilon() * std::max(1., entry);
+  if (!(trigger > 0.)) {throw nav2_core::InvalidPath("Nonpositive terminal RPP entry trigger");}
+  return trigger;
+}
+
+bool SegmentControllerServer::terminalCenterReached(
+  const geometry_msgs::msg::PoseStamped & path_pose, double original_xy) const
+{
+  return terminal_rotation_entry_xy_tolerance_ == 0. || (original_goal_ &&
+    std::hypot(path_pose.pose.position.x - original_goal_->pose.position.x,
+    path_pose.pose.position.y - original_goal_->pose.position.y) <= terminalEntryXY(original_xy));
+}
+
+void SegmentControllerServer::enforceTerminalRotationEntry(
+  const geometry_msgs::msg::PoseStamped & path_pose, double original_xy) const
+{
+  if (terminal_rotation_entry_xy_tolerance_ > 0. && !terminal_rotation_started_ &&
+    (terminal_rotation_active_ || coordinator_.terminalRotationRun()) &&
+    !terminalCenterReached(path_pose, original_xy))
+  {
+    throw nav2_core::NoValidControl("Unstarted terminal rotation needs centered original-goal reentry");
+  }
 }
 
 void SegmentControllerServer::enforceTrackApproachRegion(
   const geometry_msgs::msg::PoseStamped & path_pose, double xy_tolerance) const
 {
-  if (track_approach_pending_ &&
-    std::hypot(path_pose.pose.position.x - end_pose_.pose.position.x,
-    path_pose.pose.position.y - end_pose_.pose.position.y) >
-    std::min(xy_tolerance, coordinator_.config().xy_tolerance))
+  const bool terminal = terminal_rotation_entry_xy_tolerance_ > 0. &&
+    coordinator_.finalApproachTrack() && original_goal_;
+  const auto & anchor = terminal ? original_goal_->pose : end_pose_.pose;
+  const double limit = terminal ? xy_tolerance : std::min(xy_tolerance, coordinator_.config().xy_tolerance);
+  if ((track_approach_pending_ || terminal_center_approach_pending_) &&
+    std::hypot(path_pose.pose.position.x - anchor.position.x,
+    path_pose.pose.position.y - anchor.position.y) > limit)
   {
     // Do not let continuing forward motion continually reset the progress timer
     // after an unsafe short-segment handoff. Fail inside the original XY bound.
@@ -1051,6 +1122,12 @@ bool SegmentControllerServer::intermediateSegmentReached(
   const bool guarded_track = require_next_rotation_clearance_ && !coordinator_.rotating() &&
     next && next->kind == SegmentCoordinator::Kind::Rotation;
   if (!coordinator_.geometryReached(path_pose.pose, xy_tolerance)) {return false;}
+  if (terminal_rotation_entry_xy_tolerance_ > 0. && coordinator_.finalApproachTrack() &&
+    !terminalCenterReached(path_pose, xy_tolerance))
+  {
+    terminal_center_approach_pending_ = true;
+    return false;  // Continue the ordered approach; .05 is not final acceptance.
+  }
   if (!guarded_track) {return true;}
   auto target = next->path.poses.back();
   target.header.frame_id = next->path.header.frame_id;
@@ -1097,6 +1174,7 @@ void SegmentControllerServer::enforceRotationSweep(
 void SegmentControllerServer::activateTerminalRotation(
   const geometry_msgs::msg::PoseStamped & path_pose)
 {
+  terminal_rotation_started_ = terminal_center_approach_pending_ = false;
   resetFinalGoalStop();
   // This ephemeral RPP path is never installed in the ordered coordinator. Its original
   // full path/goal remain the authority for compatibility, pending progress and success.
@@ -1122,6 +1200,7 @@ void SegmentControllerServer::activateTerminalRotation(
 
 void SegmentControllerServer::restoreOrderedSegment()
 {
+  terminal_rotation_started_ = terminal_center_approach_pending_ = false;
   // Must precede any queued-path install; that older snapshot cannot rearm FINAL.
   terminal_retry_blocked_ = true;
   resetFinalGoalStop();
@@ -1147,8 +1226,15 @@ void SegmentControllerServer::computeAndPublishVelocity()
     throw nav2_core::ControllerTFError("Failed to obtain robot pose");
   }
 
-  if (track_approach_pending_) {
+  if (track_approach_pending_ || terminal_center_approach_pending_) {
     enforceTrackApproachRegion(toPathPose(pose), originalGoalTolerances().first);
+  }
+  // Phase checking can clear entryStopPending before a fresher compute pose.
+  // Keep admission pending until a nonzero rotation command passes every sweep.
+  if (terminal_rotation_entry_xy_tolerance_ > 0. && !terminal_rotation_started_ &&
+    (terminal_rotation_active_ || coordinator_.terminalRotationRun()))
+  {
+    enforceTerminalRotationEntry(toPathPose(pose), originalGoalTolerances().first);
   }
 
   geometry_msgs::msg::Twist measured;
@@ -1167,12 +1253,21 @@ void SegmentControllerServer::computeAndPublishVelocity()
     // the coordinator's original anchor/progress, or the external original goal.
     controllers_[current_controller_]->setPlan(SegmentCoordinator::actualOriginRotationPath(
       toPathPose(pose),terminal_rotation_active_ ? *original_goal_ : end_pose_));
-  } else if (!coordinator_.finalSegment()) {
+  } else if (!coordinator_.finalSegment() ||
+    (terminal_rotation_entry_xy_tolerance_ > 0. && coordinator_.finalApproachTrack())) {
     // Use the SAME actual pose passed to RPP. A fresh TF update between the goal/phase
     // check and this call must not let RPP start an implicit end-of-TRACK yaw correction.
     const auto actual = toPathPose(pose);
     coordinator_.observe(actual.pose);
-    if (intermediateSegmentReached(pose, actual, originalGoalTolerances().first)) {
+    const double original_xy = originalGoalTolerances().first;
+    const bool reached = intermediateSegmentReached(pose, actual, original_xy);
+    const bool centered_final_track = terminal_rotation_entry_xy_tolerance_ > 0. &&
+      coordinator_.finalSegment() && original_goal_ &&
+      coordinator_.terminalWindowEligible(actual.pose, original_goal_->pose, original_xy) &&
+      terminalCenterReached(actual, original_xy);
+    if (reached && (!coordinator_.finalSegment() || centered_final_track)) {
+      // A fresh pose can enter the center after the phase check. Stop this cycle;
+      // the next ordinary phase check may admit FINAL with the same original goal.
       segment_braking_ = true;
       publishSegmentStop();
       return;
@@ -1180,13 +1275,15 @@ void SegmentControllerServer::computeAndPublishVelocity()
   }
 
   geometry_msgs::msg::TwistStamped cmd_vel_2d;
+  bool checked_terminal_rotation = false;
 
   try {
     cmd_vel_2d =
       controllers_[current_controller_]->computeVelocityCommands(
       pose,
       measured,
-      (terminal_rotation_active_ || coordinator_.finalSegment()) ?
+      (terminal_rotation_active_ || (coordinator_.finalSegment() &&
+      (coordinator_.rotating() || terminal_rotation_entry_xy_tolerance_ == 0.))) ?
       goal_checkers_[current_goal_checker_].get() :
       intermediate_goal_checker_.get());
     // Limit BEFORE both the filled command sweep and publication. Validate raw
@@ -1240,6 +1337,9 @@ void SegmentControllerServer::computeAndPublishVelocity()
         throw nav2_core::NoValidControl("Filled actual command sweep blocked or invalid");
       }
     }
+    checked_terminal_rotation = terminal_rotation_entry_xy_tolerance_ > 0. &&
+      (terminal_rotation_active_ || coordinator_.terminalRotationRun()) &&
+      std::abs(cmd_vel_2d.twist.angular.z) > 1e-6;
     last_valid_cmd_time_ = now();
     cmd_vel_2d.header.frame_id = costmap_ros_->getBaseFrameID();
     cmd_vel_2d.header.stamp = last_valid_cmd_time_;
@@ -1276,10 +1376,17 @@ void SegmentControllerServer::computeAndPublishVelocity()
   } else {
     feedback->distance_to_goal = coordinator_.remainingDistance();
   }
-  action_server_->publish_feedback(feedback);
+  publishControlFeedback(feedback);
 
   RCLCPP_DEBUG(get_logger(), "Publishing velocity at time %.2f", now().seconds());
   publishVelocity(cmd_vel_2d);
+  if (checked_terminal_rotation) {terminal_rotation_started_ = true;}
+}
+
+void SegmentControllerServer::publishControlFeedback(
+  const std::shared_ptr<Action::Feedback> & feedback)
+{
+  action_server_->publish_feedback(feedback);
 }
 
 void SegmentControllerServer::updateGlobalPath()
@@ -1470,7 +1577,8 @@ bool SegmentControllerServer::isGoalReached()
   }
   // Test the full shortest sweep BEFORE braking. A blocked short turn must not repeatedly
   // interrupt an already valid longer ordered route. After measured stop, test it again.
-  if (terminal_eligible && sweep_free && !terminal_retry_blocked_) {
+  if (terminal_eligible && sweep_free && !terminal_retry_blocked_ &&
+    terminalCenterReached(path_pose, xy_tolerance)) {
     terminal_braking_ = segment_braking_ = true;
     if (coordinator_.stopped(measured)) {
       coordinator_.executionReady(measured);
@@ -1483,6 +1591,7 @@ bool SegmentControllerServer::isGoalReached()
     terminal_retry_blocked_ = true;
     terminal_braking_ = segment_braking_ = false;
   }
+  enforceTerminalRotationEntry(path_pose, xy_tolerance);
   if (coordinator_.rotating() && coordinator_.entryStopPending()) {
     const bool ready = coordinator_.stopped(measured) &&
       coordinator_.rotationAnchorReached(path_pose.pose) &&
@@ -1543,6 +1652,9 @@ bool SegmentControllerServer::isGoalReached()
       installActiveSegment();
     }
     return false;
+  }
+  if (terminal_rotation_entry_xy_tolerance_ > 0. && coordinator_.finalApproachTrack()) {
+    intermediateSegmentReached(actual, path_pose, xy_tolerance);  // Bound a retained final TRACK too.
   }
   return false;  // Reaching the ordered tail alone never replaces original goal geometry.
 }

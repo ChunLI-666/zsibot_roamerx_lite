@@ -463,3 +463,34 @@ The original final goal, .3 second stopped dwell, freshness limits, footprint,
 angular cap and one-second actual-command sweep are unchanged. Frozen A10 inputs
 show possible forward commands and a narrow window for the next rotation; these
 offline checks do not establish dynamic or whole-route acceptance.
+
+## A15: center admission for the terminal rotation
+
+A11 reached 34 targets. F011 entered the normal FINAL rotation near the edge of
+the original goal region, lost that region, and restored its ordered path. Its
+first controller attempt failed the progress check; the second ended at the
+existing 15 second unstarted-rotation wait. The small planner log contains no
+planning error. These logs do not establish a physical drift bound or the cause
+of every strict timing violation.
+
+`segments.terminal_rotation_entry_xy_tolerance` defaults to zero for the A14
+behavior. Matrix A sets it to `.05 m`, limited by the original XY tolerance.
+This is an entry condition about the original goal. The original `.15/.08`
+acceptance and checked-zero `.3 s` stopped dwell still take priority.
+
+The shortcut and the final TRACK handoff use the same center condition. A tail
+of consecutive ROTATE phases is one terminal run, including turns split at
+90 degrees. Before its first filled-checked nonzero rotation command, both phase
+checking and the fresh compute pose must satisfy center admission. Admission
+then survives internal chunks, while restore and newly installed plans clear
+it. Ordinary turns needed to approach the center retain A14 behavior.
+
+The final TRACK uses an RPP-only proxy narrowed by the goal-cell binding error,
+including a path with no trailing ROTATE. The original GoalChecker is unchanged.
+A retained terminal approach is bounded by the original goal region, so a
+quantized endpoint cannot reject a valid original-goal stopped acceptance.
+An unstarted terminal run outside the center requests the existing same-goal
+replan instead of rotating or waiting for an impossible translation inside a
+ROTATE phase. Full filled sweeps, speed limits, freshness and progress budgets
+are unchanged. This candidate does not establish full-route acceptance and is
+not evidence that `.05 m` admission resolves B34's separate failure.

@@ -1,5 +1,6 @@
 // Regression fixture for the actual controller server and real PoseProgressChecker.
 // Real SegmentControllerServer bodies and real Jazzy PoseProgressChecker are used.
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -11,6 +12,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "nav2_core/controller_exceptions.hpp"
 #include "nav2_controller/plugins/pose_progress_checker.hpp"
+#include "nav2_costmap_2d/cost_values.hpp"
 #include "robot_feasible_navigation/segment_controller_server.hpp"
 using robot_feasible_navigation::SegmentControllerServer;
 using robot_feasible_navigation::SegmentCoordinator;
@@ -43,17 +45,21 @@ class PlanSink : public nav2_core::Controller {
 public:
   int resets=0,plans=0,unexpected_compute=0;
   double received_xy=-1.;
+  bool return_command=false;
+  geometry_msgs::msg::Twist command;
   void configure(const rclcpp_lifecycle::LifecycleNode::WeakPtr&,std::string,
     std::shared_ptr<tf2_ros::Buffer>,std::shared_ptr<nav2_costmap_2d::Costmap2DROS>)override{}
   void cleanup()override{} void activate()override{} void deactivate()override{}
   void setPlan(const nav_msgs::msg::Path&)override{++plans;}
   void reset()override{++resets;}
   void setSpeedLimit(const double&,const bool&)override{}
-  geometry_msgs::msg::TwistStamped computeVelocityCommands(const Pose&,
+  geometry_msgs::msg::TwistStamped computeVelocityCommands(const Pose& actual,
     const geometry_msgs::msg::Twist&,nav2_core::GoalChecker* checker)override {
     geometry_msgs::msg::Pose tolerance;geometry_msgs::msg::Twist velocity;
     if(checker&&checker->getTolerances(tolerance,velocity))received_xy=tolerance.position.x;
-    ++unexpected_compute;throw std::runtime_error("Motion compute escaped expected zero branch");
+    ++unexpected_compute;
+    if(!return_command)throw std::runtime_error("Motion compute escaped expected zero branch");
+    geometry_msgs::msg::TwistStamped out;out.header=actual.header;out.twist=command;return out;
   }
 };
 class GoalProbe : public nav2_core::GoalChecker {
@@ -86,6 +92,7 @@ public:
     SegmentCoordinator::Config cfg;cfg.xy_tolerance=.15;cfg.yaw_tolerance=.08;
     cfg.stopped_linear_velocity=.03;cfg.stopped_angular_velocity=.05;cfg.odom_timeout=.3;
     coordinator_=SegmentCoordinator(cfg);
+    failure_tolerance_=0.;
     current_controller_="FollowPath";current_goal_checker_="Checker";current_progress_checker_="Progress";
     sink=std::make_shared<PlanSink>();goal=std::make_shared<GoalProbe>();progress=std::make_shared<CountedPoseProgress>();
     controllers_[current_controller_]=sink;goal_checkers_[current_goal_checker_]=goal;
@@ -97,6 +104,11 @@ public:
   Pose actual;geometry_msgs::msg::Twist measured;
   bool odom_valid=true,sweep_free=true,zero_ok=true;int zeros=0,final_zeros=0,activations=0;
   std::int64_t ns=1000000000000LL;
+  bool command_map_configured=false;int commands=0,feedbacks=0;
+  geometry_msgs::msg::TwistStamped last_command;
+  ~Peer()override {
+    if(command_map_configured)costmap_ros_->on_cleanup(rclcpp_lifecycle::State());
+  }
   void time(double s) {
     ns=1000000000000LL+static_cast<std::int64_t>(s*1e9);
     if(rcl_set_ros_time_override(get_clock()->get_clock_handle(),ns)!=RCL_RET_OK)throw std::runtime_error("test clock set failed");
@@ -123,14 +135,53 @@ public:
   void expireAnchor(){rotation_anchor_wait_since_=std::chrono::steady_clock::now()-std::chrono::seconds(16);}
   void guardNextTurn(bool enabled){require_next_rotation_clearance_=enabled;}
   std::size_t segmentIndex()const{return coordinator_.index();}
+  nav_msgs::msg::Path loadedPath()const{return coordinator_.fullPath();}
   bool repairPending()const{return track_approach_pending_;}
   double controlXY(){return intermediateXYTolerance();}
+  void centerEntry(double xy) {
+    terminal_rotation_entry_xy_tolerance_=xy;
+    configureIntermediateGoalChecker(coordinator_.config());
+  }
+  bool rotationStarted()const{return terminal_rotation_started_;}
+  bool centerApproachPending()const{return terminal_center_approach_pending_;}
+  void blockShortcut(){terminal_retry_blocked_=true;}
+  void binding(bool enabled){terminal_goal_binding_=enabled;}
+  void restore(){restoreOrderedSegment();}
+  void checkedCommands(double vx,double wz) {
+    if(!command_map_configured) {
+      const auto result=costmap_ros_->set_parameters({
+        rclcpp::Parameter("plugins",std::vector<std::string>{}),
+        rclcpp::Parameter("global_frame",std::string("map")),
+        rclcpp::Parameter("width",6),rclcpp::Parameter("height",6),
+        rclcpp::Parameter("origin_x",-3.),rclcpp::Parameter("origin_y",-3.),
+        rclcpp::Parameter("resolution",.01),rclcpp::Parameter("footprint_padding",.15),
+        rclcpp::Parameter("footprint",std::string(
+          "[[-0.647,-0.53],[0.647,-0.53],[0.647,0.53],[-0.647,0.53]]"))});
+      for(const auto & r:result)if(!r.successful)throw std::runtime_error(r.reason);
+      if(costmap_ros_->on_configure(rclcpp_lifecycle::State())!=nav2_util::CallbackReturn::SUCCESS)
+        throw std::runtime_error("Fixture command map configure failed");
+      command_map_configured=true;
+      auto * map=costmap_ros_->getCostmap();
+      std::fill_n(map->getCharMap(),map->getSizeInCellsX()*map->getSizeInCellsY(),nav2_costmap_2d::FREE_SPACE);
+    }
+    sink->return_command=true;sink->command=geometry_msgs::msg::Twist{};
+    sink->command.linear.x=vx;sink->command.angular.z=wz;
+  }
+  void blockCommandOrigin() {
+    unsigned int x,y;
+    if(!costmap_ros_->getCostmap()->worldToMap(0.,0.,x,y))throw std::runtime_error("Fixture origin outside map");
+    costmap_ros_->getCostmap()->setCost(x,y,nav2_costmap_2d::LETHAL_OBSTACLE);
+  }
   void configurePhaseXY(double xy,bool enabled) {
     require_next_rotation_clearance_=enabled;
     auto cfg=coordinator_.config();cfg.xy_tolerance=xy;coordinator_=SegmentCoordinator(cfg);
     configureIntermediateGoalChecker(cfg);
   }
 protected:
+  void publishVelocity(const geometry_msgs::msg::TwistStamped & cmd)override {
+    ++commands;last_command=cmd; // Capture the real server's checked command, no DDS command publisher.
+  }
+  void publishControlFeedback(const std::shared_ptr<Action::Feedback>&)override{++feedbacks;}
   bool getRobotPose(Pose&out)override{out=actual;return true;}
   Pose toPathPose(const Pose&p)override{return p;}
   bool measuredVelocity(geometry_msgs::msg::Twist&v,std::int64_t*stamp=nullptr)override {
@@ -287,5 +338,158 @@ TEST_F(ControllerPhase, DisabledGuardKeepsExistingSubFiveMillimeterConfiguration
 }
 TEST_F(ControllerPhase, EnabledGuardValidatesItsApproachTriggerAtConfiguration) {
   EXPECT_THROW(s->configurePhaseXY(.001,true),std::invalid_argument);
+}
+
+TEST_F(ControllerPhase, TerminalCenterOptOutRetainsLegacyShortcut) {
+  s->actual=pose(.12,pi,s->ns);s->load(approach(s->ns));
+  ASSERT_FALSE(s->tick());EXPECT_TRUE(s->finalActive());
+}
+TEST_F(ControllerPhase, TerminalCenterBlocksShortcutAndOrdinaryTailHandoffTogether) {
+  s->centerEntry(.05);s->guardNextTurn(true);s->actual=pose(.12,pi,s->ns);s->load(approach(s->ns));
+  ASSERT_FALSE(s->tick());EXPECT_FALSE(s->finalActive());EXPECT_EQ(s->segmentIndex(),0U);
+  EXPECT_TRUE(s->centerApproachPending());
+  EXPECT_THROW(s->emitSameCycle(),std::runtime_error);
+  EXPECT_DOUBLE_EQ(s->sink->received_xy,.005);EXPECT_EQ(s->segmentIndex(),0U);
+  // Disable the shortcut so a centered observation must use the ordered handoff.
+  s->blockShortcut();s->actual=pose(.02,pi,s->ns);
+  ASSERT_FALSE(s->tick());EXPECT_EQ(s->segmentIndex(),1U);EXPECT_FALSE(s->finalActive());
+  EXPECT_FALSE(s->rotationStarted());
+}
+TEST_F(ControllerPhase, TerminalCenterIncludesFirstOfTwoTrailingRotationChunks) {
+  s->centerEntry(.05);s->actual=pose(.12,pi,s->ns);s->load(approach(s->ns));s->blockShortcut();
+  ASSERT_FALSE(s->tick());EXPECT_EQ(s->segmentIndex(),0U); // First turn is not finalSegment.
+  s->actual=pose(.02,pi,s->ns);ASSERT_FALSE(s->tick());ASSERT_EQ(s->segmentIndex(),1U);
+  s->checkedCommands(0.,-.3);ASSERT_NO_THROW(s->emitSameCycle());ASSERT_TRUE(s->rotationStarted());
+  // Drift after checked entry does not require re-centering at every internal chunk.
+  s->actual=pose(.10,pi/2,s->ns);ASSERT_FALSE(s->tick());ASSERT_EQ(s->segmentIndex(),2U);
+  EXPECT_TRUE(s->rotationStarted());ASSERT_FALSE(s->tick());
+  ASSERT_NO_THROW(s->emitSameCycle());EXPECT_EQ(s->commands,2);
+}
+TEST_F(ControllerPhase, CenteredShortcutNeedsFreshComputePoseBeforeFirstCommand) {
+  s->centerEntry(.05);s->actual=pose(.049,.2,s->ns);s->load(turn(s->ns));
+  ASSERT_FALSE(s->tick());ASSERT_TRUE(s->finalActive());EXPECT_FALSE(s->rotationStarted());
+  s->time(.05);s->actual=pose(.06,.2,s->ns);
+  EXPECT_THROW(s->emitSameCycle(),nav2_core::NoValidControl);EXPECT_EQ(s->commands,0);
+  EXPECT_EQ(s->sink->unexpected_compute,0);
+}
+TEST_F(ControllerPhase, OrderedEntryAlsoRechecksFreshComputePose) {
+  s->centerEntry(.05);s->actual=pose(.049,0,s->ns);s->load(turn(s->ns));s->blockShortcut();
+  ASSERT_FALSE(s->tick());s->time(.05);s->actual=pose(.06,0,s->ns);
+  EXPECT_THROW(s->emitSameCycle(),nav2_core::NoValidControl);EXPECT_EQ(s->commands,0);
+}
+TEST_F(ControllerPhase, UnstartedTerminalRunOutsideCenterRequestsReplan) {
+  s->centerEntry(.05);s->actual=pose(.12,0,s->ns);s->load(turn(s->ns));
+  const int resets=s->progress->resets;
+  EXPECT_THROW(s->tick(),nav2_core::NoValidControl);EXPECT_FALSE(s->finalActive());
+  EXPECT_EQ(s->progress->resets,resets);EXPECT_EQ(s->commands,0);
+  // A valid full approach to the same original goal may be installed without new permission.
+  auto repair=approach(s->ns);repair.poses.resize(19); // Same original goal (0,0,pi), final TRACK.
+  const int after=s->progress->resets;s->external(repair);s->actual=pose(.12,pi-.2,s->ns);
+  ASSERT_FALSE(s->tick());EXPECT_EQ(s->segmentIndex(),0U);EXPECT_EQ(s->progress->resets,after);
+}
+TEST_F(ControllerPhase, FinalTrackWithoutRotationUsesBindingAwareProxy) {
+  s->centerEntry(.05);s->binding(true);
+  nav_msgs::msg::Path p;p.header=pose(.18,pi,s->ns).header;
+  for(int i=18;i>=1;--i)p.poses.push_back(pose(i*.01,pi,s->ns));
+  p.poses.push_back(pose(.004,pi,s->ns));p.poses.push_back(pose(0,pi,s->ns)); // Original goal wire pose.
+  s->actual=pose(.053,pi-.2,s->ns);s->load(p);s->blockShortcut();
+  ASSERT_FALSE(s->tick());EXPECT_FALSE(s->finalActive());EXPECT_TRUE(s->centerApproachPending());
+  EXPECT_THROW(s->emitSameCycle(),std::runtime_error);
+  EXPECT_NEAR(s->sink->received_xy,.046,1e-12);EXPECT_LT(s->sink->received_xy,.049);
+  geometry_msgs::msg::Pose tolerance;geometry_msgs::msg::Twist velocity;
+  ASSERT_TRUE(s->goal->getTolerances(tolerance,velocity));EXPECT_DOUBLE_EQ(tolerance.position.x,.15);
+}
+TEST_F(ControllerPhase, EntrySmallerThanBindingErrorIsRejected) {
+  s->centerEntry(.005);s->binding(true);
+  auto p=turn(s->ns);for(auto & point:p.poses)point.pose.position.x=.007;
+  p.poses.push_back(pose(0,pi,s->ns));
+  EXPECT_THROW(s->load(p),nav2_core::InvalidPath);
+}
+TEST_F(ControllerPhase, CheckedRotationAdmissionClearsOnRestoreAndExternalPlan) {
+  s->centerEntry(.05);s->actual=pose(.02,.2,s->ns);s->load(turn(s->ns));
+  ASSERT_FALSE(s->tick());s->checkedCommands(0.,.3);ASSERT_NO_THROW(s->emitSameCycle());
+  ASSERT_TRUE(s->rotationStarted());s->actual=pose(.10,.4,s->ns);
+  ASSERT_FALSE(s->tick());EXPECT_TRUE(s->finalActive());ASSERT_NO_THROW(s->emitSameCycle());
+  s->restore();EXPECT_FALSE(s->rotationStarted());
+  EXPECT_THROW(s->emitSameCycle(),nav2_core::NoValidControl);
+  s->actual=pose(.02,0,s->ns);s->load(turn(s->ns));s->blockShortcut();
+  ASSERT_FALSE(s->tick());ASSERT_NO_THROW(s->emitSameCycle());ASSERT_TRUE(s->rotationStarted());
+  s->load(turn(s->ns));EXPECT_FALSE(s->rotationStarted());
+}
+TEST_F(ControllerPhase, CenterApproachCannotContinueOutsideOriginalGoalRegion) {
+  s->centerEntry(.05);s->actual=pose(.12,pi,s->ns);s->load(approach(s->ns));
+  ASSERT_FALSE(s->tick());ASSERT_TRUE(s->centerApproachPending());const int resets=s->progress->resets;
+  s->actual=pose(.151,pi,s->ns);
+  EXPECT_THROW(s->emitSameCycle(),nav2_core::NoValidControl);
+  EXPECT_EQ(s->progress->resets,resets);EXPECT_EQ(s->commands,0);
+}
+TEST_F(ControllerPhase, OriginalGoalDwellWinsOverQuantizedEndpointCenterBound) {
+  s->centerEntry(.05);s->binding(true);
+  nav_msgs::msg::Path p;p.header=pose(.18,pi,s->ns).header;
+  for(int i=18;i>=0;--i)p.poses.push_back(pose(i*.01,pi,s->ns));
+  p.poses.push_back(pose(-.007,pi,s->ns));p.poses.push_back(pose(0,pi,s->ns));
+  s->actual=pose(.12,pi-.2,s->ns);s->load(p);ASSERT_FALSE(s->tick());ASSERT_TRUE(s->centerApproachPending());
+  s->actual=pose(.149,pi,s->ns);bool done=false;
+  for(int i=0;i<10&&!done;++i) {
+    if(i){std::this_thread::sleep_for(std::chrono::milliseconds(50));s->time(i*.05);s->actual=pose(.149,pi,s->ns);}
+    ASSERT_NO_THROW(done=s->tick());
+  }
+  EXPECT_TRUE(done);EXPECT_GE(s->final_zeros,7); // Endpoint distance .156 must not shrink original .15.
+}
+TEST_F(ControllerPhase, NearGoalRepositionRotationIsNotTerminalRunEntry) {
+  s->centerEntry(.05);s->actual=pose(.13,pi/2,s->ns);
+  auto p=approach(s->ns);p.poses.erase(p.poses.begin(),p.poses.begin()+5);
+  p.poses.insert(p.poses.begin(),pose(.13,pi/2,s->ns));s->load(p);
+  ASSERT_FALSE(s->tick());
+  EXPECT_FALSE(s->finalActive());EXPECT_EQ(s->segmentIndex(),0U);
+  EXPECT_THROW(s->emitSameCycle(),std::runtime_error); // Normal pre-approach planned turn is allowed.
+}
+TEST_F(ControllerPhase, A14NonterminalMicroTrackKeepsItsOriginalRepairRule) {
+  s->centerEntry(.05);s->guardNextTurn(true);s->actual=pose(0,0,s->ns);s->load(microTrack(s->ns));
+  s->sweep_free=false;ASSERT_FALSE(s->tick());EXPECT_TRUE(s->repairPending());EXPECT_FALSE(s->centerApproachPending());
+  EXPECT_THROW(s->emitSameCycle(),std::runtime_error);EXPECT_DOUBLE_EQ(s->sink->received_xy,.005);
+  s->actual=pose(.18,0,s->ns);EXPECT_THROW(s->tick(),nav2_core::NoValidControl);
+}
+TEST_F(ControllerPhase, FailedFilledCommandCannotConsumeTerminalEntry) {
+  s->centerEntry(.05);s->actual=pose(.02,.2,s->ns);s->load(turn(s->ns));ASSERT_FALSE(s->tick());
+  s->checkedCommands(0.,.3);s->blockCommandOrigin();
+  EXPECT_THROW(s->emitSameCycle(),nav2_core::NoValidControl);
+  EXPECT_FALSE(s->rotationStarted());EXPECT_EQ(s->commands,0);EXPECT_EQ(s->feedbacks,0);
+}
+TEST_F(ControllerPhase, CheckedZeroDoesNotConsumeFirstRotationAdmission) {
+  s->centerEntry(.05);s->actual=pose(.02,.2,s->ns);s->load(turn(s->ns));ASSERT_FALSE(s->tick());
+  s->checkedCommands(0.,0.);ASSERT_NO_THROW(s->emitSameCycle());
+  EXPECT_FALSE(s->rotationStarted());EXPECT_EQ(s->commands,1);
+  s->time(.05);s->actual=pose(.06,.2,s->ns);EXPECT_THROW(s->emitSameCycle(),nav2_core::NoValidControl);
+  EXPECT_EQ(s->commands,1);
+}
+TEST_F(ControllerPhase, RetainedCenterApproachKeepsOriginalProgressBudget) {
+  s->centerEntry(.05);s->actual=pose(.12,pi,s->ns);s->load(approach(s->ns));ASSERT_FALSE(s->tick());
+  const int resets=s->progress->resets;s->time(10.1);s->actual=pose(.12,pi,s->ns);
+  EXPECT_THROW(s->tick(),nav2_core::FailedToMakeProgress);EXPECT_EQ(s->progress->resets,resets);
+}
+TEST_F(ControllerPhase, CenterAdmissionRejectsDriftAccumulatedAcrossRotationChunks) {
+  nav_msgs::msg::Path p;p.header=pose(0,0,s->ns).header;
+  for(int i=0;i<=6;++i)p.poses.push_back(pose(i*.00009,i*pi/2,s->ns));
+  // Each old chunk is individually within its epsilon. The whole rotation run
+  // drifts farther than the shared-anchor precision and cannot inherit entry.
+  ASSERT_NO_THROW(s->load(p)); // Default-zero preserves the legacy input contract.
+  s->load(approach(s->ns));
+  s->centerEntry(.05);
+  const auto previous=s->loadedPath();const auto index=s->segmentIndex();
+  const int plans=s->sink->plans,resets=s->progress->resets;
+  EXPECT_THROW(s->load(p),nav2_core::InvalidPath);
+  EXPECT_EQ(s->loadedPath(),previous);EXPECT_EQ(s->segmentIndex(),index);
+  EXPECT_EQ(s->sink->plans,plans);EXPECT_EQ(s->progress->resets,resets);
+}
+TEST_F(ControllerPhase, FreshFinalTrackCenterCrossingStopsBeforeImplicitRPPSpin) {
+  s->centerEntry(.05);auto p=approach(s->ns);p.poses.resize(19); // Ends with TRACK at yaw pi.
+  s->actual=pose(.053,pi-.2,s->ns);s->load(p);ASSERT_FALSE(s->tick());
+  ASSERT_FALSE(s->finalActive());const int calls=s->sink->unexpected_compute,zeros=s->zeros;
+  s->checkedCommands(0.,.3);s->time(.05);s->actual=pose(.049,pi-.2,s->ns);
+  ASSERT_NO_THROW(s->emitSameCycle());EXPECT_EQ(s->sink->unexpected_compute,calls);
+  EXPECT_EQ(s->zeros,zeros+1);EXPECT_EQ(s->commands,0);EXPECT_FALSE(s->rotationStarted());
+  ASSERT_FALSE(s->tick());ASSERT_TRUE(s->finalActive());
+  ASSERT_NO_THROW(s->emitSameCycle());EXPECT_EQ(s->commands,1);EXPECT_TRUE(s->rotationStarted());
 }
 } // namespace

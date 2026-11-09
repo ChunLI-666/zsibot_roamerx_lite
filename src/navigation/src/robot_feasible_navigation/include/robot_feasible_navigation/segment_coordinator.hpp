@@ -3,6 +3,7 @@
 #define ROBOT_FEASIBLE_NAVIGATION__SEGMENT_COORDINATOR_HPP_
 
 #include <cstddef>
+#include <cmath>
 #include <vector>
 #include "geometry_msgs/msg/pose.hpp"
 #include "geometry_msgs/msg/twist.hpp"
@@ -54,6 +55,36 @@ public:
   std::size_t size() const {return segments_.size();}
   bool finalSegment() const {return !empty() && index_ + 1 == segments_.size();}
   bool rotating() const {return !empty() && active().kind == Kind::Rotation;}
+  bool trailingRotationsShareAnchor() const {
+    std::size_t first = segments_.size();
+    while (first > 0 && segments_[first - 1].kind == Kind::Rotation) {--first;}
+    if (first == segments_.size()) {return true;}
+    const auto & anchor = segments_[first].path.poses.front().pose.position;
+    for (std::size_t i = first; i < segments_.size(); ++i) {
+      for (const auto & point : segments_[i].path.poses) {
+        if (std::hypot(point.pose.position.x - anchor.x,
+          point.pose.position.y - anchor.y) > 2. * config_.same_xy_epsilon)
+        {return false;}
+      }
+    }
+    return true;
+  }
+  // Read-only tail classification. A >90-degree terminal turn can span several
+  // ordered phases; no later spatially nearby occurrence is selected here.
+  bool terminalRotationRun() const {
+    if (!rotating()) {return false;}
+    for (std::size_t i = index_; i < segments_.size(); ++i) {
+      if (segments_[i].kind != Kind::Rotation) {return false;}
+    }
+    return trailingRotationsShareAnchor();
+  }
+  bool finalApproachTrack() const {
+    if (empty() || rotating()) {return false;}
+    for (std::size_t i = index_ + 1; i < segments_.size(); ++i) {
+      if (segments_[i].kind != Kind::Rotation) {return false;}
+    }
+    return trailingRotationsShareAnchor();
+  }
   const Config & config() const {return config_;}
   const nav_msgs::msg::Path & fullPath() const {return full_path_;}
 

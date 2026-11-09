@@ -179,7 +179,8 @@ protected:
    * @brief Calls velocity publisher to publish the velocity on "cmd_vel" topic
    * @param velocity Twist velocity to be published
    */
-  void publishVelocity(const geometry_msgs::msg::TwistStamped & velocity);
+  virtual void publishVelocity(const geometry_msgs::msg::TwistStamped & velocity);
+  virtual void publishControlFeedback(const std::shared_ptr<Action::Feedback> & feedback);
   /**
    * @brief Calls velocity publisher to publish zero velocity
    */
@@ -324,6 +325,19 @@ protected:
   bool require_next_rotation_clearance_{false};
   double track_approach_xy_tolerance_{.005};
   bool track_approach_pending_{false};
+  double terminal_rotation_entry_xy_tolerance_{0.};
+  double goal_binding_error_{0.};
+  // Admission lasts from the first filled-checked nonzero rotation command to
+  // the end of this terminal run. Internal rotation chunks retain it; external
+  // plans, restore, and new goals must enter again.
+  bool terminal_rotation_started_{false};
+  bool terminal_center_approach_pending_{false};
+  double terminalEntryXY(double original_xy) const;
+  double terminalRPPXY(double original_xy) const;
+  bool terminalCenterReached(const geometry_msgs::msg::PoseStamped & path_pose,
+    double original_xy) const;
+  void enforceTerminalRotationEntry(const geometry_msgs::msg::PoseStamped & path_pose,
+    double original_xy) const;
   void clearSegmentState();
   geometry_msgs::msg::PoseStamped actualPathPose();
   virtual geometry_msgs::msg::PoseStamped toPathPose(const geometry_msgs::msg::PoseStamped & actual);
