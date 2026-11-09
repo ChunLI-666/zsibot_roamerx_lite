@@ -419,4 +419,67 @@ TEST_F(StoppedTerminal, FarFinalTrackPathAlignmentIsNotTerminalBraking) {
   auto cmd=commandAt(1.,0.,M_PI_2,0.,0.,.1);
   EXPECT_DOUBLE_EQ(cmd.twist.linear.x,0.);EXPECT_GT(std::abs(cmd.twist.angular.z),0.);
 }
+
+class FastOnlyBraking : public StoppedTerminal {
+protected:
+  void configureExtra() override {
+    StoppedTerminal::configureExtra();
+    node_->declare_parameter("FollowPath.terminal_early_braking_min_linear_velocity",.30);
+    node_->declare_parameter("FollowPath.rpp.approach_velocity_scaling_dist",.3);
+  }
+};
+class FastOnlyB34Geometry : public FastOnlyBraking {
+protected:
+  double mapOrigin() const override {return 1.;}
+};
+
+TEST_F(FastOnlyBraking, OuterWindowLowMeasuredSpeedRetainsOriginalForwardFloor) {
+  publisher_->on_activate();
+  for (double speed:{.10,.20,.30}) {
+    SCOPED_TRACE(speed);
+    controller_->reset();controller_->setPlan(turnPlan(.3));checker_->reset();
+    auto cmd=command(.14,speed);
+    // Original .4 desired/regulated/approach floors are retained. This is a
+    // native command assertion, not evidence that the simulator has moved.
+    EXPECT_DOUBLE_EQ(cmd.twist.linear.x,.4);EXPECT_NEAR(cmd.twist.angular.z,0.,1e-8);
+  }
+  controller_->reset();controller_->setPlan(turnPlan(.3));checker_->reset();
+  auto fast=command(.14,.31);
+  EXPECT_DOUBLE_EQ(fast.twist.linear.x,0.);EXPECT_DOUBLE_EQ(fast.twist.angular.z,0.);
+  controller_->reset();controller_->setPlan(turnPlan(.3));checker_->reset();
+  // The gate uses the measured planar norm, not its forward component alone.
+  auto lateral=commandAt(.14,0.,M_PI,.20,.24);
+  EXPECT_DOUBLE_EQ(lateral.twist.linear.x,0.);EXPECT_DOUBLE_EQ(lateral.twist.angular.z,0.);
+}
+
+TEST_F(FastOnlyB34Geometry, RecordedFastApproachesRetainCheckedEarlyZero) {
+  publisher_->on_activate();
+  for (const auto & recorded:b34TerminalApproaches()) {
+    SCOPED_TRACE(recorded.plan_header_ns);
+    nav_msgs::msg::Path p;p.header.frame_id="map";p.header.stamp=node_->now();
+    for (const auto & row:recorded.wire_poses) {
+      auto x=pose(row[0],row[2]);x.pose.position.y=row[1];x.header=p.header;p.poses.push_back(x);
+    }
+    // Same cached geometry/Native velocity evidence and separate fixture clock
+    // as B20. Planned-anchor + recorded twist remains a controlled combination.
+    for (const auto & actual:{recorded.planned_track_start,recorded.native_pose}) {
+      controller_->reset();controller_->setPlan(p);checker_->reset();
+      auto cmd=commandAt(actual[0],actual[1],actual[2],recorded.body_twist[0],
+        recorded.body_twist[1],recorded.body_twist[2]);
+      EXPECT_DOUBLE_EQ(cmd.twist.linear.x,0.);EXPECT_DOUBLE_EQ(cmd.twist.angular.z,0.);
+    }
+  }
+}
+
+TEST_F(FastOnlyBraking, CenteredFirstTurnStillNeedsOriginalFullMeasuredStop) {
+  publisher_->on_activate();controller_->setPlan(turnPlan(.3));checker_->reset();
+  auto moving=command(.04,.10);
+  EXPECT_DOUBLE_EQ(moving.twist.linear.x,0.);EXPECT_DOUBLE_EQ(moving.twist.angular.z,0.);
+  auto rotating=commandAt(.04,0.,M_PI,.02,0.,.10);
+  EXPECT_DOUBLE_EQ(rotating.twist.linear.x,0.);EXPECT_DOUBLE_EQ(rotating.twist.angular.z,0.);
+  auto stopped=command(.04);
+  EXPECT_DOUBLE_EQ(stopped.twist.linear.x,0.);EXPECT_GT(std::abs(stopped.twist.angular.z),0.);
+  auto active=command(.10);
+  EXPECT_DOUBLE_EQ(active.twist.linear.x,0.);EXPECT_GT(std::abs(active.twist.angular.z),0.);
+}
 }  // namespace

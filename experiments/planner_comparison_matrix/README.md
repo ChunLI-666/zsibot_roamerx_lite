@@ -483,3 +483,23 @@ compatible same-goal plan cannot discard the pending brake or mandatory cursor.
 No smoother, speed, SDK or collision thresholds change. Public DSO fixtures
 include both cached B34 terminal approaches with a separate fixture clock;
 these checks do not prove sufficient physical stopping distance or route success.
+
+## B21: distinguish early braking from the mandatory measured stop
+
+B35 stopped outside the center twice and requested a fresh original-goal path;
+its last recorded goal error was about .11565 m without the intended turn.
+The official SIM candidate now sets
+`terminal_early_braking_min_linear_velocity` to .30 m/s. Its default .03 m/s
+retains B20. This parameter affects only the planar measured-speed test for
+early braking on the ordered last TRACK inside the original .15 m window.
+
+The first nonzero terminal angular command still requires the original full
+measured stop (.03 m/s and .05 rad/s), a fresh .05 m center check and all filled
+sweeps. The .15 m/.08 rad final goal and checked .3 second stop are unchanged.
+Desired, regulated-minimum and approach-minimum linear speeds remain .4 m/s;
+the actual RPP approach scaling distance remains .3 m. SDK mapping and its
+motion threshold are unchanged. The separate default-off and Hybrid behaviors
+are retained. Low measured speed can permit an ordinary .4 m/s forward command;
+this software result proves neither simulator response nor physical low-speed
+motion. New closed-loop evidence is required before claiming the repeated
+short-stop failure is resolved.

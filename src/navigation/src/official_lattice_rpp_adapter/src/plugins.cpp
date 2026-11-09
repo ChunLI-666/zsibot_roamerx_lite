@@ -238,6 +238,11 @@ public:
     terminal_stop_before_rotation_=parameter(node,name+".terminal_stop_before_rotation",false);
     require(!terminal_stop_before_rotation_||terminal_binding_,
       "terminal stop-before-rotation requires original-goal binding");
+    terminal_early_braking_min_linear_velocity_=parameter(node,
+      name+".terminal_early_braking_min_linear_velocity",goal_region::kTerminalTransStoppedVelocity);
+    require(std::isfinite(terminal_early_braking_min_linear_velocity_)&&
+      terminal_early_braking_min_linear_velocity_>=goal_region::kTerminalTransStoppedVelocity,
+      "terminal early-braking speed must be finite and at least the measured stop threshold");
     terminal_entry_xy_=parameter(node,name+".terminal_rotation_entry_xy_tolerance",0.);
     require(std::isfinite(terminal_entry_xy_)&&terminal_entry_xy_>=0.&&terminal_entry_xy_<=.25,
       "invalid terminal rotation entry XY tolerance");
@@ -389,8 +394,8 @@ public:
     const auto measured=measuredOdometry();
     const bool measured_stopped=goal_region::terminalMeasuredStopped(measured.twist.twist);
     const auto measured_odom_stamp=rclcpp::Time(measured.header.stamp).nanoseconds();
-    const bool linear_moving=std::hypot(measured.twist.twist.linear.x,
-      measured.twist.twist.linear.y)>goal_region::kTerminalTransStoppedVelocity;
+    const bool early_braking_speed=std::hypot(measured.twist.twist.linear.x,
+      measured.twist.twist.linear.y)>terminal_early_braking_min_linear_velocity_;
     auto * map=map_->getCostmap();
     std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> lock(*map->getMutex());
     const auto fp=map_->getRobotFootprint();
@@ -492,7 +497,7 @@ public:
     if (!terminal_armed_) {
       auto [begin,end]=handler_->findPlanSegment(pose);
       segment=handler_->transformLocalPlan(begin,end);
-      if (terminal_stop_before_rotation_&&!terminal_rotation_started_&&in_original_region&&linear_moving&&
+      if (terminal_stop_before_rotation_&&!terminal_rotation_started_&&in_original_region&&early_braking_speed&&
         handler_->terminalTrackActive(binding_->suffix_begin,binding_->rotation_begin))
       {
         return begin_braking(pose); // Original .15 braking window, before .05 turn admission.
@@ -688,6 +693,7 @@ private:
   double initial_goal_max_xy_error_=.25;
   double terminal_entry_xy_=0.; // Zero retains the existing goal-radius behavior.
   bool terminal_stop_before_rotation_=false;
+  double terminal_early_braking_min_linear_velocity_=goal_region::kTerminalTransStoppedVelocity;
   bool terminal_braking_=false,terminal_rotation_started_=false;
   double terminal_resolution_=0.01,terminal_extent_=20.;
   std::shared_ptr<const goal_region::Binding> binding_;
