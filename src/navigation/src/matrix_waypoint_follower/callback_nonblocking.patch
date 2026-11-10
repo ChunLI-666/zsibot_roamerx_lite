@@ -1,0 +1,28 @@
+--- a/src/waypoint_follower.cpp
++++ b/src/waypoint_follower.cpp
+@@ -14,6 +14,7 @@
+ 
+ #include "nav2_waypoint_follower/waypoint_follower.hpp"
+ 
++#include <chrono>
+ #include <fstream>
+ #include <memory>
+ #include <streambuf>
+@@ -410,7 +411,16 @@
+ WaypointFollower::resultCallback(
+   const rclcpp_action::ClientGoalHandle<ClientT>::WrappedResult & result)
+ {
+-  if (result.goal_id != future_goal_handle_.get()->get_goal_id()) {
++  // This callback shares the only executor that can fulfill the new goal future.
++  // rclcpp_action sets that future before make_result_aware() sends GetResult;
++  // a result arriving while it is pending therefore belongs to an older goal.
++  if (!future_goal_handle_.valid() ||
++    future_goal_handle_.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
++  {
++    return;
++  }
++  const auto goal_handle = future_goal_handle_.get();
++  if (!goal_handle || result.goal_id != goal_handle->get_goal_id()) {
+     RCLCPP_DEBUG(
+       get_logger(),
+       "Goal IDs do not match for the current goal handle and received result."
