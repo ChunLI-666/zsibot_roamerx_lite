@@ -71,11 +71,15 @@ class StorageWorker:
             self._jobs.put_nowait((self._sequence,name,copy.deepcopy(args),copy.deepcopy(kwargs),output,export_if_changed,future))
             while not future.done():
                 self._drain_timing()
+                pumped=False
                 if self.pump is not None:
-                    try:self.pump()
+                    try:self.pump();pumped=True
                     except BaseException as exc:deferred=deferred or exc
-                try:future.result(timeout=.002)
-                except TimeoutError:pass
+                # The ROS pump already has a bounded idle spin. A second wait
+                # after every ready callback would throttle a backlogged executor.
+                if not pumped:
+                    try:future.result(timeout=.002)
+                    except TimeoutError:pass
             result,state,error,drops,observation=future.result()
             self._state=state;self.timing_drops=max(self.timing_drops,drops);self._drain_timing()
             if self._sink is not None:
