@@ -196,7 +196,8 @@ class ReconcileCliTests(unittest.TestCase):
             root=Path(directory);before,sample=self.synthetic_state(root)
             self.run_cli(root,before,sample,tamper=True)
     def test_real_a15_observations_and_cli_binding(self):
-        workspace=Path(os.environ.get('MATRIX_EVIDENCE_ROOT',str(HERE.parents[4])))
+        workspace=Path(os.environ['MATRIX_EVIDENCE_ROOT']) if os.environ.get('MATRIX_EVIDENCE_ROOT') else next(
+            (ancestor for ancestor in HERE.parents if (ancestor/'analysis_outputs').is_dir()),HERE)
         evidence=workspace/'analysis_outputs/planner_comparison_20261105/space_agent_recovery_20261110/astra/reconcile_evidence_fix_v1/A15_readonly'
         original=evidence/'invocation_000/client_output/attempt_01/native_result.json'
         settled=evidence/'reconcile_000/client_output/settle/native_result.json'

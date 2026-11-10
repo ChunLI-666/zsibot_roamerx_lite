@@ -17,7 +17,8 @@ from mission_state import MissionStore,Hold,digest
 
 class SealedA12(unittest.TestCase):
     def test_real_prefix_closure_identity_and_negative_controls(self):
-        workspace=Path(os.environ.get('MATRIX_EVIDENCE_ROOT',str(HERE.parents[4])))
+        workspace=Path(os.environ['MATRIX_EVIDENCE_ROOT']) if os.environ.get('MATRIX_EVIDENCE_ROOT') else next(
+            (ancestor for ancestor in HERE.parents if (ancestor/'analysis_outputs').is_dir()),HERE)
         base=workspace/'analysis_outputs/planner_comparison_20261105'
         old=base/'native_A12_Source8_F011_lifecycle_HOLD_20261109_solmax_v1'
         source=old/'execution_A12_formal41_v1/result.remote.raw.json'
