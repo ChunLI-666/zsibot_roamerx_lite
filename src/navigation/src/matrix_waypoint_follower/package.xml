@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>matrix_waypoint_follower</name><version>1.3.13</version>
+  <description>Source-pinned official Jazzy waypoint follower with nonblocking stale-result guard.</description>
+  <maintainer email="lingyihu@navigo.com">lingyihu</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend><depend>rclcpp_action</depend><depend>rclcpp_lifecycle</depend>
+  <depend>rclcpp_components</depend><depend>nav_msgs</depend><depend>nav2_msgs</depend>
+  <depend>nav2_util</depend><depend>tf2_ros</depend><depend>nav2_core</depend>
+  <depend>pluginlib</depend><depend>robot_localization</depend><depend>geographic_msgs</depend>
+  <exec_depend>nav2_waypoint_follower</exec_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

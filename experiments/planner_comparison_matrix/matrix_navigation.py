@@ -8,6 +8,7 @@ import yaml
 from static_layer_snapshot import EXCLUDED_LAYERS,capture as capture_static_layers,audit_recorded as audit_static_layers
 from recording_deadline import arm as arm_deadline,runtime_seconds,process_identity
 import recovery_navigation
+import waypoint_runtime
 BASE=pathlib.Path(__file__).resolve().parent
 NAV=BASE.parents[1]
 def sha(path):
@@ -278,9 +279,10 @@ def source_snapshot(path,template,with_waypoints=False):
     if not isinstance(files,dict) or not files:raise ValueError('Source snapshot requires source file hashes')
     root=NAV.resolve()
     # The wrapper executes before this process; the other files are consumed here.
-    required=[pathlib.Path(__file__),BASE/'recovery_navigation.py',BASE/'static_layer_snapshot.py',BASE/'recording_deadline.py',BASE/'run_matrix_navigation.sh',
+    required=[pathlib.Path(__file__),BASE/'recovery_navigation.py',BASE/'waypoint_runtime.py',BASE/'static_layer_snapshot.py',BASE/'recording_deadline.py',BASE/'run_matrix_navigation.sh',
       template,NAV/'src/navigation/src/robot_navigo/scripts/nav_safety_gate.py']
     if with_waypoints:
+        required += [NAV/name for name in waypoint_runtime.SOURCE_FILES]
         required += [BASE/'goal_pilot_source'/name for name in
           ['waypoint_batch.py','waypoint_contract.py','pilot_scan_timing.py','message_info_contract.py','mission_state.py','mission_resume.py','mission_continuation.py','mission_storage.py']]
     required_names=set()
@@ -407,6 +409,8 @@ def simulation_scan_latency_profile(max_age=.3):
 
 
 def prepare(args):
+    waypoint_binding=waypoint_runtime.artifacts(getattr(args,'waypoint_install',None),
+      getattr(args,'waypoint_build_receipt',None),NAV) if args.with_waypoints else None
     scan_profile=simulation_scan_latency_profile(getattr(args,'simulation_scan_max_age_sec',.3))
     if getattr(args,'health_tf_latest_only',False) and scan_profile['operational_max_age_sec']!=.5:
         raise ValueError('Latest-only health TF observation requires the explicit simulation profile')
@@ -557,6 +561,8 @@ def prepare(args):
     manifest['controller_recovery']=dict(enabled=recovery is not None,maximum_retries=1 if recovery else 0,policy='Measured checked zero and fresh continuous Odom stop, current-body original-goal replan, fenced release before FollowPath; no fixed delay')
     d['bt_navigator']['ros__parameters']['default_nav_to_pose_bt_xml']=str(bt)
     manifest['with_waypoints']=args.with_waypoints
+    manifest['waypoint_runtime']=waypoint_binding
+    if waypoint_binding:shutil.copy2(args.waypoint_build_receipt,out/'waypoint_build_receipt.json')
     if args.with_waypoints:
         # Official Jazzy 1.3.13: one native batch, internally one NavigateToPose
         # per leg. The existing single-goal BT and terminal binding stay intact.
@@ -572,10 +578,11 @@ def prepare(args):
         source_files=[BASE/'goal_pilot_source'/name for name in
           ['waypoint_batch.py','waypoint_contract.py','pilot_scan_timing.py','message_info_contract.py']]
         underlay_files=[pathlib.Path('/opt/ros/jazzy')/name for name in
-          ['lib/nav2_waypoint_follower/waypoint_follower','lib/libwaypoint_follower_core.so','lib/libwait_at_waypoint.so',
+          ['lib/libwait_at_waypoint.so',
            'share/nav2_waypoint_follower/package.xml','share/nav2_msgs/action/FollowWaypoints.action','share/nav2_msgs/msg/MissedWaypoint.msg',
            'lib/nav2_bt_navigator/bt_navigator','lib/libnav2_navigate_to_pose_navigator.so','share/nav2_bt_navigator/package.xml']]
         manifest['waypoint_contract']=dict(package_version=waypoint_version,parameters=WAYPOINT_PARAMETERS,number_of_loops=0,goal_index=0,
+          guarded_runtime=waypoint_binding,
           underlay_files_sha256={str(path):sha(path) for path in underlay_files},
           client_sources_sha256={str(path.relative_to(NAV)):sha(path) for path in source_files},
           semantics='One native FollowWaypoints request; internal sequential NavigateToPose requests, no retry or skip after failure. Feedback is not visit proof.',
@@ -611,6 +618,8 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
             raise RuntimeError('Deployment source snapshot changed after preparation')
         source_snapshot(frozen,pathlib.Path(args.template).absolute(),args.with_waypoints)
     if args.with_waypoints:
+        if waypoint_runtime.artifacts(args.waypoint_install,args.waypoint_build_receipt,NAV)!=manifest['waypoint_runtime']:
+            raise RuntimeError('Waypoint overlay changed after preparation')
         for path,digest in manifest['waypoint_contract']['underlay_files_sha256'].items():
             if sha(path)!=digest:raise RuntimeError('Native waypoint underlay changed after preparation: '+path)
         for name,digest in manifest['waypoint_contract']['client_sources_sha256'].items():
@@ -809,6 +818,8 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
     commit=receipt.get('repository_commit','')
     if len(commit)!=40 or any(c not in '0123456789abcdef' for c in commit):raise RuntimeError('Build receipt requires full repository_commit SHA')
     if receipt.get('source_files_match_commit') is not True:raise RuntimeError('Build receipt must prove selected source files match its commit')
+    if args.with_waypoints and manifest['waypoint_runtime']['repository_commit']!=commit:
+        raise RuntimeError('Waypoint overlay and primary runtime commit differ')
     declared=receipt.get('artifact_sha256',{})
     required=['lib/libsegment_controller_core.so','lib/libsafe_lattice_planner.so','lib/robot_feasible_navigation/segment_controller_server'] if args.variant=='segmented' else ['lib/libofficial_lattice_rpp_adapter.so']
     for rel in required:
@@ -820,6 +831,11 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
     lifecycle_prefix=pathlib.Path(args.lifecycle_install).resolve() if args.lifecycle_install else None
     lifecycle_env=env.copy()
     if lifecycle_prefix:lifecycle_env['LD_LIBRARY_PATH']=str(lifecycle_prefix/'lib')+':'+env['LD_LIBRARY_PATH']
+    waypoint_prefix=pathlib.Path(args.waypoint_install).resolve() if args.with_waypoints else None
+    waypoint_env=env.copy()
+    if waypoint_prefix:
+        waypoint_env['LD_LIBRARY_PATH']=str(waypoint_prefix/'lib')+':'+env['LD_LIBRARY_PATH']
+        waypoint_env['AMENT_PREFIX_PATH']=str(waypoint_prefix)+':'+env['AMENT_PREFIX_PATH']
     message_runtime=out/'message_runtime';shutil.copytree(pathlib.Path(args.message_install).resolve(),message_runtime)
     recorder_env=env.copy()
     recorder_env['AMENT_PREFIX_PATH']=str(message_runtime)+':'+env['AMENT_PREFIX_PATH']
@@ -887,13 +903,14 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
           ('nav2_controller','controller_server','controller_server',['-r','cmd_vel:='+recovery['raw_topic'] if recovery else 'cmd_vel:=cmd_vel_nav']),
           ('nav2_velocity_smoother','velocity_smoother','velocity_smoother',['-r','cmd_vel:=cmd_vel_nav','-r','cmd_vel_smoothed:=cmd_vel']),
           ('nav2_bt_navigator','bt_navigator','bt_navigator',['-r','goal_pose:='+private_goal_topic] if args.with_waypoints else [])]
-        if args.with_waypoints:servers.append(('nav2_waypoint_follower','waypoint_follower','waypoint_follower',[]))
+        if args.with_waypoints:servers.append(('matrix_waypoint_follower','waypoint_follower','waypoint_follower',[]))
         servers.append(('nav2_lifecycle_manager','lifecycle_manager','lifecycle_manager',[]))
         for package,exe,name,remaps in servers:
             exe_path=str(runtime/'lib/robot_feasible_navigation/segment_controller_server') if name=='controller_server' and args.variant=='segmented' else '/opt/ros/jazzy/lib/'+package+'/'+exe
             if name=='lifecycle_manager' and lifecycle_prefix:exe_path=str(lifecycle_prefix/'lib/nav2_lifecycle_manager/lifecycle_manager')
+            if name=='waypoint_follower':exe_path=str(waypoint_prefix/waypoint_runtime.EXECUTABLE)
             if name=='bt_navigator' and args.with_waypoints:bt_launch_steady_ns=time.monotonic_ns()
-            launch(name,[exe_path]+common+remaps,lifecycle_env if name=='lifecycle_manager' else None)
+            launch(name,[exe_path]+common+remaps,lifecycle_env if name=='lifecycle_manager' else waypoint_env if name=='waypoint_follower' else None)
             if name=='bt_navigator' and args.with_waypoints:
                 pid=dict(procs)[name].pid
                 bt_binding=dict(run_id=deadline_guard.manifest['run_id'],private_goal_topic=private_goal_topic,
@@ -972,11 +989,14 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
             maps=pathlib.Path(f'/proc/{p.pid}/maps').read_text()
             libraries=set(line.split()[-1] for line in maps.splitlines() if len(line.split())>=6 and
               ('/opt/ros/jazzy/lib/' in line or str(runtime/'lib') in line or
-               (lifecycle_prefix and str(lifecycle_prefix/'lib') in line)))
+               (lifecycle_prefix and str(lifecycle_prefix/'lib') in line) or
+               (waypoint_prefix and str(waypoint_prefix/'lib') in line)))
             identities[name]=dict(pid=p.pid,cmdline=pathlib.Path(f'/proc/{p.pid}/cmdline').read_bytes().replace(b'\0',b' ').decode(),maps=maps,
               selected_libraries_sha256={library:sha(library) for library in libraries if pathlib.Path(library).is_file()})
         write(out/'runtime_identities.json',identities)
         if args.with_waypoints:
+            waypoint_runtime.verify_runtime(manifest['waypoint_runtime'],identities['waypoint_follower'],
+              pathlib.Path('/proc')/str(identities['waypoint_follower']['pid'])/'exe')
             bt_binding['artifacts']=[]
             for path in ['/opt/ros/jazzy/lib/nav2_bt_navigator/bt_navigator','/opt/ros/jazzy/lib/libnav2_navigate_to_pose_navigator.so']:
                 before=artifact_stat(path);observed=sha(path);after=artifact_stat(path)
@@ -1196,6 +1216,8 @@ def main():
     p.add_argument('--recovery-install',help='Frozen matrix_recovery_bt install prefix')
     p.add_argument('--recovery-build-receipt',help='Commit-bound recovery artifact receipt')
     p.add_argument('--with-waypoints',action='store_true',help='Activate the native Jazzy FollowWaypoints server for an independently authorized ordered batch client')
+    p.add_argument('--waypoint-install',help='Isolated source-pinned official 1.3.13 callback-guard prefix')
+    p.add_argument('--waypoint-build-receipt',help='Required with native waypoints; exact source/build/runtime binding')
     args=p.parse_args();out,install,manifest=prepare(args)
     if args.run:
         deadline_guard=None;ready_storage=None

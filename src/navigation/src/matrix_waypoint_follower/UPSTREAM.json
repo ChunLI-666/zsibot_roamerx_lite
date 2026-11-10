@@ -1,0 +1,19 @@
+{
+  "repository": "https://github.com/ros-navigation/navigation2",
+  "tag": "1.3.13",
+  "commit": "f4108e5b1c2bce804a1aa0c7be6673a8eb4a1501",
+  "files": {
+    "src/waypoint_follower.cpp": {
+      "upstream_path": "nav2_waypoint_follower/src/waypoint_follower.cpp",
+      "sha256": "a9d7f49d89f8e2ef311c9c307d8d39e6783577b9ff34d0a5eb2cd47a9a89abfe"
+    },
+    "include/nav2_waypoint_follower/waypoint_follower.hpp": {
+      "upstream_path": "nav2_waypoint_follower/include/nav2_waypoint_follower/waypoint_follower.hpp",
+      "sha256": "130907ab76e81d607087d15e2b97e8c408cde5a0155770cdb2d00605f508a7d4"
+    },
+    "src/main.cpp": {
+      "upstream_path": "nav2_waypoint_follower/src/main.cpp",
+      "sha256": "eee3ac48ceee17f1294d015b8389c57a8704077c0da58a69ed4efc86e452e7f6"
+    }
+  }
+}
