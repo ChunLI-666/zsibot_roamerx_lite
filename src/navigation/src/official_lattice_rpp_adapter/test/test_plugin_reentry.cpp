@@ -347,12 +347,39 @@ TEST_F(StoppedTerminal, BrakeInOuterWindowThenRequireFullStopAtCenter) {
 TEST_F(StoppedTerminal, StopShortOfCenterRequestsFiniteFreshPath) {
   publisher_->on_activate();controller_->setPlan(turnPlan(.3));checker_->reset();
   command(.14,.4);
+  testing::internal::CaptureStderr();
   try {command(.10);FAIL()<<"An off-center braking stop needs a fresh path";}
   catch (const nav2_core::NoValidControl & error) {
     EXPECT_NE(std::string(error.what()).find("fresh original-goal path"),std::string::npos);
   }
+  const auto context=testing::internal::GetCapturedStderr();
+  RecordProperty("braking_failure_context",context);
+  for (const char * field:{"terminal_failure_context_v1 reason=braking_stopped_outside_center",
+    "original_goal_xyz=", "path_endpoint_xyz=", "body_frame=", "path_body_frame=",
+    "measured_original_stamp_ns=", "measured_linear=", "last_plugin_return_vx_vy_wz=",
+    "handler_prefix_offset=", "handler_heading_next=", "terminal_braking=", "entry_xy_limit=",
+    "original_xy_limit=", "in_entry_region=0", "in_original_region=1", "measured_stopped=1"}) {
+    EXPECT_NE(context.find(field),std::string::npos)<<field<<'\n'<<context;
+  }
   controller_->setPlan(turnPlan(.10));checker_->reset();
   auto repair=command(.10);EXPECT_GT(repair.twist.linear.x,0.);
+}
+
+TEST_F(StoppedTerminal, RotationExitRecordsCursorWithoutGrantingCompletion) {
+  publisher_->on_activate();controller_->setPlan(turnPlan(.3));checker_->reset();
+  command(.14,.4);command(.04);
+  testing::internal::CaptureStderr();
+  EXPECT_THROW(command(.16),nav2_core::NoValidControl);
+  const auto context=testing::internal::GetCapturedStderr();
+  RecordProperty("rotation_failure_context",context);
+  for (const char * field:{"terminal_failure_context_v1 reason=rotation_left_original_region",
+    "path_geometry_digest=", "binding_generation=", "body_xyz=", "original_goal_xyz=",
+    "handler_constraint_locale=", "handler_rotation_active=", "terminal_heading_next=",
+    "terminal_heading_count=", "terminal_armed=1", "in_original_region=0",
+    "command_boundary=plugin_return_not_downstream_measured_command"}) {
+    EXPECT_NE(context.find(field),std::string::npos)<<field<<'\n'<<context;
+  }
+  EXPECT_FALSE(reached(.16));
 }
 
 TEST_F(StoppedTerminal, CompatibleBrakingPlanCannotResetMandatoryPrefix) {

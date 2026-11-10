@@ -105,6 +105,17 @@ public:
   const goal_region::HeadingCursor & constraintHeadings() const {return constraint_headings_;}
   bool constraintRotationActive() const {return ordered_rotations_&&constraint_locale_!=0u&&constraint_near_anchor_;}
   bool finalPrefixActive() const {return constraint_locale_==0u;}
+  struct DiagnosticState {
+    std::size_t global_offset,prefix_offset,constraint_locale,constraint_heading_start;
+    std::size_t remaining_plan_poses,current_prefix_poses,heading_next,heading_count;
+    bool ordered_rotations,near_anchor,rotation_active,final_prefix;
+  };
+  DiagnosticState diagnosticState() const {
+    return {global_offset_,prefix_offset_,constraint_locale_,constraint_heading_start_,
+      global_plan_.poses.size(),global_plan_up_to_constraint_.poses.size(),
+      constraint_headings_.next(),constraint_headings_.headings().size(),
+      ordered_rotations_,constraint_near_anchor_,constraintRotationActive(),finalPrefixActive()};
+  }
   bool terminalHandoffReady(std::size_t suffix_begin,double limit) const {
     return prefix_offset_>=suffix_begin && finalPrefixWithin(limit);
   }

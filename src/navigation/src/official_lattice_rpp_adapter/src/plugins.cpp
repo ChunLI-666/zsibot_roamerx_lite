@@ -4,6 +4,8 @@
 #include <limits>
 #include <mutex>
 #include <chrono>
+#include <iomanip>
+#include <sstream>
 #include <unordered_map>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav2_core/controller.hpp>
@@ -407,7 +409,8 @@ public:
       if (!sweep::commandSweepFree(*map,fp,actual.pose.position.x,actual.pose.position.y,
         yaw(actual.pose),0.,0.,horizon_)) {throw nav2_core::NoValidControl("Filled terminal stop sweep blocked");}
       geometry_msgs::msg::TwistStamped zero;zero.header=actual.header;
-      completion_->finishCycle(generation,ready&&!terminal_cancelled_);return zero;
+      completion_->finishCycle(generation,ready&&!terminal_cancelled_);
+      last_returned_command_=zero;last_returned_command_valid_=true;return zero;
     };
     const auto zero_command=[&](bool ready) {return zero_at(pose,ready);};
     const auto begin_braking=[&](const geometry_msgs::msg::PoseStamped & actual) {
@@ -426,6 +429,8 @@ public:
       in_entry_region=std::hypot(path_pose.pose.position.x-binding_->original_goal.pose.position.x,
         path_pose.pose.position.y-binding_->original_goal.pose.position.y)<=entry_xy;
       if (terminal_armed_&&!in_original_region&&!terminal_drift_active_) {
+        logTerminalFailure("rotation_left_original_region",pose,path_pose,measured,entry_xy,
+          tolerance.position.x,yaw_tolerance,in_entry_region,in_original_region,measured_stopped);
         throw nav2_core::NoValidControl("Actual body left original goal region during terminal rotation");
       }
     }
@@ -454,6 +459,8 @@ public:
       const bool original_stopped_goal=completed&&in_original_region&&
         std::abs(angle(yaw(path_pose.pose),yaw(binding_->original_goal.pose)))<=yaw_tolerance;
       if (!in_entry_region&&!original_stopped_goal) {
+        logTerminalFailure("braking_stopped_outside_center",pose,path_pose,measured,entry_xy,
+          tolerance.position.x,yaw_tolerance,in_entry_region,in_original_region,measured_stopped);
         throw nav2_core::NoValidControl("Terminal braking stopped outside center; fresh original-goal path required");
       }
     }
@@ -533,6 +540,8 @@ public:
         path_pose.pose.position.x,path_pose.pose.position.y,tolerance.position.x,
         !terminal_headings_.complete(),terminal_correction_active_)) {
         if (!in_original_region&&(terminal_headings_.complete()||terminal_correction_active_)) {
+          logTerminalFailure("rotation_left_original_region_after_drift",pose,path_pose,measured,entry_xy,
+            tolerance.position.x,yaw_tolerance,in_entry_region,in_original_region,measured_stopped);
           throw nav2_core::NoValidControl("Actual body left original goal region during terminal rotation");
         }
         throw nav2_core::NoValidControl("Terminal Track exceeded fixed-pivot or original-goal execution envelope");
@@ -677,6 +686,7 @@ public:
     if (checked_terminal_entry) {terminal_rotation_started_=true;}
     // Bound terminal completion is published only by the zero/stop hold above.
     completion_->finishCycle(generation,!terminal_binding_&&handler_->finalPrefixWithin(remaining_length_));
+    last_returned_command_=cmd;last_returned_command_valid_=true;
     return cmd;
   }
 private:
@@ -703,6 +713,66 @@ private:
   double command_yaw_limit_=.3;
   bool terminal_drift_active_=false;
   bool terminal_correction_active_=false;
+  geometry_msgs::msg::TwistStamped last_returned_command_;
+  bool last_returned_command_valid_=false;
+  void logTerminalFailure(const char * reason,const geometry_msgs::msg::PoseStamped & body,
+    const geometry_msgs::msg::PoseStamped & path_body,const nav_msgs::msg::Odometry & measured,
+    double entry_xy,double original_xy,double original_yaw,bool in_entry,bool in_original,bool stopped) const
+  {
+    // Failure-only scalar snapshot, before the existing exception. No path copy,
+    // new subscriptions, command publication or change to any decision predicate.
+    auto node=node_.lock();if (!node) {return;}
+    std::ostringstream out;out<<std::setprecision(17)<<"terminal_failure_context_v1 reason="<<reason
+      <<" installed_path_frame="<<std::quoted(path_frame_);
+    const auto pose_fields=[&](const char * name,const geometry_msgs::msg::PoseStamped & p) {
+      out<<' '<<name<<"_frame="<<std::quoted(p.header.frame_id)
+        <<' '<<name<<"_stamp_ns="<<rclcpp::Time(p.header.stamp).nanoseconds()
+        <<' '<<name<<"_xyz="<<p.pose.position.x<<','<<p.pose.position.y<<','<<p.pose.position.z
+        <<' '<<name<<"_quaternion="<<p.pose.orientation.x<<','<<p.pose.orientation.y<<','
+        <<p.pose.orientation.z<<','<<p.pose.orientation.w<<' '<<name<<"_yaw="<<yaw(p.pose);
+    };
+    pose_fields("body",body);pose_fields("path_body",path_body);
+    if (binding_) {
+      pose_fields("original_goal",binding_->original_goal);
+      if (!binding_->executable.poses.empty()) {pose_fields("path_endpoint",binding_->executable.poses.back());}
+      out<<" binding_generation="<<binding_->generation<<" path_geometry_digest="<<binding_->geometric_digest
+        <<" suffix_begin="<<binding_->suffix_begin<<" rotation_begin="<<binding_->rotation_begin;
+    }
+    const auto & v=measured.twist.twist;
+    out<<" measured_frame="<<std::quoted(measured.header.frame_id)
+      <<" measured_child_frame="<<std::quoted(measured.child_frame_id)
+      <<" measured_original_stamp_ns="<<rclcpp::Time(measured.header.stamp).nanoseconds()
+      <<" measured_linear="<<v.linear.x<<','<<v.linear.y<<','<<v.linear.z
+      <<" measured_angular="<<v.angular.x<<','<<v.angular.y<<','<<v.angular.z
+      <<" last_plugin_return_valid="<<last_returned_command_valid_
+      <<" last_plugin_return_frame="<<std::quoted(last_returned_command_.header.frame_id)
+      <<" last_plugin_return_stamp_ns="<<rclcpp::Time(last_returned_command_.header.stamp).nanoseconds()
+      <<" last_plugin_return_vx_vy_wz="<<last_returned_command_.twist.linear.x<<','
+      <<last_returned_command_.twist.linear.y<<','<<last_returned_command_.twist.angular.z
+      <<" command_boundary=plugin_return_not_downstream_measured_command";
+    const auto h=handler_->diagnosticState();
+    out<<" handler_global_offset="<<h.global_offset<<" handler_prefix_offset="<<h.prefix_offset
+      <<" handler_constraint_locale="<<h.constraint_locale<<" handler_heading_start="<<h.constraint_heading_start
+      <<" handler_remaining_poses="<<h.remaining_plan_poses<<" handler_prefix_poses="<<h.current_prefix_poses
+      <<" handler_heading_next="<<h.heading_next<<" handler_heading_count="<<h.heading_count
+      <<" handler_ordered="<<h.ordered_rotations<<" handler_near_anchor="<<h.near_anchor
+      <<" handler_rotation_active="<<h.rotation_active<<" handler_final_prefix="<<h.final_prefix
+      <<" terminal_armed="<<terminal_armed_<<" terminal_braking="<<terminal_braking_
+      <<" terminal_rotation_started="<<terminal_rotation_started_<<" terminal_drift_active="<<terminal_drift_active_
+      <<" terminal_drift_reentry_required="<<terminal_drift_.reentryRequired()
+      <<" terminal_correction_active="<<terminal_correction_active_<<" terminal_cancelled="<<terminal_cancelled_
+      <<" terminal_stop_holding="<<terminal_stop_.holding()<<" terminal_stop_dwell_ns="<<goal_region::kTerminalStopDwellNs
+      <<" terminal_heading_next="<<terminal_headings_.next()<<" terminal_heading_count="<<terminal_headings_.headings().size()
+      <<" correction_heading_next="<<terminal_correction_headings_.next()<<" correction_heading_count="<<terminal_correction_headings_.headings().size()
+      <<" entry_xy_limit="<<entry_xy<<" original_xy_limit="<<original_xy<<" original_yaw_limit="<<original_yaw
+      <<" early_braking_speed_limit="<<terminal_early_braking_min_linear_velocity_
+      <<" handler_xy_limit="<<xy_<<" completion_path_length_limit="<<remaining_length_
+      <<" terminal_track_drift_limit="<<terminal_drift_.limit()
+      <<" measured_linear_stop_limit="<<goal_region::kTerminalTransStoppedVelocity
+      <<" measured_angular_stop_limit="<<goal_region::kTerminalRotStoppedVelocity
+      <<" in_entry_region="<<in_entry<<" in_original_region="<<in_original<<" measured_stopped="<<stopped;
+    RCLCPP_ERROR(node->get_logger(),"%s",out.str().c_str());
+  }
   bool allow_static_path_transform_=false;
   struct TransformHistory {
     std::int64_t stamp=0;
