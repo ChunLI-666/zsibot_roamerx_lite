@@ -223,13 +223,28 @@ TEST_F(ControllerPhase, FreshValidExternalPlansEveryCycleCannotRearmFailedFinal5
   EXPECT_LE(s->activations,1);EXPECT_EQ(s->progress->resets,resets);EXPECT_TRUE(timed_out);
 }
 TEST_F(ControllerPhase, HealthyZeroHoldCannotBypassTenSecondProgressDeadline) {
-  s->actual=pose(.20,.2,s->ns);s->zeroCycle();const int checks=s->progress->checks;
+  s->actual=pose(.20,.2,s->ns);s->measured.angular.z=.08;s->zeroCycle();const int checks=s->progress->checks;
   s->time(10.1);EXPECT_THROW(s->zeroCycle(),nav2_core::FailedToMakeProgress);
   EXPECT_GT(s->progress->checks,checks);EXPECT_EQ(s->sink->unexpected_compute,0);
 }
 TEST_F(ControllerPhase, ExistingFifteenSecondAnchorBoundaryIsActuallyRead) {
-  s->actual=pose(.20,.2,s->ns);s->expireAnchor();
+  s->actual=pose(.20,.2,s->ns);s->measured.angular.z=.08;s->expireAnchor();
   EXPECT_THROW(s->tick(),nav2_core::NoValidControl);
+}
+TEST_F(ControllerPhase, A12MovingEntryStopsThenImmediatelyRetiresIncompatibleUnstartedAnchor) {
+  auto original=turn(s->ns);
+  for(int i=1;i<=100;++i)original.poses.push_back(pose(-i*.01,pi,s->ns));
+  s->load(original);s->actual=pose(.20,.2,s->ns);
+  s->measured.linear.x=-.0717;s->measured.linear.y=.1007;s->measured.angular.z=.0125;
+  ASSERT_FALSE(s->tick());EXPECT_EQ(s->segmentIndex(),0u);
+  const int before=s->zeros;s->measured=geometry_msgs::msg::Twist{};
+  try {s->tick();FAIL()<<"Stopped incompatible anchor must return to serial BT replan";}
+  catch(const nav2_core::NoValidControl & e) {
+    EXPECT_NE(std::string(e.what()).find("fresh original-goal replan required"),std::string::npos);
+  }
+  EXPECT_GT(s->zeros,before);EXPECT_EQ(s->segmentIndex(),0u);EXPECT_EQ(s->sink->unexpected_compute,0);
+  EXPECT_DOUBLE_EQ(s->loadedPath().poses.back().pose.position.x,-1.);
+  EXPECT_NEAR(SegmentCoordinator::yaw(s->loadedPath().poses.back().pose),pi,1e-8);
 }
 TEST_F(ControllerPhase, GenuineAngularProgressBeyondThirtySecondsDoesNotTimeOut) {
   s->actual=pose(0,0,s->ns);ASSERT_FALSE(s->tick());ASSERT_TRUE(s->finalActive());

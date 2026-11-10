@@ -1597,13 +1597,22 @@ bool SegmentControllerServer::isGoalReached()
       coordinator_.rotationAnchorReached(path_pose.pose) &&
       (!incoming_rotation_snapshot_ || coordinator_.incomingRotationStartReached(path_pose.pose));
     if (!ready) {
+      if (coordinator_.stopped(measured)) {
+        // Serial ComputePath->FollowPath cannot deliver a replacement while
+        // this action waits. Retire the obsolete internal anchor explicitly;
+        // the measured-stop BT replans the SAME original goal from actual TF.
+        rotation_anchor_waiting_ = segment_braking_ = true;
+        publishSegmentStop();
+        throw nav2_core::NoValidControl(
+          "Unstarted ROTATE stopped at incompatible anchor; fresh original-goal replan required");
+      }
       const auto steady = std::chrono::steady_clock::now();
       if (!rotation_anchor_wait_since_) {
         rotation_anchor_wait_since_ = steady;
         const auto & anchor = coordinator_.active().path.poses.front().pose;
         RCLCPP_WARN(get_logger(), "Zero-hold before unstarted ROTATE: actual=(%.4f, %.4f, %.4f), "
           "planned anchor=(%.4f, %.4f, %.4f), incoming_snapshot=%d, speed=(%.4f, %.4f, %.4f); "
-          "await measured stop and a fresh compatible plan within %.2fs steady",
+          "await measured stop within %.2fs steady; incompatible stopped anchor fails for replan",
           path_pose.pose.position.x, path_pose.pose.position.y, SegmentCoordinator::yaw(path_pose.pose),
           anchor.position.x, anchor.position.y, SegmentCoordinator::yaw(anchor),
           static_cast<int>(incoming_rotation_snapshot_),
@@ -1619,7 +1628,7 @@ bool SegmentControllerServer::isGoalReached()
       {
         throw nav2_core::NoValidControl("Unstarted ROTATE measured-stop/fresh-anchor wait expired");
       }
-      return false;  // Preserve entry-pending; same-goal replans may replace this unstarted phase.
+      return false;  // No rotation or success while measured motion remains.
     }
     rotation_anchor_wait_since_.reset();
     rotation_anchor_waiting_ = segment_braking_ = false;
