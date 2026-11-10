@@ -102,6 +102,7 @@ class MissionStore:
         self.locks = []
         self.timing_sink=None
         self.timing_drops=0
+        self.state_read_timing={}
         try:
             # Caller supplies a stable resource lock shared across A/B missions.
             for lock in ([Path(resource)] if resource else [])+[self.path.with_suffix('.lock')]:
@@ -140,10 +141,32 @@ class MissionStore:
             db.close()
 
     def state(self):
+        observed=self.timing_sink is not None
+        if observed:start=time.monotonic_ns();cpu=time.thread_time_ns()
         row = self.db.execute('SELECT state FROM mission WHERE id=1').fetchone()
+        if observed:selected=time.monotonic_ns();selected_cpu=time.thread_time_ns()
         if row is None:
             raise Hold('Mission has not been created')
-        return json.loads(row[0])
+        state=json.loads(row[0])
+        if observed:
+            ended=time.monotonic_ns();ended_cpu=time.thread_time_ns()
+            for phase,wall,used in [('select',selected-start,selected_cpu-cpu),
+                                   ('json_decode',ended-selected,ended_cpu-selected_cpu)]:
+                item=self.state_read_timing.setdefault(phase,dict(count=0,total_wall_ns=0,max_wall_ns=0,
+                    total_thread_cpu_ns=0,max_thread_cpu_ns=0,first_steady_ns=start,last_steady_ns=ended))
+                item.update(count=item['count']+1,total_wall_ns=item['total_wall_ns']+wall,
+                    max_wall_ns=max(item['max_wall_ns'],wall),total_thread_cpu_ns=item['total_thread_cpu_ns']+used,
+                    max_thread_cpu_ns=max(item['max_thread_cpu_ns'],used),last_steady_ns=ended)
+        return state
+
+    def flush_state_read_timing(self,checkpoint):
+        if self.timing_sink is None or not self.state_read_timing:return
+        sample=dict(stage='state_reads:aggregate',checkpoint=checkpoint,success=True,
+            phases=self.state_read_timing,emitted_unix_ns=time.time_ns(),
+            boundary='Caller-thread SELECT/fetch and JSON decode, aggregated in memory; no per-read event or fsync')
+        self.state_read_timing={}
+        try:self.timing_sink(sample)
+        except Exception:self.timing_drops+=1
 
     @contextmanager
     def timing(self,stage):
@@ -166,6 +189,8 @@ class MissionStore:
                 io_boundary='getrusage thread block-operation counters; not bytes or proof of device latency')
             try:sink(sample)
             except Exception:self.timing_drops+=1
+            if stage.endswith(':commit') or stage.startswith('export_result:'):
+                self.flush_state_read_timing(stage)
 
     def create(self, route_raw, identity, policy, mission_id=None):
         validate_identity(identity)

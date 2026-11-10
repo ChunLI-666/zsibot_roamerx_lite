@@ -52,5 +52,29 @@ class PersistenceTimingTests(unittest.TestCase):
                 raise RuntimeError('fixture failure before commit')
         self.assertEqual(self.store.state(),before)
         self.assertFalse(any(s['stage'].endswith(':commit') for s in samples))
+    def test_hot_state_reads_aggregate_without_per_read_events_or_revision_changes(self):
+        samples=[];self.store.timing_sink=samples.append;before=self.store.state()
+        for _ in range(500):self.assertEqual(self.store.state(),before)
+        self.assertEqual(samples,[])
+        self.store.flush_state_read_timing('explicit_checkpoint')
+        self.assertEqual(len(samples),1);sample=samples[0]
+        self.assertEqual(sample['checkpoint'],'explicit_checkpoint')
+        for phase in ['select','json_decode']:
+            stats=sample['phases'][phase];self.assertEqual(stats['count'],501)
+            self.assertGreater(stats['total_wall_ns'],0)
+            self.assertGreaterEqual(stats['total_wall_ns'],stats['max_wall_ns'])
+        self.store.flush_state_read_timing('no_new_reads');self.assertEqual(len(samples),1)
+        self.assertEqual(self.store.state(),before)
+    def test_real_checkpoint_flushes_reads_and_sink_failure_keeps_state(self):
+        samples=[];self.store.timing_sink=samples.append
+        for _ in range(20):self.store.state()
+        self.store.export(self.root)
+        aggregate=[s for s in samples if s['stage']=='state_reads:aggregate']
+        self.assertEqual(len(aggregate),1)
+        self.assertEqual(aggregate[0]['phases']['json_decode']['count'],21)
+        before=self.store.state()
+        def broken(sample):raise OSError('fixture sink failure')
+        self.store.timing_sink=broken;self.store.flush_state_read_timing('failed_sink')
+        self.assertEqual(self.store.timing_drops,1);self.assertEqual(self.store.state(),before)
 
 if __name__=='__main__':unittest.main()

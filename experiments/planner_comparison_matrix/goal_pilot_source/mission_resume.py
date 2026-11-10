@@ -186,6 +186,7 @@ def run_attempt(args, store, output, reconcile=False):
                 result['owned_goal_shutdown']=node.finalize_own_goal()
                 result['ordered']=node.ordered.summary()
                 result['final_measured_and_commanded_stop']=bool(node.stop_evidence and node.stop_evidence.get('observed'))
+                store.flush_state_read_timing('attempt_finalization')
                 store.timing_sink=None  # Evidence writer closes below; terminal DB work follows it.
                 result['mission_persistence_timing_drops']=store.timing_drops
                 result['evidence_writer']=node.finish_evidence()
