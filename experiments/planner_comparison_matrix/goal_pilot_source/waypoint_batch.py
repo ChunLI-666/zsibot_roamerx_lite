@@ -69,7 +69,7 @@ def freeze_sources(output, simulation_scan_max_age_sec=.3):
     manifest['runtime_callback_pump']='Runtime batches callbacks within 20ms before unchanged guards; interruption/terminal/own-cancel/existing deadlines checked per callback. Single-callback overruns, original topic-count deltas and check intervals are recorded; no 300ms/500ms/QoS changes. Fixed .002s spin kwargs preserve Jazzy ready iterator fairness; one idle wait may exceed a wall window, and single callbacks remain nonpreemptible.'
     manifest['ready_read_failure_capture']='Unchanged a63b validator receives one path-like single-file read with fd stat and wall/steady bounds. Only the first read_ready exception retains exact raw bytes in memory, persisted after own-goal cleanup; internal validator now remains unknown. Last-passing READY cache is labelled separately.'
     manifest['stop_cleanup']='Every possibly sent goal reaches finally own-UUID cancellation and a fresh finite measured/commanded stop observation, including response timeout, signal and exception. Default rclpy shutdown-on-SIGINT is disabled until cleanup completes.'
-    manifest['stop_callback_pump']='Stop/finally/reconcile drain the same executor for <=20ms with fixed .002s spin calls, independent of terminal/cancel state; one full READY/ownership health check per batch. Unchanged strict stopped predicates and advancing original-Odom source/steady .3s dwell, bounded by the original settle deadline. No age refresh or extra executor.'
+    manifest['stop_callback_pump']='Stop/finally/reconcile drain the same executor for <=20ms with fixed .002s spin calls, independent of terminal/cancel state; one full READY/ownership health check per batch. After full validation, original caches and that same READY are re-aged with current clocks before unchanged strict stopped/advancing-Odom .3s dwell. No second READY/state read, callback pump, timestamp refresh or extra executor; original settle deadline retained.'
     manifest['producer_scan_confirmation']='Opt-in same-scan producer-only not_ready may use the existing <=50ms window only after current raw metadata/bindings/UUID revalidation. New strict READY with a later original producer scan stamp and all own original guards is required; every episode permanently fails strict timing. Preflight/runtime failed reads are separate.'
     manifest['scan_aging_confirmation']='Default 0 preserves strict behavior. Opt-in <=.05s drains existing callbacks only after sole scan-header aging; a newer original stamp must restore every original guard. Every episode permanently fails strict timing acceptance; no header-age threshold changes.'
     manifest['simulation_scan_latency_profile']=simulation_scan_latency_profile(simulation_scan_max_age_sec)
@@ -529,6 +529,33 @@ class WaypointPilot(frozen.Pilot):
                     for key in set(before)|set(self.counts) if self.counts.get(key,0)!=before.get(key,0)})
         return self.stop_last_pump
 
+    def stop_decision_ready(self):
+        """Re-age original caches and the already-read lease after full validation.
+
+        This runs on the same executor thread without spinning, file I/O or a
+        mission-state read. Camera health retains its preflight-only policy.
+        """
+        _,issues,snapshot=self.input_ready(require_camera=self.goal_sent_ns is None)
+        issues=operational_scan_age_issues(issues,snapshot,self.simulation_scan_max_age_sec)
+        if self.args.execute:
+            ready=getattr(self,'latest_ready',{})
+            now=time.time_ns();issued=ready.get('time_ns',0);expiry=ready.get('valid_until_ns',0)
+            # Identical absolute lease bounds to the unchanged frozen read_ready.
+            if (not isinstance(issued,int) or not isinstance(expiry,int) or
+                    not 0<expiry-now<=550_000_000 or not -50_000_000<=now-issued<=500_000_000):
+                issues.append('readiness:launcher_lease_missing_expired_or_future')
+            try:
+                validate_ownership(ready.get('waypoint_ownership',{}),now,
+                    None if self.owned_identity is None else self.owned_identity.value.hex(),self.goal_sent_ns)
+                if self.simulation_scan_max_age_sec>.3:
+                    bounds=producer_scan_signed_age_bounds(ready,
+                        clock_ns=self.get_clock().now().nanoseconds,steady_ns=time.monotonic_ns())
+                    if (min(bounds['header_age_bounds_s'])<-.05 or min(bounds['receive_age_bounds_s'])<0
+                            or max(bounds['header_age_bounds_s'])>.5 or max(bounds['receive_age_bounds_s'])>.5):
+                        raise ValueError('scan:producer_observation_outside_simulation_bound')
+            except ValueError as error:issues.append('readiness:'+str(error))
+        return not issues,issues,snapshot
+
     def wait_settled(self, seconds):
         """One full health read per batch, then unchanged advancing-Odom stop."""
         started=time.monotonic_ns();deadline=started+int(seconds*1e9)
@@ -540,14 +567,23 @@ class WaypointPilot(frozen.Pilot):
                 pump=self.pump_stop_inputs(deadline)
                 if time.monotonic_ns()>=deadline:break
                 checked=time.monotonic_ns();cpu=time.thread_time_ns()
-                # This validates READY/ownership exactly once. strict_stopped is
-                # evaluated by AdvancingStop on this same unmodified snapshot.
+                # One full READY/state validation, then a cheap current-clock
+                # check of the same original caches/lease before stop accrual.
                 healthy,issues,snapshot=self.execution_ready()
+                full_health_finished=time.monotonic_ns()
+                full_odom_age=snapshot.get('last',{}).get('odom',{}).get('header_age_s')
+                decision_unix,decision_steady=time.time_ns(),time.monotonic_ns()
+                current,age_issues,snapshot=self.stop_decision_ready()
+                healthy=healthy and current;issues=list(dict.fromkeys(issues+age_issues))
+                self.scan_timing_record_check(False,issues,snapshot,decision_unix,decision_steady)
                 if not healthy:self.invalidate_artifact(issues)
                 finished=time.monotonic_ns();checks+=1
                 qualified=dwell.observe(snapshot,finished,healthy)
                 recent.append(dict(pump=pump,health_started_steady_ns=checked,
                     health_finished_steady_ns=finished,health_wall_ns=finished-checked,
+                    full_health_finished_steady_ns=full_health_finished,
+                    full_health_odom_header_age_s=full_odom_age,
+                    decision_odom_header_age_s=snapshot.get('last',{}).get('odom',{}).get('header_age_s'),
                     health_thread_cpu_ns=time.thread_time_ns()-cpu,
                     healthy=healthy,issues=list(issues),stop_qualified=qualified,
                     odom_stamp_ns=snapshot.get('last',{}).get('odom',{}).get('stamp_ns'),

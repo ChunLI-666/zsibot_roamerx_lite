@@ -680,7 +680,7 @@ def operational_scan_age_issues(strict_issues,snapshot,max_age_sec=.3):
     return [issue for issue in strict_issues if issue not in allowed]
 
 
-def producer_scan_signed_age_bounds(ready):
+def producer_scan_signed_age_bounds(ready, *, clock_ns=None, steady_ns=None):
     obs=ready.get('producer_scan_observation')
     if not isinstance(obs,dict):raise ValueError('scan:producer_observation_missing_or_invalid')
     stamp=obs.get('header_ns');begin=obs.get('validation_clock_begin_ns');end=obs.get('validation_clock_end_ns')
@@ -689,6 +689,10 @@ def producer_scan_signed_age_bounds(ready):
             or type(received) not in (int,float) or not math.isfinite(received) or received<=0
             or obs.get('frame_id')!='base_link' or obs.get('ranges',0)<=0):
         raise ValueError('scan:producer_observation_missing_or_invalid')
+    # Optional decision clocks re-age the same original sample without rewriting
+    # its header, receipt time or captured producer validation evidence.
+    if clock_ns is not None:begin=end=clock_ns
+    if steady_ns is not None:sb=se=steady_ns
     return dict(header_age_bounds_s=[(begin-stamp)/1e9,(end-stamp)/1e9],
         receive_age_bounds_s=[sb/1e9-received,se/1e9-received],original_observation=obs)
 

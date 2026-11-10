@@ -25,7 +25,7 @@ def main():
     parser.add_argument('--client-dir',type=Path,required=True)
     parser.add_argument('--evidence-root',type=Path,required=True)
     parser.add_argument('--output',type=Path,required=True)
-    parser.add_argument('--case',choices=['terminal','cancel','moving','pulse','cached','stale','deadline','overrun'],required=True)
+    parser.add_argument('--case',choices=['terminal','cancel','moving','pulse','cached','stale','deadline','overrun','slow_health','ready_expiry'],required=True)
     parser.add_argument('--baseline',action='store_true')
     args=parser.parse_args()
     assert os.environ.get('ROS_DOMAIN_ID')=='190'
@@ -36,6 +36,7 @@ def main():
     import numpy as np
     import rclpy
     from rclpy.qos import qos_profile_sensor_data
+    from rclpy.duration import Duration
     from geometry_msgs.msg import PoseStamped,TransformStamped,Twist
     from nav_msgs.msg import Odometry,Path as NavPath
     from sensor_msgs.msg import LaserScan,CompressedImage,CameraInfo
@@ -118,6 +119,8 @@ def main():
                 if speed:shared['last_nonzero_ns']=steady
                 o=Odometry();o.header.frame_id='odom';o.child_frame_id='base_link';o.header.stamp=stamp;o.pose.pose.orientation.w=1.
                 o.twist.twist.linear.x=speed
+                if active and args.case=='slow_health':
+                    o.header.stamp=(producer.get_clock().now()-Duration(seconds=.2)).to_msg()
                 if active and args.case=='cached':
                     if shared['source'] is None:shared['source']=stamp
                     o.header.stamp=shared['source']
@@ -134,7 +137,7 @@ def main():
                     c=CompressedImage();c.header.stamp=stamp;c.format='jpeg';c.data=jpeg;pubs['camera'].publish(c)
                     info=CameraInfo();info.header.stamp=stamp;info.width=info.height=64;info.k=[100.,0.,32.,0.,100.,32.,0.,0.,1.];pubs['info'].publish(info)
                     path=NavPath();path.header.frame_id='map';path.header.stamp=stamp;path.poses=[p];pubs['plan'].publish(path)
-                    ready.update(ready=True,time_ns=wall,valid_until_ns=wall+500_000_000)
+                    ready.update(ready=True,time_ns=wall,valid_until_ns=wall+(100_000_000 if args.case=='ready_expiry' else 500_000_000))
                     ready['waypoint_ownership']['checked_unix_ns']=wall
                     temp=ready_path.with_suffix('.tmp');temp.write_text(json.dumps(ready));temp.replace(ready_path)
                 stopped.wait(.002)
@@ -145,6 +148,13 @@ def main():
         warm=time.monotonic()+2.
         while time.monotonic()<warm:rclpy.spin_once(node,timeout_sec=.002)
         valid,issues,_=node.execution_ready();assert valid,issues
+        if args.case in ('slow_health','ready_expiry'):
+            original_execution_ready=node.execution_ready
+            def delayed_execution_ready(*call_args,**call_kwargs):
+                result=original_execution_ready(*call_args,**call_kwargs)
+                time.sleep(.2 if args.case=='slow_health' else .15)
+                return result
+            node.execution_ready=delayed_execution_ready
         node.owned_identity=OwnedGoalIdentity(uuid.uuid4().bytes)
         node.goal_sent_ns=time.time_ns();node.goal_sent_steady=time.monotonic()
         node.action_result=SimpleNamespace(status=5 if args.case=='cancel' else 4)
@@ -163,10 +173,14 @@ def main():
             artifact_invalid_reasons=node.artifact_invalid_reasons,
             last_nonzero_steady_ns=shared['last_nonzero_ns'],observation=getattr(node,'stop_wait_observation',None),
             full_guard_median_ns=statistics.median(measurements),full_guard_max_ns=max(measurements),
-            state_unchanged=worker.state()==before,physical_acceptance=False)
+            state_unchanged=worker.state()==before,physical_acceptance=False,
+            decision_odom_header_age_sec=(node.get_clock().now().nanoseconds-snapshot.get('last',{}).get('odom',{}).get('stamp_ns',0))/1e9,
+            snapshot_odom_header_age_sec=snapshot.get('last',{}).get('odom',{}).get('header_age_s'),
+            validated_ready_expiry_minus_return_ns=node.latest_ready['valid_until_ns']-time.time_ns(),
+            injected_health_work_sec=.2 if args.case=='slow_health' else .15 if args.case=='ready_expiry' else 0.)
         (out/'RESULT.json').write_text(json.dumps(result,indent=2)+'\n')
         if not args.baseline:
-            assert observed==(args.case not in ('cached','stale','deadline','overrun')),result
+            assert observed==(args.case not in ('cached','stale','deadline','overrun','slow_health','ready_expiry')),result
             if args.case in ('terminal','cancel','moving','pulse'):
                 assert not node.artifact_invalid_reasons,result
             if args.case in ('moving','pulse'):
