@@ -34,7 +34,7 @@ from waypoint_contract import (ACTION, AdvancingStop, AsyncEvidenceWriter, Order
 from waypoint_contract import (ReadyReadCapture, ownership_metadata_lease_deviation, validate_settle_budget,
                                producer_scan_confirmation_failure, producer_scan_confirmation_outcome)
 from waypoint_contract import (simulation_scan_latency_profile, validate_simulation_scan_latency_profile,
-    operational_scan_age_issues, strict_simulation_scan_deviations, producer_scan_signed_age_bounds)
+    operational_scan_age_issues, strict_simulation_scan_deviations, producer_scan_signed_age_bounds, record_scan_timing_health)
 from waypoint_contract import (scan_aging_confirmation_eligible, scan_aging_confirmation_outcome,
                                scan_confirmation_payload_valid, validate_scan_aging_confirmation)
 
@@ -354,8 +354,6 @@ class WaypointPilot(frozen.Pilot):
                     latest_ready=getattr(self, 'latest_ready', None))
             if self.event_pub.get_subscription_count() == 0:
                 issues.append('goal_event_subscriber_disappeared')
-        strict_issues=list(issues)
-        deviations=[]
         producer_evidence_ready=validated_ready
         producer_evidence_context='current_fully_validated_READY' if validated_ready is not None else None
         if self.simulation_scan_max_age_sec>.3:
@@ -367,29 +365,8 @@ class WaypointPilot(frozen.Pilot):
                     producer_evidence_ready=candidate
                     producer_evidence_context='failed_original_READY_raw_strict_evidence_only_never_health'
                 except (ValueError,TypeError,KeyError):pass
-            deviations=strict_simulation_scan_deviations(snapshot,producer_evidence_ready)
-            if any(d['source']=='producer_original_scan_bounds' for d in deviations):
-                strict_issues.append('scan:producer_strict_300ms_age_exceeded')
-        # The immutable original .3 check and original snapshot feed strict evidence.
-        self.scan_timing_record_check(require_stopped,strict_issues,snapshot,entered_unix_ns,entered_steady_ns)
-        if deviations:
-            if self.strict_scan_latency_first_fault is None:
-                self.strict_scan_latency_first_fault=dict(checked_unix_ns=entered_unix_ns,checked_steady_ns=entered_steady_ns,
-                    original_strict_issues=list(strict_issues),original_snapshot=snapshot,deviations=deviations,
-                    producer_evidence_context=producer_evidence_context,
-                    failed_READY_raw_sha256=None if self.current_ready_read_failure is None else self.current_ready_read_failure['metadata']['sha256'],
-                    latest_validated_READY_sha256=getattr(self,'latest_ready_sha',None),strict_timing_status='FAIL')
-            self.invalidate_artifact(['scan:strict_300ms_latency_violation'])
-            for deviation in deviations:
-                stamp=(deviation.get('original_scan',{}).get('stamp_ns') if deviation['source']=='consumer_original_scan'
-                    else deviation['original_observation'].get('header_ns'))
-                key=(deviation['source'],stamp)
-                if key not in self.strict_scan_latency_seen:
-                    self.strict_scan_latency_seen.add(key);self.strict_scan_latency_count+=1
-                    self.emit('strict_scan_latency_deviation',strict_timing_status='FAIL',strict_timing_accepted=False,
-                        deviation=deviation,original_check_unix_ns=entered_unix_ns)
-        operational_issues=operational_scan_age_issues(strict_issues,snapshot,self.simulation_scan_max_age_sec)
-        return not operational_issues,operational_issues,snapshot
+        return record_scan_timing_health(self,require_stopped,issues,snapshot,entered_unix_ns,entered_steady_ns,
+            producer_evidence_ready,producer_evidence_context)
 
     def producer_scan_confirmation_failure(self,issues,snapshot):
         topic=getattr(self.args,'scan_topic','/laser_scan_leveled')
@@ -529,14 +506,15 @@ class WaypointPilot(frozen.Pilot):
                     for key in set(before)|set(self.counts) if self.counts.get(key,0)!=before.get(key,0)})
         return self.stop_last_pump
 
-    def stop_decision_ready(self):
+    def stop_decision_ready(self, prior_issues=()):
         """Re-age original caches and the already-read lease after full validation.
 
         This runs on the same executor thread without spinning, file I/O or a
         mission-state read. Camera health retains its preflight-only policy.
         """
+        entered_unix_ns,entered_steady_ns=time.time_ns(),time.monotonic_ns()
         _,issues,snapshot=self.input_ready(require_camera=self.goal_sent_ns is None)
-        issues=operational_scan_age_issues(issues,snapshot,self.simulation_scan_max_age_sec)
+        issues=list(dict.fromkeys(list(prior_issues)+issues));bounds=None;ready=None
         if self.args.execute:
             ready=getattr(self,'latest_ready',{})
             now=time.time_ns();issued=ready.get('time_ns',0);expiry=ready.get('valid_until_ns',0)
@@ -554,7 +532,9 @@ class WaypointPilot(frozen.Pilot):
                             or max(bounds['header_age_bounds_s'])>.5 or max(bounds['receive_age_bounds_s'])>.5):
                         raise ValueError('scan:producer_observation_outside_simulation_bound')
             except ValueError as error:issues.append('readiness:'+str(error))
-        return not issues,issues,snapshot
+        return record_scan_timing_health(self,False,issues,snapshot,entered_unix_ns,entered_steady_ns,
+            ready if bounds is not None else None,
+            'same_cached_READY_reaged_at_stop_decision' if bounds is not None else None,producer_bounds=bounds)
 
     def wait_settled(self, seconds):
         """One full health read per batch, then unchanged advancing-Odom stop."""
@@ -572,10 +552,8 @@ class WaypointPilot(frozen.Pilot):
                 healthy,issues,snapshot=self.execution_ready()
                 full_health_finished=time.monotonic_ns()
                 full_odom_age=snapshot.get('last',{}).get('odom',{}).get('header_age_s')
-                decision_unix,decision_steady=time.time_ns(),time.monotonic_ns()
-                current,age_issues,snapshot=self.stop_decision_ready()
+                current,age_issues,snapshot=self.stop_decision_ready(issues)
                 healthy=healthy and current;issues=list(dict.fromkeys(issues+age_issues))
-                self.scan_timing_record_check(False,issues,snapshot,decision_unix,decision_steady)
                 if not healthy:self.invalidate_artifact(issues)
                 finished=time.monotonic_ns();checks+=1
                 qualified=dwell.observe(snapshot,finished,healthy)

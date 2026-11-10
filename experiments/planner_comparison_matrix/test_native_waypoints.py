@@ -23,7 +23,7 @@ import uuid
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE/'goal_pilot_source'))
 from waypoint_contract import (AsyncEvidenceWriter, OrderedVisits, OwnedGoalIdentity, ReadyReadCapture, WAYPOINT_PARAMETERS, initial_leg_limit,
-                               simulation_scan_latency_profile, validate_simulation_scan_latency_profile, operational_scan_age_issues, strict_simulation_scan_deviations, producer_scan_signed_age_bounds,
+                               simulation_scan_latency_profile, validate_simulation_scan_latency_profile, operational_scan_age_issues, strict_simulation_scan_deviations, producer_scan_signed_age_bounds, record_scan_timing_health,
                                evidence_json, exclusive_graph, finite_velocity, mission_budget, strict_stopped,
                                validate_ownership, validate_route, validate_settle_budget, validate_scan_aging_confirmation, waypoint_binding)
 
@@ -65,7 +65,7 @@ def load_method(name):
     method = next(node for node in cls.body if isinstance(node, ast.FunctionDef) and node.name == name)
     namespace = dict(OwnedGoalIdentity=OwnedGoalIdentity, ReadyReadCapture=ReadyReadCapture, ACTION='/follow_waypoints', json=json,
                      evidence_json=evidence_json, finite_velocity=finite_velocity, strict_stopped=strict_stopped, time=time,
-                     simulation_scan_latency_profile=simulation_scan_latency_profile, validate_simulation_scan_latency_profile=validate_simulation_scan_latency_profile, operational_scan_age_issues=operational_scan_age_issues, strict_simulation_scan_deviations=strict_simulation_scan_deviations, producer_scan_signed_age_bounds=producer_scan_signed_age_bounds)
+                     simulation_scan_latency_profile=simulation_scan_latency_profile, validate_simulation_scan_latency_profile=validate_simulation_scan_latency_profile, operational_scan_age_issues=operational_scan_age_issues, strict_simulation_scan_deviations=strict_simulation_scan_deviations, producer_scan_signed_age_bounds=producer_scan_signed_age_bounds, record_scan_timing_health=record_scan_timing_health)
     exec(compile(ast.Module(body=[method], type_ignores=[]), str(HERE/'goal_pilot_source/waypoint_batch.py'), 'exec'), namespace)
     return namespace[name], namespace
 
@@ -360,7 +360,7 @@ class ExitFlowTests(unittest.TestCase):
             error_function=next(node for node in original.body if isinstance(node,ast.FunctionDef) and node.name=='error')
             exec(compile(ast.Module(body=[error_function],type_ignores=[]),'unchanged_goal_error','exec'),pure)
             namespace = dict(argparse=argparse, Path=Path, hashlib=hashlib, json=json, math=math, os=os, sys=sys, time=time,
-                simulation_scan_latency_profile=simulation_scan_latency_profile, validate_simulation_scan_latency_profile=validate_simulation_scan_latency_profile, operational_scan_age_issues=operational_scan_age_issues, strict_simulation_scan_deviations=strict_simulation_scan_deviations, producer_scan_signed_age_bounds=producer_scan_signed_age_bounds,
+                simulation_scan_latency_profile=simulation_scan_latency_profile, validate_simulation_scan_latency_profile=validate_simulation_scan_latency_profile, operational_scan_age_issues=operational_scan_age_issues, strict_simulation_scan_deviations=strict_simulation_scan_deviations, producer_scan_signed_age_bounds=producer_scan_signed_age_bounds, record_scan_timing_health=record_scan_timing_health,
                 ReadyReadCapture=ReadyReadCapture,
                 uuid=uuid, HERE=root, rclpy=fake_ros, SignalHandlerOptions=SimpleNamespace(NO='NO'),
                 signal=SimpleNamespace(SIGINT=2, SIGTERM=15, signal=lambda number, handler: 'previous'),

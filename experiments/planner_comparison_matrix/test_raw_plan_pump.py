@@ -85,10 +85,10 @@ class RawPathTests(unittest.TestCase):
         self.assertTrue(all(args[3] is qos for args,kw in calls))
     def test_raw_path_retains_frozen_validator_and_reviewed_wrapper_guards(self):
         self.assertEqual(hashlib.sha256(FROZEN.read_bytes()).hexdigest(),'a63bce9490f55438e7af5d16025e4dd20d86293cec12f1560d403ecb629cbe31')
-        # execution_ready is the independently reviewed f163f509 scan-profile
-        # wrapper. Default/operational/strict behavior has separate integration
-        # fixtures; original cancellation and confirmation methods stay frozen.
-        expected={'execution_ready': '039da0ff6cba93ec337c25c03b258a9c3bc54a0781b7ef921259c8bdf4a3fe1c', 'confirm_scan_aging': 'db28cdd3018c42ba7c38169d33f45f046759cc90fc1e277763ec2b426d6cfebb', 'cancel_own': '3c8c0e7e689262980e1bbadbad67bb62f398f23ff4eec3d57bf406033e9b57ce'}
+        # The authorized strict-evidence extraction shares full-check/decision
+        # recording. Pin that helper with the wrapper; behavior has integration
+        # fixtures. Original cancellation/confirmation and frozen pilot stay pinned.
+        expected={'execution_ready': '414b69f6a910333f54b592dcb419214d317b1a73d8d1df9668f058c95bdc99a2', 'confirm_scan_aging': 'db28cdd3018c42ba7c38169d33f45f046759cc90fc1e277763ec2b426d6cfebb', 'cancel_own': '3c8c0e7e689262980e1bbadbad67bb62f398f23ff4eec3d57bf406033e9b57ce'}
         cls=next(n for n in ast.parse(SOURCE.read_text()).body if isinstance(n,ast.ClassDef) and n.name=='WaypointPilot')
         methods=[copy.deepcopy(n) for n in cls.body if isinstance(n,ast.FunctionDef) and n.name in expected]
         execution=next(n for n in methods if n.name=='execution_ready')
@@ -97,6 +97,10 @@ class RawPathTests(unittest.TestCase):
         execution.body.remove(split[0])  # Only the separately tested camera recording split.
         observed={n.name:hashlib.sha256(ast.dump(n,include_attributes=False).encode()).hexdigest() for n in methods}
         self.assertEqual(observed,expected)
+        contract=ast.parse((SOURCE.parent/'waypoint_contract.py').read_text())
+        helper=next(n for n in contract.body if isinstance(n,ast.FunctionDef) and n.name=='record_scan_timing_health')
+        self.assertEqual(hashlib.sha256(ast.dump(helper,include_attributes=False).encode()).hexdigest(),
+                         'fcee4e91af9f235322536641bbdb6b4efe0f4fde80e8833c31ef3080e58d2bf8')
 
 class FakeClock:
     def __init__(self):self.ns=100000000000

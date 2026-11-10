@@ -245,7 +245,7 @@ class ConfirmationTests(unittest.TestCase):
                 finite_velocity=contract.finite_velocity,waypoint_binding=lambda *args:{},
                 validate_ownership=contract.validate_ownership,
                 ownership_metadata_lease_deviation=contract.ownership_metadata_lease_deviation)
-            namespace.update({name:getattr(contract,name) for name in ['simulation_scan_latency_profile', 'validate_simulation_scan_latency_profile', 'operational_scan_age_issues', 'strict_simulation_scan_deviations', 'producer_scan_signed_age_bounds']})
+            namespace.update({name:getattr(contract,name) for name in ['simulation_scan_latency_profile', 'validate_simulation_scan_latency_profile', 'operational_scan_age_issues', 'strict_simulation_scan_deviations', 'producer_scan_signed_age_bounds', 'record_scan_timing_health']})
             exec(compile(ast.fix_missing_locations(ast.Module(body=[method],type_ignores=[])),
                          'waypoint_batch.py','exec'),namespace)
             valid,issues,_=namespace['execution_ready'](fake)
