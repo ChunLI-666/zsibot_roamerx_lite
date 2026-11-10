@@ -435,7 +435,9 @@ protected:
 
 TEST_F(FastOnlyBraking, OuterWindowLowMeasuredSpeedRetainsOriginalForwardFloor) {
   publisher_->on_activate();
-  for (double speed:{.10,.20,.30}) {
+  // B35 recorded low drift speeds must retain the unchanged .4 m/s floor;
+  // they are above final-stop acceptance but below the separate early brake.
+  for (double speed:{.0318,.055,.10,.20,.30}) {
     SCOPED_TRACE(speed);
     controller_->reset();controller_->setPlan(turnPlan(.3));checker_->reset();
     auto cmd=command(.14,speed);
