@@ -157,6 +157,163 @@ class Fixture:
 class ContinuationTests(unittest.TestCase):
     def setUp(self):self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name)
     def tearDown(self):self.temp.cleanup()
+    def v3_supplement(self,f,maximum=14400):
+        value=dict(schema='main.continuation.design_supplement.v3',
+            decision='APPROVED_BOUNDED_A_INACTIVE_CREDIT_CAP_EXTENSION',mission_id=f.state['mission_id'],
+            previous_approval=f.authorization['design_approval'],maximum_grant_sec=maximum,
+            original_navigation_budget_sec=1800,actual_grant_not_yet_issued=True)
+        f.authorization['design_supplement']=save(f.root,'supplement_v3.json',value)
+        f.authorization['credit']['grant_sec']=min(f.end-f.start,maximum)
+        return value
+    def test_v3_cap_from_approval_preserves_exact_elapsed_and_history(self):
+        for maximum,duration in ((14400,1200.125),(14400,14400.),(14400,15000.125),
+                (86400,86400.),(1500.25,1800.125),(.25,.125),(1,1.)):
+            with self.subTest(maximum=maximum,duration=duration),tempfile.TemporaryDirectory() as directory:
+                f=Fixture(Path(directory),duration=duration,with_b=duration>20);self.v3_supplement(f,maximum)
+                try:
+                    receipt=f.apply();s=receipt['state'];grant=min(f.end-f.start,maximum)
+                    self.assertEqual(s['budgets']['deadline_boottime_sec'],f.state['budgets']['deadline_boottime_sec']+grant)
+                    self.assertEqual(s['budgets']['authorized_inactive_credit_sec'],grant)
+                    self.assertAlmostEqual(s['budgets']['remaining_sec'],
+                        f.state['budgets']['deadline_boottime_sec']-f.start-(f.now-f.end)-max(0,f.end-f.start-maximum))
+                    self.assertNotEqual(s['budgets']['deadline_boottime_sec'],f.now+1800)
+                    for key in ('mission_id','route','progress','current_target','result_flags'):
+                        self.assertEqual(s[key],f.state[key])
+                    for key,value in f.state['budgets'].items():
+                        if key not in ('deadline_boottime_sec','remaining_sec'):self.assertEqual(s['budgets'][key],value)
+                    self.assertEqual(s['policy']['mission_budget_sec'],1800)
+                    self.assertEqual(receipt['transition']['credit']['maximum_sec'],maximum)
+                    self.assertEqual(receipt['transition']['evidence']['design_supplement'],f.authorization['design_supplement'])
+                    self.assertEqual(f.apply(),receipt)
+                finally:f.store.close()
+    def test_v3_rejects_malformed_or_out_of_range_caps_before_mutation(self):
+        cases=[None,True,False,'14400',0,-1,86400.0001,10**1000,float('nan'),float('inf'),float('-inf'),'missing','exponent']
+        for maximum in cases:
+            with self.subTest(maximum=str(maximum)[:30]),tempfile.TemporaryDirectory() as directory:
+                f=Fixture(Path(directory));value=self.v3_supplement(f)
+                try:
+                    value['maximum_grant_sec']=maximum
+                    if maximum=='missing':value.pop('maximum_grant_sec')
+                    raw=json.dumps(value)
+                    if maximum=='exponent':raw=raw.replace('"exponent"','1e309')
+                    path=f.root/'invalid_cap.json';path.write_text(raw)
+                    f.authorization['design_supplement']=reference(path)
+                    with self.assertRaises(Hold):f.apply()
+                    self.assertEqual(f.store.state(),f.state)
+                    self.assertEqual(f.store.db.execute('SELECT count(*) FROM continuations').fetchone()[0],0)
+                    self.assertEqual(f.store.db.execute('SELECT count(*) FROM events').fetchone()[0],0)
+                finally:f.store.close()
+    def test_v3_cannot_bypass_authority_interval_or_separate_B_accounting(self):
+        cases=['schema','decision','mission','approval','budget','issued','sha','over_grant','under_grant','boot',
+            'future_end','registered_A','missing_B','B_source','state','revision','source','active_goal']
+        for case in cases:
+            with self.subTest(case=case),tempfile.TemporaryDirectory() as directory:
+                f=Fixture(Path(directory),duration=7000.,with_b=True);value=self.v3_supplement(f)
+                try:
+                    if case=='schema':value['schema']='main.continuation.design_supplement.v4'
+                    if case=='decision':value['decision']='PENDING'
+                    if case=='mission':value['mission_id']=str(uuid.uuid4())
+                    if case=='approval':value['previous_approval']={'sha256':'0'*64}
+                    if case=='budget':value['original_navigation_budget_sec']=14400
+                    if case=='issued':value['actual_grant_not_yet_issued']=False
+                    f.authorization['design_supplement']=save(f.root,'changed_v3.json',value)
+                    if case=='sha':f.authorization['design_supplement']['sha256']='0'*64
+                    if case=='over_grant':f.authorization['credit']['grant_sec']+=.25
+                    if case=='under_grant':f.authorization['credit']['grant_sec']-=.25
+                    if case=='boot':f.authorization['credit']['boot_id']=str(uuid.uuid4())
+                    if case=='future_end':f.authorization['credit']['end_boottime_sec']=f.now+1
+                    if case=='registered_A':f.interval['registered_a_execution_clients']=['A-active']
+                    if case=='missing_B':f.interval['b_runs']=[]
+                    if case=='B_source':f.interval['b_runs'][0]['source_sha']='0'*40
+                    f.authorization['inactive_interval']=save(f.root,'changed_interval.json',f.interval)
+                    if case=='state':f.authorization['expected_state_sha256']='0'*64
+                    if case=='revision':f.authorization['expected_revision']+=1
+                    if case=='source':f.authorization['new_source_sha']='0'*40
+                    if case=='active_goal':
+                        f.ready['waypoint_ownership']['follow_path_active']=['active'];atomic_json(f.ready_path,f.ready)
+                    with self.assertRaises(Hold):f.apply()
+                    self.assertEqual(f.store.state(),f.state)
+                finally:f.store.close()
+    def test_v3_equal_or_expired_extended_deadline_still_fails(self):
+        for duration,delay in ((14400.,0.),(14400.,.25),(16000.,None)):
+            with self.subTest(duration=duration,delay=delay),tempfile.TemporaryDirectory() as directory:
+                f=Fixture(Path(directory),duration=duration);self.v3_supplement(f)
+                try:
+                    if delay is not None:
+                        f.now=f.state['budgets']['deadline_boottime_sec']+14400+delay
+                        f.now_ns=f.end_ns+round((f.now-f.end)*1e9)
+                        f.ready.update(time_ns=f.now_ns,valid_until_ns=f.now_ns+500000000)
+                        f.ready['waypoint_ownership']['checked_unix_ns']=f.now_ns;atomic_json(f.ready_path,f.ready)
+                    with self.assertRaisesRegex(Hold,'FAILED_BUDGET'):f.apply()
+                    self.assertEqual(f.store.state(),f.state)
+                    self.assertEqual(f.store.db.execute('SELECT count(*) FROM continuations').fetchone()[0],0)
+                finally:f.store.close()
+    def test_v3_transaction_rollback_retry_and_second_credit(self):
+        f=Fixture(self.root,duration=7000.);self.v3_supplement(f)
+        try:
+            f.store.db.execute("CREATE TRIGGER fail_v3 BEFORE INSERT ON continuations BEGIN SELECT RAISE(ABORT,'fixture failure'); END")
+            with self.assertRaises(sqlite3.DatabaseError):f.apply()
+            self.assertEqual(f.store.state(),f.state)
+            self.assertEqual(f.store.db.execute('SELECT count(*) FROM events').fetchone()[0],0)
+            f.store.db.execute('DROP TRIGGER fail_v3');first=f.apply();after=f.store.state()
+            self.assertEqual(f.apply(),first)
+            f.authorization['credit']['grant_sec']+=1
+            with self.assertRaisesRegex(Hold,'different bytes'):f.apply()
+            self.assertEqual(f.store.state(),after)
+            f.authorization.update(authorization_id=str(uuid.uuid4()),expected_revision=after['revision'],expected_state_sha256=digest(after))
+            with self.assertRaisesRegex(Hold,'already applied'):f.apply()
+            self.assertEqual(f.store.state(),after)
+        finally:f.store.close()
+    def test_v3_committed_authorization_recovers_after_export_failure(self):
+        f=Fixture(self.root,duration=7000.);self.v3_supplement(f)
+        try:
+            args=parser().parse_args(f.args())
+            with f.clock(),patch('mission_continuation.write_once',side_effect=OSError('fixture export interruption')):
+                with self.assertRaises(OSError):continuation_main(args)
+            committed=MissionStore.inspect(f.db)
+            process=f.cli(f.args());self.assertEqual(process.returncode,0,process.stderr+process.stdout)
+            self.assertEqual(MissionStore.inspect(f.db),committed)
+            self.assertEqual(json.loads((self.root/'output/state.json').read_text()),committed)
+        finally:f.store.close()
+    def test_actual_A15_v3_approval_cli_preserves_history_and_last_F016_parent(self):
+        f=Fixture(self.root,duration=7000.,actual=True)
+        try:
+            workspace=Path(os.environ['MATRIX_EVIDENCE_ROOT']) if os.environ.get('MATRIX_EVIDENCE_ROOT') else next(
+                (a for a in HERE.parents if (a/'analysis_outputs').is_dir()),HERE)
+            source=workspace/'analysis_outputs/planner_comparison_20261105/space_agent_recovery_20261110/main_continuation_design_supplement_v3.json'
+            if not source.exists():self.skipTest('Actual Main v3 approval unavailable')
+            raw=source.read_bytes();copied=self.root/'real_v3.json';copied.write_bytes(raw)
+            maximum=json.loads(raw)['maximum_grant_sec']
+            f.authorization['design_supplement']=reference(copied)
+            grant=min(f.end-f.start,maximum);f.authorization['credit']['grant_sec']=grant
+            args=f.args(execute=False);before=f.db.read_bytes();result=f.cli(args)
+            self.assertEqual(result.returncode,0,result.stderr);self.assertEqual(f.db.read_bytes(),before)
+            self.assertFalse((self.root/'output').exists())
+            result=f.cli(f.args());self.assertEqual(result.returncode,0,result.stderr)
+            self.assertEqual(json.loads(result.stdout)['goals_sent'],0)
+            s=MissionStore.inspect(f.db)
+            for key in ('mission_id','route','progress','current_target','result_flags'):self.assertEqual(s[key],f.state[key])
+            self.assertEqual(s['budgets']['deadline_boottime_sec'],f.state['budgets']['deadline_boottime_sec']+grant)
+            self.assertEqual(s['budgets']['mission_dispatches_reserved'],3)
+            self.assertEqual(s['budgets']['per_index_parent_dispatches'][5],2)
+            self.assertEqual(s['budgets']['per_index_reserved'][5],4)
+            self.assertEqual(s['result_flags']['strict_timing_status'],'FAIL')
+            hashes={p.name:digest(p.read_bytes()) for p in (self.root/'output').iterdir()}
+            repeated=f.cli(f.args());self.assertEqual(repeated.returncode,0,repeated.stderr)
+            self.assertEqual(repeated.stdout,result.stdout);self.assertEqual(MissionStore.inspect(f.db),s)
+            self.assertEqual({p.name:digest(p.read_bytes()) for p in (self.root/'output').iterdir()},hashes)
+            f.store=MissionStore(f.db)
+            with f.clock():
+                Session(f.store,str(uuid.uuid4()),self.root/'next').validate_ready(f.ready)
+                attempt=f.store.reserve(str(uuid.uuid4()),self.root/'next')
+                self.assertEqual(attempt['start_index'],5)
+                closed=stop_result(attempt['parent_action_uuid']);path=self.root/'next_result.json';atomic_json(path,closed)
+                f.store.finish_attempt(closed,True,result_path=path)
+                with self.assertRaisesRegex(Hold,'FAILED_BUDGET'):f.store.reserve(str(uuid.uuid4()),self.root/'forbidden')
+            self.assertEqual(f.store.state()['budgets']['per_index_parent_dispatches'][5],3)
+            self.assertEqual(f.store.state()['budgets']['per_index_reserved'][5],6)
+            self.assertEqual(source.read_bytes(),raw)
+        finally:f.store.close()
     def supplement(self,f):
         value=dict(schema='main.continuation.design_supplement.v2',
             decision='APPROVED_BOUNDED_A_INACTIVE_CREDIT_CAP_EXTENSION',mission_id=f.state['mission_id'],
