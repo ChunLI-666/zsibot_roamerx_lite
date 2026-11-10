@@ -546,7 +546,7 @@ class WaypointPilot(frozen.Pilot):
         if len(matches) == 1 and matches[0] not in self.first_plans:
             self.first_plans[matches[0]] = item
 
-    def observe_ordered(self, healthy, snapshot):
+    def observe_ordered(self, healthy, snapshot, *, defer_storage=False):
         while self.pending_feedback:
             feedback = self.pending_feedback.popleft()
             event = self.ordered.feedback(feedback['index'], feedback['steady_ns'], feedback['unix_ns'])
@@ -559,7 +559,7 @@ class WaypointPilot(frozen.Pilot):
             kind = event.pop('kind')
             self.emit(kind, parent_action_uuid=self.owned_identity.value.hex(), child_action_uuid=None, **event)
         if getattr(self, 'mission', None) is not None:
-            self.mission.observe(self.ordered)
+            self.mission.observe(self.ordered,defer=defer_storage)
         if now-self.last_state_trace_ns >= 100_000_000:
             self.last_state_trace_ns = now
             self.writer.submit('state_trace', dict(unix_ns=time.time_ns(), steady_ns=now,
@@ -633,6 +633,58 @@ class WaypointPilot(frozen.Pilot):
                     for key in set(before)|set(self.counts) if self.counts.get(key,0)!=before.get(key,0)})
         return self.runtime_last_pump
 
+    def pump_storage_wait(self):
+        """One executor; callback state stays on the main thread during fsync."""
+        if not rclpy.ok():
+            raise RuntimeError('ROS context stopped while durable checkpoint is pending')
+        rclpy.spin_once(self,timeout_sec=.002)
+        active=self.goal_sent_ns is not None
+        if self.args.stop_signals:
+            if active:self.cancel_own('pilot_interrupted')
+            return
+        now=time.monotonic()
+        if now-getattr(self,'storage_last_check',0)<.02:return
+        self.storage_last_check=now
+        terminal=getattr(self,'storage_terminal',None)
+        if terminal is not None and terminal.done():return
+        try:
+            valid,issues,snapshot=self.execution_ready(require_stopped=not active)
+            if not active:
+                if not valid:self.storage_preflight_gap=True
+                return
+            if not valid:self.invalidate_artifact(issues)
+            self.observe_ordered(valid,snapshot,defer_storage=True)
+            elapsed=now-self.goal_sent_steady
+            reason='input_became_invalid:'+','.join(issues) if not valid else None
+            if self.ordered.violation:reason=self.ordered.violation
+            if self.feedback_overflow:reason='native_feedback_observation_queue_overflow'
+            if self.args.cancel_after is not None and elapsed>=self.args.cancel_after:reason='scheduled_cancel'
+            if elapsed>=self.args.timeout or self.mission.store.remaining()<=0:reason='pilot_navigation_deadline'
+            if reason:self.cancel_own(reason)
+        except BaseException:
+            if active:self.cancel_own('storage_wait_observation_failed')
+            raise
+
+    def post_intent_preflight(self,deadline,started):
+        # Keep the original preflight deadline and original stable duration.
+        # Reuse this operation's durable UUID; never reserve again for a wait.
+        deadline=min(deadline,time.monotonic()+self.mission.store.remaining())
+        valid,issues,snapshot=self.wait_stable_preflight(deadline,started)
+        if valid:valid,issues,snapshot=self.execution_ready(require_stopped=True)
+        if not valid:return valid,issues,snapshot
+        if time.monotonic()>=deadline or self.mission.store.remaining()<=0:
+            return False,['post_intent_deadline'],snapshot
+        limit=initial_leg_limit(self.args.simulation_first_leg_max_distance_m,
+            self.latest_ready,self.args.simulation_scan_max_age_sec)
+        pose=snapshot['last']['pose'];goal=self.route[self.mission.start_index]['pose']
+        if math.hypot(goal[0]-pose['x'],goal[1]-pose['y'])>=limit:
+            return False,['post_intent_first_leg_outside_reviewed_window'],snapshot
+        self.args.timeout=min(self.args.timeout,self.mission.store.remaining())
+        self.emit('post_intent_preflight_passed',action_uuid=str(self.mission.action_uuid),
+            original_deadline_steady_s=deadline,original_stable_sec=self.args.stable_preflight_seconds,
+            persistence_health_gap=bool(getattr(self,'storage_preflight_gap',False)),snapshot=snapshot)
+        return True,[],snapshot
+
     def run_batch(self):
         self.emit('case_created', requested_route_map=self.route,
                   evidence_boundary='Native Lightning map pose only; GT /odom is reserved for offline comparison.')
@@ -666,6 +718,10 @@ class WaypointPilot(frozen.Pilot):
                   source_pose_stamp_ns=start_pose.get('stamp_ns'), final_goal_tolerances_unchanged=True)
         if first_distance >= first_limit:
             return dict(classification='invalid_first_leg_outside_reviewed_rolling_window_goal_not_sent')
+        requested_uuid = self.mission.reserve() if getattr(self, 'mission', None) is not None else uuid.uuid4()
+        if getattr(self,'mission',None) is not None:
+            valid,issues,snapshot=self.post_intent_preflight(deadline,started)
+            if not valid:return dict(classification='invalid_post_intent_preflight_not_sent',issues=issues,snapshot=snapshot)
         request = FollowWaypoints.Goal()
         try:
             budget = mission_budget(self.latest_ready,self.args.timeout,time.clock_gettime(time.CLOCK_BOOTTIME),
@@ -682,7 +738,6 @@ class WaypointPilot(frozen.Pilot):
             pose.pose.orientation.z = math.sin(entry['pose'][2]/2.)
             pose.pose.orientation.w = math.cos(entry['pose'][2]/2.)
             request.poses.append(pose)
-        requested_uuid = self.mission.reserve() if getattr(self, 'mission', None) is not None else uuid.uuid4()
         self.owned_identity = OwnedGoalIdentity(requested_uuid.bytes)
         self.goal_uuid = UUID(uuid=list(requested_uuid.bytes))
         self.goal_sent_steady, self.goal_sent_ns = time.monotonic(), time.time_ns()
@@ -691,17 +746,19 @@ class WaypointPilot(frozen.Pilot):
                   readiness_manifest=self.latest_ready, readiness_manifest_sha256=self.latest_ready_sha,
                   preregistered_budget=budget,
                   pose_header_stamps_ns=[frozen.stamp_ns(pose.header.stamp) for pose in request.poses])
+        if getattr(self,'mission',None) is not None:self.mission.send_invoked=True
         sent = client.send_goal_async(request, goal_uuid=self.goal_uuid, feedback_callback=self.native_feedback)
         if not self.spin_until(sent.done, 10.):
             return dict(classification='goal_response_timeout_acceptance_unknown')
         self.action_goal_handle = sent.result()
         self.owned_identity.verify(self.action_goal_handle.goal_id.uuid)
         self.emit('goal_response', accepted=bool(self.action_goal_handle.accepted), action_uuid=str(requested_uuid))
+        terminal=self.action_goal_handle.get_result_async() if self.action_goal_handle.accepted else None
+        self.storage_terminal=terminal
         if getattr(self, 'mission', None) is not None:
             self.mission.acknowledge(bool(self.action_goal_handle.accepted))
         if not self.action_goal_handle.accepted:
             return dict(classification='goal_rejected')
-        terminal = self.action_goal_handle.get_result_async()
         cancel_logged = False
         while rclpy.ok() and not terminal.done():
             pumped=self.pump_runtime_inputs(terminal)

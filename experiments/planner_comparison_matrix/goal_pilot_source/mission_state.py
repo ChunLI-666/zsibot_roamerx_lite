@@ -59,6 +59,19 @@ def validate_identity(identity):
         raise ValueError('Full source commit required')
 
 
+def check_identity_state(state,identity):
+    validate_identity(identity)
+    for key in (*IDENTITY_KEYS,'variant','source_sha','effective_config_sha256'):
+        if identity.get(key)!=state['identity'].get(key):raise Hold('IDENTITY_MISMATCH:'+key)
+
+
+def remaining_state(state):
+    boot,now=boot_clock();budget=state['budgets']
+    if budget['deadline_boottime_sec'] is None:return budget['remaining_sec']
+    if boot!=budget['deadline_boot_id']:raise Hold('CLOCK_UNTRUSTED: mission boot changed')
+    return max(0.,budget['deadline_boottime_sec']-now)
+
+
 def validate_visit(route, index, visit, legacy=False):
     if visit.get('index') != index or visit.get('id') != route[index]['id'] or visit.get('original_goal_map') != route[index]['pose']:
         raise Hold('Visit identity does not match exact original index')
@@ -98,12 +111,18 @@ def failure_decision(result, terminal, quiescent, stopped, *, operator_cancel=Fa
 def terminal_fields(result):
     value={key:result.get(key) for key in ('status','error_code','missed_waypoints')}
     value['error_msg']=result.get('error_msg') or ''
+    # Reconcile's native GetResult adapter exposes absolute index/code, while
+    # the original observer additionally records the goal pose. Keep that pose
+    # in the immutable raw authority, not in the shared comparison projection.
+    if isinstance(value['missed_waypoints'],list):
+        value['missed_waypoints']=[{key:item.get(key) for key in ('index','error_code')}
+            for item in value['missed_waypoints']]
     return value
 
 
 def terminal_authority(state, attempt, current, history):
     """Return the original raw result, never a result merged with a later stop."""
-    authority=attempt.get('terminal_authority');selected=None;previous_finished=None
+    authority=attempt.get('terminal_authority');selected=None;previous_finished=None;operator_evidence=None
     binding={key:attempt.get(key) for key in ('attempt_id','parent_action_uuid','identity_epoch_id')}
     if authority and authority.get('binding')!=binding:
         raise Hold('Terminal cause attempt/epoch binding differs')
@@ -116,6 +135,9 @@ def terminal_authority(state, attempt, current, history):
             raise Hold('Historical terminal evidence hash/UUID differs')
         if observed.get('route_sha256') not in (None,state['identity']['route_raw_sha256']):
             raise Hold('Historical terminal route differs')
+        if operator_evidence is None and (observed.get('operator_cancel_requested') or observed.get('stop_signals')
+                or observed.get('cancel_reason') in ('scheduled_cancel','pilot_interrupted')):
+            operator_evidence=copy.deepcopy(item)
         finished=observed.get('finished_ns')
         if finished is not None:
             if type(finished) is not int or (previous_finished is not None and finished<previous_finished):
@@ -125,6 +147,9 @@ def terminal_authority(state, attempt, current, history):
             if selected is None:selected=(item,observed)
             elif terminal_fields(observed)!=terminal_fields(selected[1]):
                 raise Hold('Conflicting native terminal observations')
+    if attempt.get('operator_cancel_evidence') not in (None,operator_evidence):
+        raise Hold('Operator cancellation evidence differs')
+    if operator_evidence is not None:attempt['operator_cancel_evidence']=operator_evidence
     if selected is None:
         if authority:raise Hold('Bound terminal authority is absent from history')
         return current
@@ -148,6 +173,7 @@ class MissionStore:
         self.timing_sink=None
         self.timing_drops=0
         self.state_read_timing={}
+        self.process_token=str(uuid.uuid4())
         try:
             # Caller supplies a stable resource lock shared across A/B missions.
             for lock in ([Path(resource)] if resource else [])+[self.path.with_suffix('.lock')]:
@@ -301,10 +327,7 @@ class MissionStore:
         self.db.execute('UPDATE operations SET result=? WHERE request_id=?',(encoded(result),request_id))
 
     def check_identity(self, identity):
-        validate_identity(identity); state = self.state()
-        for key in (*IDENTITY_KEYS, 'variant', 'source_sha', 'effective_config_sha256'):
-            if identity.get(key) != state['identity'].get(key):
-                raise Hold('IDENTITY_MISMATCH:'+key)
+        check_identity_state(self.state(),identity)
 
     def authorize_continuation(self, authorization, authorization_sha256, ready_path):
         """One atomic, idempotent authority change; never sends or reserves a goal."""
@@ -326,12 +349,7 @@ class MissionStore:
         return receipt
 
     def remaining(self):
-        s=self.state();boot,now=boot_clock()
-        if s['budgets']['deadline_boottime_sec'] is None:
-            return s['budgets']['remaining_sec']
-        if boot != s['budgets']['deadline_boot_id']:
-            raise Hold('CLOCK_UNTRUSTED: mission boot changed')
-        return max(0.,s['budgets']['deadline_boottime_sec']-now)
+        return remaining_state(self.state())
 
     def reserve(self, request_id, output):
         with self.transaction('SEND_INTENT') as s:
@@ -362,6 +380,7 @@ class MissionStore:
                 missed_waypoints=None,terminal_confirmed=False,children_quiescent=False,stopped=False,
                 output=str(Path(output).resolve()),created_ns=time.time_ns(),highest_feedback_index=None)
             attempt['child_slots_reserved']=child_slots
+            attempt['intent_owner_token']=self.process_token
             attempt['identity_epoch_id']=s['identity_epoch_id']
             attempt['source_provenance']=dict(kind='live_execution',source_sha=s['identity']['source_sha'])
             s['attempt']=attempt;s['attempts'].append(copy.deepcopy(attempt))
@@ -369,6 +388,22 @@ class MissionStore:
             s['stop']=dict(state='UNPROVEN');s['progress']['active_index']=index
             if len(s['attempts'])>1: s['result_flags']['recovery_used']=True
         return self.state()['attempt']
+
+    def record_not_sent(self,action_uuid,*,result_path,send_invoked):
+        with self.transaction('NOT_SENT_AFTER_INTENT') as s:
+            a=s['attempt'];path=Path(result_path).resolve(strict=True);raw=path.read_bytes();result=json.loads(raw)
+            if (send_invoked is not False or a.get('intent_owner_token')!=self.process_token
+                    or a['parent_action_uuid']!=action_uuid or a['dispatch_state']!='INTENT_COMMITTED'
+                    or result.get('action_uuid')!=action_uuid or result.get('status') is not None
+                    or result.get('send_goal_async_invoked') is not False or result.get('goals_sent')!=0):
+                raise Hold('Current-process never-sent intent proof missing')
+            a.update(dispatch_state='NOT_SENT_AFTER_INTENT',native_status=None,terminal_confirmed=False,
+                not_sent_evidence=dict(path=str(path),sha256=digest(raw)))
+            s['lifecycle']='HOLD';s['hold_reason']='NOT_SENT_AFTER_INTENT_NO_AUTOMATIC_REDISPATCH'
+            if result.get('strict_scan_timing_status')=='FAIL':s['result_flags']['strict_timing_status']='FAIL'
+            if (result.get('camera_recording_quality') or {}).get('status')=='FAIL':
+                s['result_flags']['camera_recording_quality_status']='FAIL';s['result_flags']['strict_timing_status']='FAIL'
+            s['attempts'][-1]=copy.deepcopy(a)
 
     def acknowledge(self, action_uuid, accepted):
         with self.transaction('ACK') as s:
@@ -486,7 +521,7 @@ class MissionStore:
                 s['hold_reason']=None
             else:
                 s['lifecycle'],s['hold_reason']=failure_decision(cause,a['terminal_confirmed'],a['children_quiescent'],a['stopped'],
-                    operator_cancel=bool(result.get('operator_cancel_requested') or result.get('stop_signals')))
+                    operator_cancel=bool(a.get('operator_cancel_evidence')))
             s['attempts'][-1]=copy.deepcopy(a)
 
     def import_closed(self, result, result_sha, historical_bt_retries=1):

@@ -503,3 +503,30 @@ are retained. Low measured speed can permit an ordinary .4 m/s forward command;
 this software result proves neither simulator response nor physical low-speed
 motion. New closed-loop evidence is required before claiming the repeated
 short-stop failure is resolved.
+
+## Durable mission checkpoints and terminal cause (2026-11-10)
+
+The opt-in mission CLI binds the first same-UUID terminal cause to its unchanged
+raw result file and SHA. A later reconciliation file supplies its own stop and
+child-quiescence observation; it does not replace the original cancellation
+cause or clear strict timing failures. Missing, modified or conflicting evidence
+holds the mission. Explicit operator cancellation remains canceled.
+
+For executing mission operations, one storage thread creates, uses and closes
+SQLite and retains the original owner locks. FULL/DELETE, transaction commits,
+file fsync and directory fsync remain required. The main ROS executor continues
+input processing and exact-UUID cancellation while these checkpoints finish.
+Critical visit transitions use a bounded ordered queue; failures retain an
+uncertain attempt rather than claiming a completed checkpoint.
+
+After durable SEND_INTENT and both exports, the same operation re-establishes
+the original stable preflight inside its original deadline, checks fresh inputs,
+identity, stop, first-leg distance and remaining budget, then sends at most once
+with the already reserved UUID. Exiting before invoking send_goal_async permits
+only a current-owner NOT_SENT_AFTER_INTENT record with null native status and no
+budget refund. A new process never automatically dispatches an uncertain intent
+or reuses a proven-not-sent reservation. The new mission_storage.py module is
+included in launcher required sources, capability SHA and CLI source copies.
+
+These are software contracts for isolated experiments. They do not migrate old
+A16/B38 live databases or establish route, simulator or physical acceptance.

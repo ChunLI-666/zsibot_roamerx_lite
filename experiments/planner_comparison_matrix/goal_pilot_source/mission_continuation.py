@@ -8,7 +8,7 @@ import uuid
 
 from mission_state import Hold, MissionStore, IDENTITY_KEYS, atomic_json, boot_clock, digest, encoded, validate_identity
 
-CLIENT_SOURCES=('mission_state.py','mission_resume.py','mission_continuation.py')
+CLIENT_SOURCES=('mission_state.py','mission_resume.py','mission_continuation.py','mission_storage.py')
 HERE=Path(__file__).resolve().parent
 
 
