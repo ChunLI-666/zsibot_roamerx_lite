@@ -94,16 +94,19 @@ class StorageWorker:
         if name in self.METHODS:return lambda *args,**kwargs:self.call(name,*args,**kwargs)
         raise AttributeError(name)
 
-    def state(self):
+    def _committed_state(self):
         if self._state is None:
             # Only used before create or for opening an existing mission, before ROS.
             if self.busy:raise Hold('No committed state available during storage work')
             self.call('flush_state_read_timing','initial_snapshot')
         if self._state is None:raise Hold('Mission has not been created')
-        return copy.deepcopy(self._state)
+        return self._state
 
-    def remaining(self):return remaining_state(self.state())
-    def check_identity(self,identity):return check_identity_state(self.state(),identity)
+    def state(self):
+        return copy.deepcopy(self._committed_state())
+
+    def remaining(self):return remaining_state(self._committed_state())
+    def check_identity(self,identity):return check_identity_state(self._committed_state(),identity)
 
     @property
     def timing_sink(self):return self._sink

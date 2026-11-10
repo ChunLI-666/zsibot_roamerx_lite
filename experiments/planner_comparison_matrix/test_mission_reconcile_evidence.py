@@ -145,7 +145,8 @@ class ReconcileCliTests(unittest.TestCase):
         env=os.environ.copy();env.update(ROS_DOMAIN_ID='185',PYTHONDONTWRITEBYTECODE='1',MATRIX_TEST_TAMPER_RESULT='1' if tamper else '0')
         command=[sys.executable,str(Path(__file__).resolve()),'--cli-fixture',str(receipt),*args]
         process=subprocess.run(command,env=env,capture_output=True,text=True,timeout=15)
-        self.assertEqual(process.returncode,10 if tamper else 11,process.stderr+process.stdout)
+        expected_code=10 if tamper or not sample['final_measured_and_commanded_stop'] else 11
+        self.assertEqual(process.returncode,expected_code,process.stderr+process.stdout)
         trace=json.loads(receipt.with_suffix('.trace.json').read_text())
         self.assertEqual(trace['goals_sent'],0)
         self.assertEqual(trace['cancelled_uuids'],[before['attempt']['parent_action_uuid']])
@@ -172,12 +173,13 @@ class ReconcileCliTests(unittest.TestCase):
         self.assertEqual(response['result_sha256'],digest((root/'operation/result.json').read_bytes()))
         self.assertEqual(state['attempts'][:-1],before['attempts'][:-1])
         repeated=subprocess.run(command,env=env,capture_output=True,text=True,timeout=15)
-        self.assertEqual(repeated.returncode,11,repeated.stderr)
+        self.assertEqual(repeated.returncode,expected_code,repeated.stderr)
         self.assertEqual(json.loads(repeated.stdout),response)
         self.assertEqual(MissionStore.inspect(db),state)
         with_db=MissionStore(db)
         try:
-            with self.assertRaisesRegex(Hold,'FAILED_BUDGET'):with_db.reserve(str(uuid.uuid4()),root/'forbidden')
+            reason='FAILED_BUDGET' if expected_code==11 else 'Prior attempt lacks child quiescence or measured stop'
+            with self.assertRaisesRegex(Hold,reason):with_db.reserve(str(uuid.uuid4()),root/'forbidden')
         finally:with_db.close()
         return state
     def synthetic_state(self,root):
@@ -198,6 +200,16 @@ class ReconcileCliTests(unittest.TestCase):
                 original=Path(before['attempt']['native_result']['path']);old_raw=original.read_bytes()
                 self.run_cli(root,before,sample,operation)
                 self.assertEqual(original.read_bytes(),old_raw)
+
+    def test_terminal_quiescent_without_measured_stop_keeps_operation_held(self):
+        for operation in ['reconcile','cancel']:
+            with self.subTest(operation=operation),tempfile.TemporaryDirectory() as directory:
+                root=Path(directory);before,sample=self.synthetic_state(root)
+                sample['final_measured_and_commanded_stop']=False
+                sample['owned_goal_shutdown']['stop']=dict(observed=False,strict_stop_issues=['no_stop'])
+                state=self.run_cli(root,before,sample,operation)
+                self.assertFalse(state['attempt']['stopped'])
+                self.assertEqual(state['lifecycle'],'HOLD')
     def test_cli_evidence_mismatch_holds_and_cleans_up(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);before,sample=self.synthetic_state(root)

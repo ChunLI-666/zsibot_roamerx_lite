@@ -29,7 +29,7 @@ from unique_identifier_msgs.msg import UUID
 
 import pilot_scan_timing as frozen
 import message_info_contract
-from waypoint_contract import (ACTION, AsyncEvidenceWriter, OrderedVisits, OwnedGoalIdentity, initial_leg_limit,
+from waypoint_contract import (ACTION, AdvancingStop, AsyncEvidenceWriter, OrderedVisits, OwnedGoalIdentity, initial_leg_limit,
                                evidence_json, finite_velocity, mission_budget, strict_stopped, validate_ownership, validate_route, waypoint_binding)
 from waypoint_contract import (ReadyReadCapture, ownership_metadata_lease_deviation, validate_settle_budget,
                                producer_scan_confirmation_failure, producer_scan_confirmation_outcome)
@@ -69,6 +69,7 @@ def freeze_sources(output, simulation_scan_max_age_sec=.3):
     manifest['runtime_callback_pump']='Runtime batches callbacks within 20ms before unchanged guards; interruption/terminal/own-cancel/existing deadlines checked per callback. Single-callback overruns, original topic-count deltas and check intervals are recorded; no 300ms/500ms/QoS changes. Fixed .002s spin kwargs preserve Jazzy ready iterator fairness; one idle wait may exceed a wall window, and single callbacks remain nonpreemptible.'
     manifest['ready_read_failure_capture']='Unchanged a63b validator receives one path-like single-file read with fd stat and wall/steady bounds. Only the first read_ready exception retains exact raw bytes in memory, persisted after own-goal cleanup; internal validator now remains unknown. Last-passing READY cache is labelled separately.'
     manifest['stop_cleanup']='Every possibly sent goal reaches finally own-UUID cancellation and a fresh finite measured/commanded stop observation, including response timeout, signal and exception. Default rclpy shutdown-on-SIGINT is disabled until cleanup completes.'
+    manifest['stop_callback_pump']='Stop/finally/reconcile drain the same executor for <=20ms with fixed .002s spin calls, independent of terminal/cancel state; one full READY/ownership health check per batch. Unchanged strict stopped predicates and advancing original-Odom source/steady .3s dwell, bounded by the original settle deadline. No age refresh or extra executor.'
     manifest['producer_scan_confirmation']='Opt-in same-scan producer-only not_ready may use the existing <=50ms window only after current raw metadata/bindings/UUID revalidation. New strict READY with a later original producer scan stamp and all own original guards is required; every episode permanently fails strict timing. Preflight/runtime failed reads are separate.'
     manifest['scan_aging_confirmation']='Default 0 preserves strict behavior. Opt-in <=.05s drains existing callbacks only after sole scan-header aging; a newer original stamp must restore every original guard. Every episode permanently fails strict timing acceptance; no header-age threshold changes.'
     manifest['simulation_scan_latency_profile']=simulation_scan_latency_profile(simulation_scan_max_age_sec)
@@ -172,6 +173,33 @@ class WaypointPilot(frozen.Pilot):
                 cls,topic,callback,frozen.qos_profile_sensor_data,raw=True))
         else:
             frozen.Pilot.sub(self,cls,topic,callback)
+
+    def remember(self, key, value):
+        remembered=super().remember(key,value)
+        dwell=getattr(self,'_stop_dwell',None)
+        if dwell is not None and key in ('odom','/cmd_vel_safe','loc_status','pose_valid'):
+            # A short delivered moving sample between health checks must break
+            # the stop history even when the last value is zero again. This is
+            # invalidation only: no callback can grant stop or refresh an age.
+            bad=(key=='loc_status' and remembered.get('value')!=1) or (
+                key=='pose_valid' and remembered.get('value') is not True)
+            if key in ('odom','/cmd_vel_safe'):
+                linear,angular=(.03,.05) if key=='odom' else (.01,.01)
+                bad=not finite_velocity(remembered) or math.hypot(
+                    remembered.get('vx',math.inf),remembered.get('vy',math.inf))>linear or abs(
+                    remembered.get('wz',math.inf))>angular
+                source=remembered.get('stamp_ns') if key=='odom' else remembered['received_unix_ns']
+                previous=self._stop_sample_previous.get(key)
+                if key=='odom':
+                    bad=bad or remembered.get('frame_id')!='odom' or remembered.get('child_frame_id')!='base_link'
+                if type(source) is not int or source<=0:
+                    bad=True
+                elif previous is not None and not 0<source-previous<=300_000_000:
+                    bad=True
+                self._stop_sample_previous[key]=source
+            if bad:
+                dwell.reset();self._stop_callback_resets+=1
+        return remembered
 
     def publish_serialized_event(self, line):
         if self.event_pub is not None:
@@ -473,8 +501,69 @@ class WaypointPilot(frozen.Pilot):
     def record_stop(self, settled, snapshot, basis):
         strict, issues = strict_stopped(snapshot)
         self.stop_evidence = dict(attempted=True, observed=bool(settled and strict), basis=basis,
-            checked_unix_ns=time.time_ns(), strict_stop_issues=issues, snapshot=snapshot)
+            checked_unix_ns=time.time_ns(), strict_stop_issues=issues, snapshot=snapshot,
+            callback_observation=getattr(self,'stop_wait_observation',None))
         return self.stop_evidence
+
+    def pump_stop_inputs(self, deadline_ns):
+        """Drain original subscriptions after terminal/cancel as well as before.
+
+        The active-goal pump deliberately stops at terminal/cancel, so it cannot
+        supply fresh stop evidence. This uses its own finite wall window on the
+        same executor and never refreshes a cached message's receipt/header.
+        """
+        started=time.monotonic_ns();cpu=time.thread_time_ns();before=dict(self.counts)
+        end=min(deadline_ns,started+20_000_000);calls=0
+        try:
+            while rclpy.ok() and time.monotonic_ns()<end:
+                self.check_interruption()
+                rclpy.spin_once(self,timeout_sec=.002)
+                calls+=1
+        finally:
+            finished=time.monotonic_ns()
+            self.stop_last_pump=dict(started_steady_ns=started,finished_steady_ns=finished,
+                budget_ns=max(0,end-started),wall_ns=finished-started,
+                thread_cpu_ns=time.thread_time_ns()-cpu,spin_calls=calls,
+                overrun_ns=max(0,finished-end),
+                observed_count_deltas={key:self.counts.get(key,0)-before.get(key,0)
+                    for key in set(before)|set(self.counts) if self.counts.get(key,0)!=before.get(key,0)})
+        return self.stop_last_pump
+
+    def wait_settled(self, seconds):
+        """One full health read per batch, then unchanged advancing-Odom stop."""
+        started=time.monotonic_ns();deadline=started+int(seconds*1e9)
+        dwell=AdvancingStop();recent=deque(maxlen=32);checks=0;settled=False
+        self._stop_dwell=dwell;self._stop_sample_previous={};self._stop_callback_resets=0
+        snapshot=None
+        try:
+            while rclpy.ok() and time.monotonic_ns()<deadline:
+                pump=self.pump_stop_inputs(deadline)
+                if time.monotonic_ns()>=deadline:break
+                checked=time.monotonic_ns();cpu=time.thread_time_ns()
+                # This validates READY/ownership exactly once. strict_stopped is
+                # evaluated by AdvancingStop on this same unmodified snapshot.
+                healthy,issues,snapshot=self.execution_ready()
+                if not healthy:self.invalidate_artifact(issues)
+                finished=time.monotonic_ns();checks+=1
+                qualified=dwell.observe(snapshot,finished,healthy)
+                recent.append(dict(pump=pump,health_started_steady_ns=checked,
+                    health_finished_steady_ns=finished,health_wall_ns=finished-checked,
+                    health_thread_cpu_ns=time.thread_time_ns()-cpu,
+                    healthy=healthy,issues=list(issues),stop_qualified=qualified,
+                    odom_stamp_ns=snapshot.get('last',{}).get('odom',{}).get('stamp_ns'),
+                    odom_received_unix_ns=snapshot.get('last',{}).get('odom',{}).get('received_unix_ns')))
+                if qualified and finished<=deadline:
+                    settled=True
+                    return True,snapshot
+            return False,self.current_summary()
+        finally:
+            self.stop_wait_observation=dict(schema='matrix.stop_callback_observation.v1',
+                started_steady_ns=started,deadline_steady_ns=deadline,
+                finished_steady_ns=time.monotonic_ns(),checks=checks,settled=settled,
+                recent=list(recent),ring_limit=32,advancing_odom_dwell=dict(dwell.__dict__),
+                callback_invalidations=self._stop_callback_resets)
+            self._stop_dwell=None
+            self.emit('stop_wait_finished',**self.stop_wait_observation)
 
     def finalize_own_goal(self):
         """All post-send exits reach cancellation, then independent stop evidence."""
