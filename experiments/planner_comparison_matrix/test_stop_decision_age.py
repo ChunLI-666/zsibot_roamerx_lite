@@ -32,7 +32,12 @@ class DecisionAgeTests(unittest.TestCase):
             waypoint_ownership=dict(checked_unix_ns=self.wall,exclusive_nav_client=True,status_publishers_match=True,
                 navigate_to_pose_active=[],follow_waypoints_active=[]))
         n=SimpleNamespace(last=last,transforms=transforms,counts=Counter(),goal_sent_ns=1,owned_identity=None,
-            simulation_scan_max_age_sec=.3,args=SimpleNamespace(execute=True),latest_ready=ready)
+            simulation_scan_max_age_sec=.3,args=SimpleNamespace(execute=True),latest_ready=ready,
+            strict_scan_latency_first_fault=None,strict_scan_latency_count=0,strict_scan_latency_seen=set(),
+            events=[],artifact_invalid_reasons=[])
+        n.emit=lambda kind,**fields:n.events.append((kind,fields))
+        n.invalidate_artifact=lambda issues:n.artifact_invalid_reasons.extend(issues)
+        n.scan_timing_record_check=MethodType(batch.frozen.Pilot.scan_timing_record_check,n)
         # Bind the production functions themselves, without editing/extracting AST.
         n.current_summary=MethodType(batch.frozen.Pilot.current_summary,n)
         n.input_ready=MethodType(batch.frozen.Pilot.input_ready,n)
@@ -104,6 +109,43 @@ class DecisionAgeTests(unittest.TestCase):
                 if target=='producer_receive':obs['receive_steady_seconds']-=.4
                 self.assertTrue(self.decision(n,0.)[0])
                 self.assertFalse(self.decision(n,.2)[0])
+
+    def test_decision_scan_operational_point_four_latches_strict_fault_and_deduplicates(self):
+        for target in ['consumer_header','consumer_receive','producer_header','producer_receive']:
+            with self.subTest(target=target):
+                n=self.node();n.simulation_scan_max_age_sec=.5
+                obs=dict(header_ns=self.wall,validation_clock_begin_ns=self.wall,validation_clock_end_ns=self.wall,
+                    validation_steady_begin_ns=int(self.steady*1e9),validation_steady_end_ns=int(self.steady*1e9),
+                    receive_steady_seconds=self.steady,frame_id='base_link',ranges=360)
+                n.latest_ready['producer_scan_observation']=obs
+                if target=='consumer_header':n.last['scan']['stamp_ns']-=200_000_000
+                if target=='consumer_receive':n.last['scan']['received_steady']-=.2
+                if target=='producer_header':obs['header_ns']-=200_000_000
+                if target=='producer_receive':obs['receive_steady_seconds']-=.2
+                # The original full-check-time strict evidence is clean.
+                self.assertTrue(self.decision(n,0.)[0]);self.assertIsNone(n.strict_scan_latency_first_fault)
+                self.assertTrue(n.scan_timing_latest_check['valid'])
+                self.assertTrue(self.decision(n,.2)[0])
+                self.assertFalse(n.scan_timing_latest_check['valid'])
+                first=n.strict_scan_latency_first_fault
+                self.assertEqual(first['strict_timing_status'],'FAIL')
+                self.assertEqual(n.strict_scan_latency_count,1)
+                self.assertIn('scan:strict_300ms_latency_violation',n.artifact_invalid_reasons)
+                deviation=first['deviations'][0]
+                if target.startswith('producer'):
+                    self.assertEqual(deviation['source'],'producer_original_scan_bounds')
+                    self.assertEqual(deviation['original_observation'],obs)
+                    key='header_age_bounds_s' if target.endswith('header') else 'receive_age_bounds_s'
+                    self.assertAlmostEqual(deviation[key][0],.4)
+                else:self.assertEqual(deviation['source'],'consumer_original_scan')
+                self.assertTrue(self.decision(n,.21)[0]);self.assertEqual(n.strict_scan_latency_count,1)
+                self.assertEqual(len(n.events),1)
+                # A newer original scan can recover current health, never the verdict.
+                n.last['scan'].update(stamp_ns=self.wall+200_000_000,received_steady=self.steady+.2)
+                obs.update(header_ns=self.wall+200_000_000,receive_steady_seconds=self.steady+.2)
+                self.assertTrue(self.decision(n,.22)[0]);self.assertTrue(n.scan_timing_latest_check['valid'])
+                self.assertIs(n.strict_scan_latency_first_fault,first)
+                self.assertEqual(n.strict_scan_latency_count,1)
 
 
 if __name__=='__main__':unittest.main()

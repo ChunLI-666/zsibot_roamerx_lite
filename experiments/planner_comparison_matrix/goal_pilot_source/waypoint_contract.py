@@ -697,14 +697,48 @@ def producer_scan_signed_age_bounds(ready, *, clock_ns=None, steady_ns=None):
         receive_age_bounds_s=[sb/1e9-received,se/1e9-received],original_observation=obs)
 
 
-def strict_simulation_scan_deviations(snapshot,ready):
+def strict_simulation_scan_deviations(snapshot,ready,*,producer_bounds=None):
     deviations=[];scan=snapshot.get('last',{}).get('scan',{})
     own={k:scan.get(k) for k in ['stamp_ns','receive_age_s','header_age_s','received_unix_ns','received_steady']}
     if any(type(own.get(k)) in (int,float) and math.isfinite(own[k]) and own[k]>.3
            for k in ['receive_age_s','header_age_s']):
         deviations.append(dict(source='consumer_original_scan',original_scan=own))
-    if ready is not None:
-        bounds=producer_scan_signed_age_bounds(ready)
+    if ready is not None or producer_bounds is not None:
+        bounds=producer_scan_signed_age_bounds(ready) if producer_bounds is None else producer_bounds
         if any(age>.3 for key in ['header_age_bounds_s','receive_age_bounds_s'] for age in bounds[key]):
             deviations.append(dict(source='producer_original_scan_bounds',**bounds))
     return deviations
+
+
+def record_scan_timing_health(pilot, require_stopped, issues, snapshot, entered_unix_ns, entered_steady_ns,
+                              producer_evidence_ready=None, producer_evidence_context=None, *, producer_bounds=None):
+    """Record original strict evidence before returning operational health.
+
+    Both full health and stop decisions share the same permanent fault/count/
+    deduplication rules. Optional bounds describe this decision's original sample.
+    """
+    strict_issues=list(issues);deviations=[]
+    if pilot.simulation_scan_max_age_sec>.3:
+        deviations=strict_simulation_scan_deviations(snapshot,producer_evidence_ready,producer_bounds=producer_bounds)
+        if any(d['source']=='producer_original_scan_bounds' for d in deviations):
+            strict_issues.append('scan:producer_strict_300ms_age_exceeded')
+    # The immutable original .3 check and original snapshot feed strict evidence.
+    pilot.scan_timing_record_check(require_stopped,strict_issues,snapshot,entered_unix_ns,entered_steady_ns)
+    if deviations:
+        if pilot.strict_scan_latency_first_fault is None:
+            pilot.strict_scan_latency_first_fault=dict(checked_unix_ns=entered_unix_ns,checked_steady_ns=entered_steady_ns,
+                original_strict_issues=list(strict_issues),original_snapshot=snapshot,deviations=deviations,
+                producer_evidence_context=producer_evidence_context,
+                failed_READY_raw_sha256=None if getattr(pilot,'current_ready_read_failure',None) is None else pilot.current_ready_read_failure['metadata']['sha256'],
+                latest_validated_READY_sha256=getattr(pilot,'latest_ready_sha',None),strict_timing_status='FAIL')
+        pilot.invalidate_artifact(['scan:strict_300ms_latency_violation'])
+        for deviation in deviations:
+            stamp=(deviation.get('original_scan',{}).get('stamp_ns') if deviation['source']=='consumer_original_scan'
+                else deviation['original_observation'].get('header_ns'))
+            key=(deviation['source'],stamp)
+            if key not in pilot.strict_scan_latency_seen:
+                pilot.strict_scan_latency_seen.add(key);pilot.strict_scan_latency_count+=1
+                pilot.emit('strict_scan_latency_deviation',strict_timing_status='FAIL',strict_timing_accepted=False,
+                    deviation=deviation,original_check_unix_ns=entered_unix_ns)
+    operational_issues=operational_scan_age_issues(strict_issues,snapshot,pilot.simulation_scan_max_age_sec)
+    return not operational_issues,operational_issues,snapshot

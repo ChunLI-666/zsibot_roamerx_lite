@@ -25,7 +25,7 @@ def main():
     parser.add_argument('--client-dir',type=Path,required=True)
     parser.add_argument('--evidence-root',type=Path,required=True)
     parser.add_argument('--output',type=Path,required=True)
-    parser.add_argument('--case',choices=['terminal','cancel','moving','pulse','cached','stale','deadline','overrun','slow_health','ready_expiry'],required=True)
+    parser.add_argument('--case',choices=['terminal','cancel','moving','pulse','cached','stale','deadline','overrun','slow_health','ready_expiry','strict_consumer_age','strict_producer_age'],required=True)
     parser.add_argument('--baseline',action='store_true')
     args=parser.parse_args()
     assert os.environ.get('ROS_DOMAIN_ID')=='190'
@@ -67,12 +67,14 @@ def main():
     seed.db.execute('INSERT INTO mission VALUES (1,?,?)',(state['revision'],encoded(state)));seed.close()
     worker=StorageWorker(database,out/'resource.lock')
     session=Session(worker,str(uuid.uuid4()),out)
-    manifest=freeze_sources(out)
+    strict_case=args.case.startswith('strict_')
+    scan_cap=.5 if strict_case else .3
+    manifest=freeze_sources(out,scan_cap)
     ready['waypoint_contract']['client_sources_sha256']={
         'experiments/planner_comparison_matrix/goal_pilot_source/'+name:value for name,value in manifest['sources_sha256'].items()}
     ready['waypoint_contract']['mission_resume']['client_sources_sha256']={
         name:digest((args.client_dir/name).read_bytes()) for name in CLIENT_SOURCES}
-    ready['simulation_scan_latency_profile']=simulation_scan_latency_profile(.3)
+    ready['simulation_scan_latency_profile']=simulation_scan_latency_profile(scan_cap)
     ready['mission_deadline'].update(launcher_boot_id=boot,deadline_boottime_sec=now+120)
     ready['waypoint_ownership'].update(navigate_to_pose_active=[],follow_waypoints_active=[],follow_path_active=[])
     ready_path=out/'synthetic_READY.json'
@@ -81,7 +83,7 @@ def main():
         original_event_ready_sha256=event['latest_ready_sha256'],structured_ready_sha256=digest(original_ready),
         structured_ready_bytes=len(original_ready),state_bytes=state_path.stat().st_size,
         fixture_changes=['local boot/deadline in isolated DB and READY','current loaded client source bindings',
-            'strict .3 scan profile','fresh synthetic READY lease and ownership timestamp','empty synthetic active goals'],
+            'explicit scan profile '+str(scan_cap),'fresh synthetic READY lease and ownership timestamp','empty synthetic active goals'],
         original_budgets=original_budgets,physical_acceptance=False)
     (out/'fixture_manifest.json').write_text(json.dumps(audit,indent=2)+'\n')
     measurements=[]
@@ -89,7 +91,7 @@ def main():
         start=time.perf_counter_ns();session.validate_ready(ready);measurements.append(time.perf_counter_ns()-start)
     before=worker.state()
     options=SimpleNamespace(execute=True,ready=ready_path,variant=state['variant'],case_id='dds_stop_'+args.case,
-        scan_aging_confirm_sec=0.,simulation_scan_max_age_sec=.3,odom_topic='/odom/current_pose',scan_topic='/laser_scan',
+        scan_aging_confirm_sec=0.,simulation_scan_max_age_sec=scan_cap,odom_topic='/odom/current_pose',scan_topic='/laser_scan',
         camera_topic='/test/camera/compressed',camera_info_topic='/test/camera/info',stop_signals=[],
         timeout=10.,settle_seconds=1.3,cancel_after=None,goal=None,relative_goal=None)
     rclpy.init();producer=rclpy.create_node('synthetic_b41_stop_inputs')
@@ -128,7 +130,12 @@ def main():
                 if tick%10==0:
                     p=PoseStamped();p.header.frame_id='map';p.header.stamp=stamp;p.pose.orientation.w=1.;pubs['pose'].publish(p)
                     pubs['loc'].publish(UInt8(data=1));pubs['valid'].publish(Bool(data=True))
-                    scan=LaserScan();scan.header.frame_id='base_link';scan.header.stamp=stamp;scan.ranges=[10.]*360;pubs['scan'].publish(scan)
+                    scan=LaserScan();scan.header.frame_id='base_link';scan.header.stamp=stamp;scan.ranges=[10.]*360
+                    if strict_case:
+                        scan.angle_increment=.01745;scan.angle_max=359*.01745;scan.range_min=.1;scan.range_max=30.
+                    if args.case=='strict_consumer_age':
+                        scan.header.stamp=(producer.get_clock().now()-Duration(seconds=.2)).to_msg()
+                    pubs['scan'].publish(scan)
                     for key in ('nav','cmd','safe'):pubs[key].publish(Twist())
                     transforms=[]
                     for parent,child in [('map','odom'),('odom','base_link')]:
@@ -139,20 +146,30 @@ def main():
                     path=NavPath();path.header.frame_id='map';path.header.stamp=stamp;path.poses=[p];pubs['plan'].publish(path)
                     ready.update(ready=True,time_ns=wall,valid_until_ns=wall+(100_000_000 if args.case=='ready_expiry' else 500_000_000))
                     ready['waypoint_ownership']['checked_unix_ns']=wall
+                    if strict_case:
+                        delay_ns=200_000_000 if args.case=='strict_producer_age' else 0
+                        clock_ns=stamp.sec*1_000_000_000+stamp.nanosec
+                        ready['producer_scan_observation']=dict(header_ns=clock_ns-delay_ns,
+                            validation_clock_begin_ns=clock_ns,validation_clock_end_ns=clock_ns,
+                            validation_steady_begin_ns=steady,validation_steady_end_ns=steady,
+                            receive_steady_seconds=(steady-delay_ns)/1e9,frame_id='base_link',ranges=360)
                     temp=ready_path.with_suffix('.tmp');temp.write_text(json.dumps(ready));temp.replace(ready_path)
                 stopped.wait(.002)
         except BaseException as error:errors.append(repr(error));stopped.set()
     thread=threading.Thread(target=publish);thread.start()
-    result={}
+    result={};full_health_strict_before_delay=[]
     try:
         warm=time.monotonic()+2.
         while time.monotonic()<warm:rclpy.spin_once(node,timeout_sec=.002)
         valid,issues,_=node.execution_ready();assert valid,issues
-        if args.case in ('slow_health','ready_expiry'):
+        if args.case in ('slow_health','ready_expiry') or strict_case:
             original_execution_ready=node.execution_ready
             def delayed_execution_ready(*call_args,**call_kwargs):
                 result=original_execution_ready(*call_args,**call_kwargs)
-                time.sleep(.2 if args.case=='slow_health' else .15)
+                if strict_case:
+                    full_health_strict_before_delay.append(dict(strict_valid=node.scan_timing_latest_check['valid'],
+                        scan_header_age_s=result[2]['last']['scan']['header_age_s']))
+                time.sleep(.2 if args.case=='slow_health' or strict_case else .15)
                 return result
             node.execution_ready=delayed_execution_ready
         node.owned_identity=OwnedGoalIdentity(uuid.uuid4().bytes)
@@ -177,7 +194,11 @@ def main():
             decision_odom_header_age_sec=(node.get_clock().now().nanoseconds-snapshot.get('last',{}).get('odom',{}).get('stamp_ns',0))/1e9,
             snapshot_odom_header_age_sec=snapshot.get('last',{}).get('odom',{}).get('header_age_s'),
             validated_ready_expiry_minus_return_ns=node.latest_ready['valid_until_ns']-time.time_ns(),
-            injected_health_work_sec=.2 if args.case=='slow_health' else .15 if args.case=='ready_expiry' else 0.)
+            injected_health_work_sec=.2 if args.case=='slow_health' or strict_case else .15 if args.case=='ready_expiry' else 0.,
+            strict_scan_latency_first_fault=node.strict_scan_latency_first_fault,
+            strict_scan_latency_count=node.strict_scan_latency_count,
+            strict_latest_check_valid=node.scan_timing_latest_check['valid'],
+            full_health_strict_before_delay=full_health_strict_before_delay)
         (out/'RESULT.json').write_text(json.dumps(result,indent=2)+'\n')
         if not args.baseline:
             assert observed==(args.case not in ('cached','stale','deadline','overrun','slow_health','ready_expiry')),result
@@ -188,6 +209,14 @@ def main():
                 assert result['observation']['callback_invalidations']>0,result
             if args.case=='deadline':assert end-start<250_000_000,result
             if args.case=='overrun':assert 400_000_000<end-start<650_000_000,result
+        if strict_case:
+            assert observed and all(x['strict_valid'] for x in full_health_strict_before_delay),result
+            assert (node.strict_scan_latency_first_fault is None)==args.baseline,result
+            assert node.scan_timing_latest_check['valid']==args.baseline,result
+            if not args.baseline:
+                expected='consumer_original_scan' if args.case=='strict_consumer_age' else 'producer_original_scan_bounds'
+                assert expected in [d['source'] for d in node.strict_scan_latency_first_fault['deviations']],result
+                assert node.strict_scan_latency_count>0 and 'scan:strict_300ms_latency_violation' in node.artifact_invalid_reasons,result
         assert worker.state()==before
         assert not errors,errors
         print(json.dumps({k:result[k] for k in ('case','baseline','observed','elapsed_ns','full_guard_median_ns','state_unchanged')}))
