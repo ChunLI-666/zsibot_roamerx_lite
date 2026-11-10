@@ -38,7 +38,9 @@ def prepare(args, selected_install, footprint, scan_age):
     result.update(schema='matrix.recovery.runtime.v1',run_id=uuid.uuid4().hex,
         footprint=footprint,padding=args.padding,scan_topic=args.scan_topic,odom_topic=args.odom_topic,
         scan_max_age=scan_age,bt_retries=1,health_stable_sec=1.,stop_timeout_sec=30.)
-    result['raw_topic']='/matrix/'+result['run_id']+'/controller_cmd_vel'
+    # ROS topic tokens cannot start with a digit. Keep the original run identity
+    # for parameters/services/evidence; only its topic token needs a safe prefix.
+    result['raw_topic']='/matrix/run_'+result['run_id']+'/controller_cmd_vel'
     return result
 
 
