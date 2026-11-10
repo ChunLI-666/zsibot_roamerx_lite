@@ -148,14 +148,20 @@ def _apply_authorization(state,authorization,authorization_sha256,ready_path):
     maximum=2400
     if 'design_supplement' in a:
         supplement=read_ref(a['design_supplement'])
-        require(supplement.get('schema')=='main.continuation.design_supplement.v2'
+        require(supplement.get('schema') in ('main.continuation.design_supplement.v2','main.continuation.design_supplement.v3')
             and supplement.get('decision')=='APPROVED_BOUNDED_A_INACTIVE_CREDIT_CAP_EXTENSION'
             and supplement.get('mission_id')==state['mission_id']
             and supplement.get('previous_approval',{}).get('sha256')==a['design_approval']['sha256']
-            and supplement.get('maximum_grant_sec')==5400
             and supplement.get('original_navigation_budget_sec')==1800
             and supplement.get('actual_grant_not_yet_issued') is True,'Main design supplement differs')
-        maximum=5400
+        if supplement['schema']=='main.continuation.design_supplement.v2':
+            require(supplement.get('maximum_grant_sec')==5400,'Main v2 cap differs')
+            maximum=5400
+        else:
+            maximum=supplement.get('maximum_grant_sec')
+            # Check the bounded numeric range before isfinite can convert a huge integer.
+            require(type(maximum) in (int,float) and 0<maximum<=86400 and finite(maximum),
+                'Main v3 cap must be finite, positive and at most 86400 seconds')
     policy=state['policy'];require(policy['max_parent_dispatches']==3 and policy['max_attempts_per_index']==6
         and policy['bt_retries']==1 and policy['mission_budget_sec']==1800,'old campaign policy differs')
     expected_policy=dict(policy,max_parent_dispatches=10,max_parent_dispatches_per_index=3)
