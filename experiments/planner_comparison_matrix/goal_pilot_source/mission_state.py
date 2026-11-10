@@ -377,6 +377,10 @@ class MissionStore:
             s['result_flags']['operational_complete']=complete
             s['result_flags']['single_run_complete']=complete and not s['result_flags']['recovery_used'] and not result.get('bt_recovery_used',True)
             if result.get('strict_scan_timing_status')=='FAIL':s['result_flags']['strict_timing_status']='FAIL'
+            camera=result.get('camera_recording_quality') or {}
+            if camera.get('status')=='FAIL':
+                s['result_flags']['camera_recording_quality_status']='FAIL'
+                s['result_flags']['strict_timing_status']='FAIL'
             if complete:
                 s['lifecycle']='COMPLETED_WITH_RECOVERY' if s['result_flags']['recovery_used'] else 'COMPLETED_SINGLE_RUN'
                 s['hold_reason']=None

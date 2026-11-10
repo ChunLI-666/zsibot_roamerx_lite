@@ -59,7 +59,7 @@ def freeze_sources(output, simulation_scan_max_age_sec=.3):
     manifest = dict(schema='matrix_native_follow_waypoints_v1', sources_sha256=hashes,
         inherited_observer_sha256=FROZEN_PILOT_SHA256, original_subscriptions=13,
         scan_ring_limit=50, trace_policy='Bounded 4096-record nonblocking queue; dedicated writer serializes and flushes at low frequency. No 2048-sample trace truncation.',
-        input_limits='Original .3s old/.05s future and .5s READY lease; original JPEG/Info checks and QoS retained.',
+        input_limits='Original .3s old/.05s future and .5s READY lease; original JPEG/Info preflight and QoS retained. Running camera quality is recorded independently and does not cancel navigation.',
         acceptance='One native batch, all original map points independently in order with .3s fresh measured+commanded stop. Native feedback and Action success alone are insufficient.',
         cancellation='Only this client FollowWaypoints UUID; the upstream Jazzy server internally cancels all goals on its NavigateToPose endpoint. Exclusive experiment ownership is required.',
         timing_boundary='Native source pose sample stamps are retained. /plan receipt latency is transport/BT/observer latency, not planner computation time. Child NavigateToPose UUID is unavailable to this client.')
@@ -233,6 +233,24 @@ class WaypointPilot(frozen.Pilot):
         self.check_interruption()
         entered_unix_ns, entered_steady_ns = time.time_ns(), time.monotonic_ns()
         valid, issues, snapshot = self.input_ready(require_camera=True, require_stopped=require_stopped)
+        # Run the unchanged camera checks and retain their original snapshots.
+        # After dispatch they describe recording quality, not navigation input health.
+        if getattr(self, 'goal_sent_ns', None) is not None:
+            camera_issues=[issue for issue in issues if issue in (
+                'camera_missing_stale_or_decode_failed','camera_info_missing_or_invalid','camera_shape_mismatch')]
+            report=getattr(self,'camera_recording_quality',None)
+            if report is None:
+                report=dict(schema='matrix.camera.recording_quality.v1',status='NO_CAMERA_FAULT_RECORDED',
+                    strict_timing_status='NO_CAMERA_FAULT_RECORDED',fault_checks=0,first_fault=None)
+                self.camera_recording_quality=report
+            if camera_issues:
+                report.update(status='FAIL',strict_timing_status='FAIL',fault_checks=report['fault_checks']+1)
+                if report['first_fault'] is None:
+                    report['first_fault']=dict(checked_unix_ns=entered_unix_ns,issues=list(camera_issues),
+                        camera=dict(snapshot['last'].get('camera',{})),camera_info=dict(snapshot['last'].get('camera_info',{})))
+                    self.emit('camera_recording_quality_fault',**report['first_fault'],
+                        recording_quality_status='FAIL',navigation_cancelled_by_camera=False)
+            issues=[issue for issue in issues if issue not in camera_issues]
         if snapshot['last'].get('pose', {}).get('raw_pose_values_finite') is not True:
             issues.append('pose:raw_position_or_quaternion_nonfinite_or_missing')
         if not finite_velocity(snapshot['last'].get('/cmd_vel_safe', {})):
@@ -761,6 +779,7 @@ class WaypointPilot(frozen.Pilot):
                     'native_action_success_but_independent_acceptance_failed' if fields['status'] == 4 else
                     'canceled_by_pilot' if self.cancel_reason else 'completed_action_failure_or_missing_result',
                     functional_status='PASS' if passed else 'FAIL',simulation_scan_latency_profile=self.scan_latency_profile,
+                    camera_recording_quality=getattr(self,'camera_recording_quality',None),
                     strict_scan_timing_status='FAIL' if (self.strict_scan_latency_first_fault or self.scan_aging_episodes) else 'NO_STRICT_SCAN_FAULT_RECORDED',
                     action_uuid=str(requested_uuid), cancel_reason=self.cancel_reason, ordered=ordered, first_plans=plans,
                     settled_measured_and_commanded_stop=settled, settled_original_goal_error=final_error,
@@ -770,6 +789,7 @@ class WaypointPilot(frozen.Pilot):
 
     def finish_evidence(self):
         writer = self.writer.close()
+        writer['camera_recording_quality']=getattr(self,'camera_recording_quality',None)
         if self.first_ready_read_failure is not None:
             failure = self.first_ready_read_failure
             if failure['raw_bytes'] is not None:

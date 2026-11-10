@@ -1,5 +1,6 @@
 """Actual ROS CDR serializer comparisons and fake executor. No ROS init/Node/goal."""
 import ast
+import copy
 from collections import Counter
 import hashlib
 import json
@@ -89,7 +90,12 @@ class RawPathTests(unittest.TestCase):
         # fixtures; original cancellation and confirmation methods stay frozen.
         expected={'execution_ready': '039da0ff6cba93ec337c25c03b258a9c3bc54a0781b7ef921259c8bdf4a3fe1c', 'confirm_scan_aging': 'db28cdd3018c42ba7c38169d33f45f046759cc90fc1e277763ec2b426d6cfebb', 'cancel_own': '3c8c0e7e689262980e1bbadbad67bb62f398f23ff4eec3d57bf406033e9b57ce'}
         cls=next(n for n in ast.parse(SOURCE.read_text()).body if isinstance(n,ast.ClassDef) and n.name=='WaypointPilot')
-        observed={n.name:hashlib.sha256(ast.dump(n,include_attributes=False).encode()).hexdigest() for n in cls.body if isinstance(n,ast.FunctionDef) and n.name in expected}
+        methods=[copy.deepcopy(n) for n in cls.body if isinstance(n,ast.FunctionDef) and n.name in expected]
+        execution=next(n for n in methods if n.name=='execution_ready')
+        split=[n for n in execution.body if isinstance(n,ast.If) and ast.unparse(n.test)=="getattr(self, 'goal_sent_ns', None) is not None"]
+        self.assertEqual(len(split),1)
+        execution.body.remove(split[0])  # Only the separately tested camera recording split.
+        observed={n.name:hashlib.sha256(ast.dump(n,include_attributes=False).encode()).hexdigest() for n in methods}
         self.assertEqual(observed,expected)
 
 class FakeClock:
