@@ -102,13 +102,19 @@ def main():
     jpeg=cv2.imencode('.jpg',np.zeros((64,64,3),dtype=np.uint8))[1].tobytes()
     stopped=threading.Event();shared=dict(start=None,source=None,last_nonzero_ns=None);errors=[]
     def publish():
-        tick=0
+        tick=0;pulse_started=False;pulse_delivered=False
         try:
             while not stopped.is_set():
                 tick+=1;stamp=producer.get_clock().now().to_msg();wall=time.time_ns();steady=time.monotonic_ns()
                 elapsed=0. if shared['start'] is None else (steady-shared['start'])/1e9
                 active=shared['start'] is not None
-                speed=.08 if active and ((args.case=='moving' and elapsed<.2) or (args.case=='pulse' and .22<elapsed<.235)) else 0.
+                # End the short pulse only after the real subscription has taken
+                # a moving sample. A wall-clock-only 15ms window can be skipped
+                # completely when the publisher thread is descheduled by a build.
+                if active and args.case=='pulse' and elapsed>=.22:pulse_started=True
+                if pulse_started and getattr(node,'_stop_callback_resets',0)>0:pulse_delivered=True
+                speed=.08 if active and ((args.case=='moving' and elapsed<.2) or
+                    (pulse_started and not pulse_delivered)) else 0.
                 if speed:shared['last_nonzero_ns']=steady
                 o=Odometry();o.header.frame_id='odom';o.child_frame_id='base_link';o.header.stamp=stamp;o.pose.pose.orientation.w=1.
                 o.twist.twist.linear.x=speed
