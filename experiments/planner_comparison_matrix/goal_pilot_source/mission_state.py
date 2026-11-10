@@ -113,6 +113,7 @@ class MissionStore:
                 CREATE TABLE IF NOT EXISTS mission (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, state TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY, revision INTEGER NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS operations (request_id TEXT PRIMARY KEY, arguments_sha256 TEXT NOT NULL, result TEXT);
+                CREATE TABLE IF NOT EXISTS continuations (authorization_id TEXT PRIMARY KEY, authorization_sha256 TEXT NOT NULL, receipt TEXT NOT NULL);
             ''')
         except BaseException:
             self.close(); raise
@@ -150,6 +151,8 @@ class MissionStore:
             raise ValueError('Finite limits required (parent dispatches<=10, child attempts per index<=6)')
         if policy.get('bt_retries') not in (0, 1):
             raise ValueError('Only zero or one native BT retry is supported')
+        if policy.get('max_parent_dispatches_per_index',3)!=3:
+            raise ValueError('Per-index parent dispatch cap must remain three')
         ident = dict(identity, route_raw_sha256=digest(route_raw), route_semantic_sha256=digest(route))
         boot, now = boot_clock()
         state = dict(schema='matrix.mission.state.v1', mission_id=str(uuid.UUID(mission_id)) if mission_id else str(uuid.uuid4()),
@@ -167,7 +170,7 @@ class MissionStore:
         return state
 
     @contextmanager
-    def transaction(self, kind, expected=None):
+    def transaction(self, kind, expected=None, before_commit=None):
         self.db.execute('BEGIN IMMEDIATE')
         try:
             state = self.state()
@@ -183,6 +186,7 @@ class MissionStore:
             self.db.execute('INSERT INTO events(revision,kind,payload) VALUES (?,?,?)',
                 (state['revision'],kind,encoded(dict(attempt_id=(state.get('attempt') or {}).get('attempt_id'),
                                                   progress=state['progress']['accepted_prefix_count'],time_ns=time.time_ns()))))
+            if before_commit is not None:before_commit(state)
             self.db.execute('COMMIT')
         except BaseException:
             self.db.execute('ROLLBACK'); raise
@@ -205,6 +209,25 @@ class MissionStore:
         for key in (*IDENTITY_KEYS, 'variant', 'source_sha', 'effective_config_sha256'):
             if identity.get(key) != state['identity'].get(key):
                 raise Hold('IDENTITY_MISMATCH:'+key)
+
+    def authorize_continuation(self, authorization, authorization_sha256, ready_path):
+        """One atomic, idempotent authority change; never sends or reserves a goal."""
+        from mission_continuation import apply_authorization
+        key=authorization['authorization_id']
+        row=self.db.execute('SELECT authorization_sha256,receipt FROM continuations WHERE authorization_id=?',(key,)).fetchone()
+        if row:
+            if row[0]!=authorization_sha256:raise Hold('Continuation authorization id reused with different bytes')
+            return json.loads(row[1])
+        receipt={}
+        def persist(state):
+            if state['budgets']['remaining_sec']<=0:raise Hold('FAILED_BUDGET at continuation commit')
+            receipt.update(after_revision=state['revision'],after_state_sha256=digest(state),state=copy.deepcopy(state))
+            self.db.execute('INSERT INTO continuations VALUES (?,?,?)',(key,authorization_sha256,encoded(receipt)))
+        with self.transaction('CONTINUATION_AUTHORIZED',authorization['expected_revision'],before_commit=persist) as state:
+            receipt.update(schema='matrix.mission.continuation_receipt.v1',authorization_id=key,
+                authorization_sha256=authorization_sha256,before_revision=state['revision'],before_state_sha256=digest(state),goals_sent=0)
+            receipt['transition']=apply_authorization(state,authorization,authorization_sha256,ready_path)
+        return receipt
 
     def remaining(self):
         s=self.state();boot,now=boot_clock()
@@ -230,8 +253,9 @@ class MissionStore:
             if boot!=budget['deadline_boot_id'] or now>=budget['deadline_boottime_sec']:
                 raise Hold('FAILED_BUDGET: deadline exhausted or boot changed')
             child_slots=1+policy['bt_retries']
-            if budget['mission_dispatches_reserved']>=policy['max_parent_dispatches'] or any(
-                    count+child_slots>policy['max_attempts_per_index'] for count in budget['per_index_reserved'][index:]):
+            if (budget['mission_dispatches_reserved']>=policy['max_parent_dispatches']
+                    or any(count>=3 for count in budget['per_index_parent_dispatches'][index:]) or any(
+                    count+child_slots>policy['max_attempts_per_index'] for count in budget['per_index_reserved'][index:])):
                 raise Hold('FAILED_BUDGET: dispatch allowance exhausted')
             budget['mission_dispatches_reserved']+=1
             for i in range(index,len(s['route'])):
@@ -242,6 +266,8 @@ class MissionStore:
                 missed_waypoints=None,terminal_confirmed=False,children_quiescent=False,stopped=False,
                 output=str(Path(output).resolve()),created_ns=time.time_ns(),highest_feedback_index=None)
             attempt['child_slots_reserved']=child_slots
+            attempt['identity_epoch_id']=s['identity_epoch_id']
+            attempt['source_provenance']=dict(kind='live_execution',source_sha=s['identity']['source_sha'])
             s['attempt']=attempt;s['attempts'].append(copy.deepcopy(attempt))
             s['lifecycle']='DISPATCH_INTENT';s['hold_reason']=None;s['candidates']={}
             s['stop']=dict(state='UNPROVEN');s['progress']['active_index']=index
@@ -376,6 +402,9 @@ class MissionStore:
                 historical_result_sha256=result_sha,start_index=0,native_status=result['status'],missed_waypoints=missed)
             if type(historical_bt_retries) is not int or historical_bt_retries not in (0,1):raise Hold('Historical BT retry count required')
             a['child_slots_reserved']=1+historical_bt_retries
+            a['identity_epoch_id']=s['identity_epoch_id']
+            a['source_provenance']=dict(kind='imported_closed_result',historical_result_sha256=result_sha,
+                epoch_role='import_authority_not_historical_execution_source')
             a['budget_reconciled']=True  # Import already excludes the proven unentered suffix.
             s['attempt']=a;s['attempts']=[copy.deepcopy(a)]
             s['candidates']={str(i):visits[i] for i in range(end)}
@@ -400,5 +429,8 @@ class MissionStore:
             lifecycle=state['lifecycle'],identity=state['identity'],progress=state['progress'],
             result_flags=state['result_flags'],attempts=state['attempts'],budgets=state['budgets'],
             current_target=state['current_target'],last_attempt=state['attempt'],stop=state['stop'],reason=state['hold_reason'])
+        result['identity_epoch_id']=state['identity_epoch_id']
+        result['identity_policy_epochs']=state.get('identity_policy_epochs',[])
+        result['continuation_authorizations']=state.get('continuation_authorizations',[])
         atomic_json(path/'result.json',result)
         return state

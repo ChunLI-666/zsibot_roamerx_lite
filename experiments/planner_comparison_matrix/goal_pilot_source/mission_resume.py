@@ -12,6 +12,7 @@ import uuid
 
 from mission_state import MissionStore, Hold, atomic_json, digest, validate_identity
 from waypoint_contract import OrderedVisits, evidence_json, validate_route
+from mission_continuation import CLIENT_SOURCES
 
 HERE = Path(__file__).resolve().parent
 
@@ -76,7 +77,7 @@ class Session:
         capability = ready.get('waypoint_contract', {}).get('mission_resume', {})
         if capability.get('schema') != 'matrix.mission.resume_capability.v1' or not ready.get('recovery_runtime', {}).get('verified'):
             raise Hold('Runtime lacks verified measured-stop/mission resume capability')
-        expected = {name:digest((HERE/name).read_bytes()) for name in ('mission_state.py','mission_resume.py')}
+        expected = {name:digest((HERE/name).read_bytes()) for name in CLIENT_SOURCES}
         if capability.get('client_sources_sha256') != expected:
             raise Hold('Loaded mission client differs from runtime source binding')
         state=self.store.state()
@@ -133,7 +134,7 @@ def run_attempt(args, store, output, reconcile=False):
     options.timeout=10. if reconcile else min(float(state['policy']['mission_budget_sec']),store.remaining())
     if options.timeout <= 0:raise Hold('FAILED_BUDGET')
     source_manifest=freeze_sources(output,args.simulation_scan_max_age_sec)
-    for name in ('mission_resume.py','mission_state.py'):
+    for name in CLIENT_SOURCES:
         (output/('source_'+name)).write_bytes((HERE/name).read_bytes())
     session=Session(store,args.request_id,output)
     rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
@@ -213,10 +214,11 @@ def run_attempt(args, store, output, reconcile=False):
 
 def parser():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('operation',choices=['inspect','start','import-closed-attempt','resume','reconcile','cancel'])
+    p.add_argument('operation',choices=['inspect','start','import-closed-attempt','resume','reconcile','cancel','authorize-continuation'])
     p.add_argument('--store',type=Path,required=True);p.add_argument('--mission-id')
     p.add_argument('--route',type=Path);p.add_argument('--identity',type=Path);p.add_argument('--policy',type=Path)
     p.add_argument('--closed-attempt-manifest',type=Path);p.add_argument('--expect-revision',type=int)
+    p.add_argument('--authorization',type=Path);p.add_argument('--authorization-sha256')
     p.add_argument('--request-id');p.add_argument('--workflow-run-id');p.add_argument('--output',type=Path)
     p.add_argument('--ready',type=Path);p.add_argument('--execute',action='store_true');p.add_argument('--json',action='store_true')
     p.add_argument('--resource-lock',type=Path,default=Path('/tmp/matrix-domain185-mission.lock'))
@@ -230,6 +232,9 @@ def parser():
 
 def main(argv=None):
     args=parser().parse_args(argv)
+    if args.operation=='authorize-continuation':
+        from mission_continuation import main as authorize
+        return authorize(args)
     if args.operation=='inspect':
         state=MissionStore.inspect(args.store)
         if args.mission_id and args.mission_id!=state['mission_id']:raise Hold('Mission identity differs')

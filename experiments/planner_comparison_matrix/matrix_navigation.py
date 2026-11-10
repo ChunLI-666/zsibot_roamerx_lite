@@ -268,7 +268,7 @@ def source_snapshot(path,template,with_waypoints=False):
       template,NAV/'src/navigation/src/robot_navigo/scripts/nav_safety_gate.py']
     if with_waypoints:
         required += [BASE/'goal_pilot_source'/name for name in
-          ['waypoint_batch.py','waypoint_contract.py','pilot_scan_timing.py','message_info_contract.py','mission_state.py','mission_resume.py']]
+          ['waypoint_batch.py','waypoint_contract.py','pilot_scan_timing.py','message_info_contract.py','mission_state.py','mission_resume.py','mission_continuation.py']]
     required_names=set()
     for source in required:
         resolved=source.resolve(strict=True)
@@ -533,7 +533,7 @@ def prepare(args):
           child_goal_timestamp_boundary='Upstream follower refreshes each requested child goal header to dispatch time. Original route values and native source pose sample stamps remain separately recorded.',
           native_self_client_policy='Jazzy NavigateToPose has a real self-client. Only with-waypoints remaps its sole goal_pose ingress to the fixed recording run UUID private topic, observes it before BT starts, and permits the exact artifact/owned-process-bound self-client only while actual subscription ownership, zero publishers and zero lifetime received messages remain verified. Actual service callers are recorded separately from legacy business-sender compatibility fields.')
     if recovery:
-        manifest['waypoint_contract']['mission_resume']=dict(schema='matrix.mission.resume_capability.v1',client_sources_sha256={name:sha(BASE/'goal_pilot_source'/name) for name in ['mission_state.py','mission_resume.py']},absolute_goal_index=True,full_original_route=True,bt_retries=recovery['bt_retries'])
+        manifest['waypoint_contract']['mission_resume']=dict(schema='matrix.mission.resume_capability.v1',client_sources_sha256={name:sha(BASE/'goal_pilot_source'/name) for name in ['mission_state.py','mission_resume.py','mission_continuation.py']},absolute_goal_index=True,full_original_route=True,bt_retries=recovery['bt_retries'])
     params=out/'params.yaml';params.write_text(yaml.safe_dump(d,sort_keys=False));manifest['params_sha256']=sha(params)
     shutil.copy2(__file__,out/'launcher_snapshot.py');manifest['launcher_sha256']=sha(__file__)
     helper=BASE/'static_layer_snapshot.py';shutil.copy2(helper,out/helper.name)
