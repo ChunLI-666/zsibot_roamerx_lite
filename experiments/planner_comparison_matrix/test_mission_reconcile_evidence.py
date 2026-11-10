@@ -41,11 +41,14 @@ def cli_fixture():
     transport=ModuleType('waypoint_batch');transport.freeze_sources=lambda *args:{}
     class Pilot:
         def __init__(self,options,output,route,source_manifest,mission):
-            self.mission=mission
+            self.mission=mission;self.options=options;self.route=route
             self.ordered=mission.ordered(route);self.stop_evidence=sample['owned_goal_shutdown']['stop']
             self.strict_scan_latency_first_fault=None;self.scan_aging_episodes=[]
             self.latest_ready={};self.recovery_handoffs=[]
         def run_batch(self):
+            if sample.get('fixture_signal_before_send'):
+                from test_mission_storage import signal_before_send_batch
+                return signal_before_send_batch(self,self.options,self.route,trace)
             if sample.get('fixture_unsent_start'):
                 self.mission.reserve()
                 return dict(status=None,classification='fixture_post_intent_health_not_restored')

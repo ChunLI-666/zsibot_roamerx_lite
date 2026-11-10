@@ -718,6 +718,7 @@ class WaypointPilot(frozen.Pilot):
                   source_pose_stamp_ns=start_pose.get('stamp_ns'), final_goal_tolerances_unchanged=True)
         if first_distance >= first_limit:
             return dict(classification='invalid_first_leg_outside_reviewed_rolling_window_goal_not_sent')
+        self.storage_preflight_gap=False
         requested_uuid = self.mission.reserve() if getattr(self, 'mission', None) is not None else uuid.uuid4()
         if getattr(self,'mission',None) is not None:
             valid,issues,snapshot=self.post_intent_preflight(deadline,started)
@@ -746,6 +747,7 @@ class WaypointPilot(frozen.Pilot):
                   readiness_manifest=self.latest_ready, readiness_manifest_sha256=self.latest_ready_sha,
                   preregistered_budget=budget,
                   pose_header_stamps_ns=[frozen.stamp_ns(pose.header.stamp) for pose in request.poses])
+        self.check_interruption()
         if getattr(self,'mission',None) is not None:self.mission.send_invoked=True
         sent = client.send_goal_async(request, goal_uuid=self.goal_uuid, feedback_callback=self.native_feedback)
         if not self.spin_until(sent.done, 10.):
