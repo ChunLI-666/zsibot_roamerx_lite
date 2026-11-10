@@ -109,12 +109,17 @@ class Fixture:
             bs=self.start+10.;be=self.end-10.;bc=self.closure(b,b_ref,be,self.end_ns-10000000000)
             self.interval['registered_b_mission_ids']=[b['mission_id']]
             self.interval['b_runs']=[dict(state=b_ref,closure=save(root,'B_closure.json',bc),source_sha='b'*40,start_boottime_sec=bs,end_boottime_sec=be)]
+        design_ref=save(root,'design.json',self.design)
+        if actual:
+            # Supplemental approval binds the exact original file bytes, not a reserialized JSON copy.
+            (root/'design.json').write_bytes((source/'main_continuation_design_approval.json').read_bytes())
+            design_ref=reference(root/'design.json')
         self.authorization=dict(schema='matrix.mission.continuation_authorization.v1',approved_by='Main',decision='APPROVED',fixture_only=True,
             authorization_id=str(uuid.uuid4()),mission_id=self.state['mission_id'],expected_revision=self.state['revision'],
             expected_state_sha256=digest(self.state),old_identity_epoch_id=self.state['identity_epoch_id'],
             old_identity_sha256=digest(self.state['identity']),old_policy_sha256=digest(self.state['policy']),new_identity_epoch_id=str(uuid.uuid4()),
             new_source_sha=self.identity['source_sha'],new_identity=self.identity_ref,old_state_snapshot=self.old_ref,
-            design_approval=save(root,'design.json',self.design),new_policy=dict(self.state['policy'],max_parent_dispatches=10,max_parent_dispatches_per_index=3),
+            design_approval=design_ref,new_policy=dict(self.state['policy'],max_parent_dispatches=10,max_parent_dispatches_per_index=3),
             stop_result=self.stop_ref,closure=self.closure_ref,inactive_interval=save(root,'interval.json',self.interval),
             credit=dict(boot_id=self.boot,start_boottime_sec=self.start,end_boottime_sec=self.end,grant_sec=min(duration,2400.)))
         self.authorization_path=root/'TEST_ONLY_authorization.json';self.refresh()
@@ -152,6 +157,70 @@ class Fixture:
 class ContinuationTests(unittest.TestCase):
     def setUp(self):self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name)
     def tearDown(self):self.temp.cleanup()
+    def supplement(self,f):
+        value=dict(schema='main.continuation.design_supplement.v2',
+            decision='APPROVED_BOUNDED_A_INACTIVE_CREDIT_CAP_EXTENSION',mission_id=f.state['mission_id'],
+            previous_approval=f.authorization['design_approval'],maximum_grant_sec=5400,
+            original_navigation_budget_sec=1800,actual_grant_not_yet_issued=True)
+        f.authorization['design_supplement']=save(f.root,'supplement.json',value)
+        f.authorization['credit']['grant_sec']=min(f.end-f.start,5400.)
+        return value
+    def test_supplemented_cap_preserves_elapsed_and_is_idempotent(self):
+        for duration in (3000.,5400.,6000.,7000.):
+            with self.subTest(duration=duration),tempfile.TemporaryDirectory() as directory:
+                f=Fixture(Path(directory),duration=duration,with_b=True);self.supplement(f)
+                try:
+                    if duration==7000.:
+                        with self.assertRaisesRegex(Hold,'FAILED_BUDGET'):f.apply()
+                        self.assertEqual(f.store.state(),f.state)
+                    else:
+                        receipt=f.apply();state=receipt['state'];grant=min(duration,5400.)
+                        self.assertEqual(state['budgets']['authorized_inactive_credit_sec'],grant)
+                        self.assertEqual(state['budgets']['deadline_boottime_sec'],f.state['budgets']['deadline_boottime_sec']+grant)
+                        self.assertEqual(state['progress'],f.state['progress']);self.assertEqual(state['result_flags'],f.state['result_flags'])
+                        self.assertEqual(receipt['transition']['credit']['maximum_sec'],5400)
+                        self.assertEqual(receipt['transition']['evidence']['design_supplement'],f.authorization['design_supplement'])
+                        self.assertEqual(f.store.authorize_continuation(f.authorization,f.sha,f.ready_path),receipt)
+                finally:f.store.close()
+    def test_supplement_cannot_change_authority_budget_or_grant_without_observed_time(self):
+        for case in ['missing','wrong_parent','wrong_mission','wrong_cap','reset_budget','decision','over_grant','sha','extra_second_credit']:
+            with self.subTest(case=case),tempfile.TemporaryDirectory() as directory:
+                f=Fixture(Path(directory),duration=3000.);supplement=self.supplement(f)
+                try:
+                    if case=='missing':f.authorization.pop('design_supplement')
+                    if case=='wrong_parent':supplement['previous_approval']={'sha256':'0'*64}
+                    if case=='wrong_mission':supplement['mission_id']=str(uuid.uuid4())
+                    if case=='wrong_cap':supplement['maximum_grant_sec']=5401
+                    if case=='reset_budget':supplement['original_navigation_budget_sec']=7200
+                    if case=='decision':supplement['decision']='PENDING'
+                    if case=='over_grant':f.authorization['credit']['grant_sec']=5400
+                    if case in ['wrong_parent','wrong_mission','wrong_cap','reset_budget','decision']:
+                        f.authorization['design_supplement']=save(f.root,'changed_supplement.json',supplement)
+                    if case=='sha':f.authorization['design_supplement']['sha256']='0'*64
+                    if case=='extra_second_credit':
+                        f.apply();f.authorization['authorization_id']=str(uuid.uuid4())
+                    before=f.store.state()
+                    with self.assertRaises(Hold):f.apply()
+                    self.assertEqual(f.store.state(),before)
+                finally:f.store.close()
+    def test_actual_A15_supplemented_production_cli_keeps_real_history(self):
+        f=Fixture(self.root,duration=6000.,actual=True)
+        try:
+            workspace=Path(os.environ['MATRIX_EVIDENCE_ROOT']) if os.environ.get('MATRIX_EVIDENCE_ROOT') else next(
+                (a for a in HERE.parents if (a/'analysis_outputs').is_dir()),HERE)
+            source=workspace/'analysis_outputs/planner_comparison_20261105/space_agent_recovery_20261110/main_continuation_design_supplement_v2.json'
+            if not source.exists():self.skipTest('Actual Main supplemental approval unavailable')
+            copied=self.root/'real_supplement.json';copied.write_bytes(source.read_bytes())
+            f.authorization['design_supplement']=reference(copied);f.authorization['credit']['grant_sec']=5400.
+            result=f.cli(f.args());self.assertEqual(result.returncode,0,result.stderr)
+            state=json.loads((self.root/'output/state.json').read_text())
+            self.assertEqual(state['progress'],f.state['progress']);self.assertEqual(state['current_target'],f.state['current_target'])
+            self.assertEqual(state['budgets']['deadline_boottime_sec'],f.state['budgets']['deadline_boottime_sec']+5400)
+            self.assertEqual(state['budgets']['mission_dispatches_reserved'],3)
+            self.assertEqual(state['budgets']['per_index_parent_dispatches'][5],2)
+            self.assertEqual(state['budgets']['per_index_reserved'][5],4)
+            self.assertEqual(state['result_flags']['strict_timing_status'],'FAIL')
+        finally:f.store.close()
     def test_atomic_epoch_preserves_progress_consumption_and_attempt_provenance(self):
         f=Fixture(self.root,with_b=True)
         try:

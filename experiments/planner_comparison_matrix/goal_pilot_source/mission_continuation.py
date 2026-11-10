@@ -74,12 +74,12 @@ def verify_closure(closed,mission_id,action_uuid):
     return shutdown
 
 
-def validate_interval(interval,credit,design,state,new_identity,new_identity_ref,closed,now_boot,now_ns):
+def validate_interval(interval,credit,design,state,new_identity,new_identity_ref,closed,now_boot,now_ns,maximum=2400):
     policy=design['credit_policy'];start=credit.get('start_boottime_sec');end=credit.get('end_boottime_sec');grant=credit.get('grant_sec')
     require(all(finite(v) for v in (start,end,grant)) and start<end<=now_boot+.05,'invalid credit window')
     require(credit.get('boot_id')==policy['start_boot_id']==state['budgets']['deadline_boot_id'],'credit boot differs')
     require(start==policy['start_boottime_sec']==closed['closure']['shutdown']['boottime_sec'],'credit start is not exact closure')
-    require(grant==min(end-start,2400.) and grant>0,'credit must equal min(actual interval,2400), once')
+    require(grant==min(end-start,float(maximum)) and grant>0,'credit must equal min(actual interval,approved cap), once')
     require(interval.get('schema')=='matrix.mission.inactive_interval.v1'
         and interval.get('mission_id')==state['mission_id'] and interval.get('boot_id')==credit['boot_id']
         and interval.get('start_boottime_sec')==start and interval.get('end_boottime_sec')==end
@@ -112,7 +112,7 @@ def validate_interval(interval,credit,design,state,new_identity,new_identity_ref
     require(interval.get('new_identity_sha256')==new_identity_ref['sha256'],'interval captured another new identity')
     verify_ready(read_ref(interval['end_ready']),new_identity,end_ns)
     return dict(boot_id=credit['boot_id'],start_boottime_sec=start,end_boottime_sec=end,
-        eligible_interval_sec=end-start,granted_sec=grant,maximum_sec=2400,application_count=1,
+        eligible_interval_sec=end-start,granted_sec=grant,maximum_sec=maximum,application_count=1,
         scope='A inactive source-repair and independently accounted B campaign',separate_B_mission_ids=b_ids)
 
 
@@ -145,6 +145,17 @@ def _apply_authorization(state,authorization,authorization_sha256,ready_path):
     require(design.get('parent_cap_after')==10 and design.get('per_index_parent_cap')==3
         and design.get('per_index_child_slots')==6 and design['credit_policy'].get('maximum_grant_sec')==2400
         and design['credit_policy'].get('fresh_full_1800_reset') is False,'approved policy limits differ')
+    maximum=2400
+    if 'design_supplement' in a:
+        supplement=read_ref(a['design_supplement'])
+        require(supplement.get('schema')=='main.continuation.design_supplement.v2'
+            and supplement.get('decision')=='APPROVED_BOUNDED_A_INACTIVE_CREDIT_CAP_EXTENSION'
+            and supplement.get('mission_id')==state['mission_id']
+            and supplement.get('previous_approval',{}).get('sha256')==a['design_approval']['sha256']
+            and supplement.get('maximum_grant_sec')==5400
+            and supplement.get('original_navigation_budget_sec')==1800
+            and supplement.get('actual_grant_not_yet_issued') is True,'Main design supplement differs')
+        maximum=5400
     policy=state['policy'];require(policy['max_parent_dispatches']==3 and policy['max_attempts_per_index']==6
         and policy['bt_retries']==1 and policy['mission_budget_sec']==1800,'old campaign policy differs')
     expected_policy=dict(policy,max_parent_dispatches=10,max_parent_dispatches_per_index=3)
@@ -179,7 +190,7 @@ def _apply_authorization(state,authorization,authorization_sha256,ready_path):
         and closed['client'].get('reconciled_native_result_sha256')==a['stop_result']['sha256']
         and a['closure']['sha256']==design['credit_policy']['start_evidence_sha256'],'closure/result/state evidence differs')
     interval=read_ref(a['inactive_interval'])
-    credit=validate_interval(interval,a['credit'],design,state,identity,a['new_identity'],closed,now,now_ns)
+    credit=validate_interval(interval,a['credit'],design,state,identity,a['new_identity'],closed,now,now_ns,maximum)
     old_deadline=state['budgets']['deadline_boottime_sec'];require(finite(old_deadline),'original deadline missing')
     deadline=old_deadline+credit['granted_sec'];require(deadline>now,'FAILED_BUDGET after authorized credit')
     # Everything below is additive provenance or one of the explicitly allowed changes.
@@ -219,6 +230,7 @@ def _apply_authorization(state,authorization,authorization_sha256,ready_path):
         preserved_progress_sha256=digest(before['progress']),preserved_consumption=copy.deepcopy(before['budgets']),
         evidence={name:copy.deepcopy(a[name]) for name in ('design_approval','old_state_snapshot','new_identity','stop_result','closure','inactive_interval')},
         accounting_boundary='Cooperative single-owner registered mission evidence; separately accounted B time is eligible A inactivity.',goals_sent=0)
+    if 'design_supplement' in a:transition['evidence']['design_supplement']=copy.deepcopy(a['design_supplement'])
     state['continuation_authorizations']=[copy.deepcopy(transition)]
     return transition
 
