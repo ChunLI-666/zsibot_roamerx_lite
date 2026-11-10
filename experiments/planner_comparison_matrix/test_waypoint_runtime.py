@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest import mock
 import waypoint_runtime as w
 
 
@@ -56,11 +55,13 @@ class BindingTests(unittest.TestCase):
             old = copy.deepcopy(self.data)
             self.data[key].pop(names[0])
             self.save()
-            with self.assertRaises(ValueError): self.binding()
+            with self.assertRaises(ValueError):
+                self.binding()
             self.data = old
         self.save()
         (self.source/w.SOURCE_FILES[0]).write_text('changed')
-        with self.assertRaises(ValueError): self.binding()
+        with self.assertRaises(ValueError):
+            self.binding()
 
     def test_wrong_contract_commit_or_prefix_rejected(self):
         for key, value in (('upstream_commit', 'b'*40), ('repository_commit', 'short'),
@@ -68,7 +69,8 @@ class BindingTests(unittest.TestCase):
             old = self.data[key]
             self.data[key] = value
             self.save()
-            with self.assertRaises(ValueError): self.binding()
+            with self.assertRaises(ValueError):
+                self.binding()
             self.data[key] = old
 
     def test_source_and_artifact_symlink_escape_rejected(self):
@@ -78,12 +80,14 @@ class BindingTests(unittest.TestCase):
             outside.write_bytes(path.read_bytes())
             path.unlink()
             path.symlink_to(outside)
-            with self.assertRaises(ValueError): self.binding()
+            with self.assertRaises(ValueError):
+                self.binding()
 
     def test_changed_client_contract_rejected(self):
         self.data['underlay_sha256'][w.UNDERLAY_FILES[-1]] = '0'*64
         self.save()
-        with self.assertRaisesRegex(ValueError, 'contract changed'): self.binding()
+        with self.assertRaisesRegex(ValueError, 'contract changed'):
+            self.binding()
 
     def test_actual_mapped_core_and_executable_required(self):
         binding = self.binding()
@@ -95,7 +99,8 @@ class BindingTests(unittest.TestCase):
             if mutation == 'wrong_hash': item['selected_libraries_sha256'][str(self.prefix/w.CORE)] = '0'*64
             if mutation == 'legacy_outside_prefix': item['maps'] = '/tmp/other/libwaypoint_follower_core.so'
             executable = self.prefix/(w.CORE if mutation == 'wrong_executable' else w.EXECUTABLE)
-            with self.assertRaises(RuntimeError): w.verify_runtime(binding, item, executable)
+            with self.assertRaises(RuntimeError):
+                w.verify_runtime(binding, item, executable)
 
 
 if __name__ == '__main__':
