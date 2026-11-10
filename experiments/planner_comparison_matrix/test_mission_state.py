@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 HERE=Path(__file__).resolve().parent
 sys.path.insert(0,str(HERE/'goal_pilot_source'))
-from mission_state import MissionStore,Hold,digest
+from mission_state import MissionStore,Hold,digest,atomic_json
 from mission_resume import main,Session
 from test_native_waypoints import snapshot
 from waypoint_contract import AdvancingStop
@@ -31,6 +31,10 @@ class MissionTests(unittest.TestCase):
         self.raw,self.identity,self.policy,self.historical=fixture()
         self.store.create(self.raw,self.identity,self.policy)
     def tearDown(self):self.store.close();self.temp.cleanup()
+    def finish(self,result,children):
+        result=dict(result,children_quiescent=children)
+        path=self.root/(str(uuid.uuid4())+'.json');atomic_json(path,result)
+        self.store.finish_attempt(result,children,result_path=path)
     def test_import_prefix_four_and_full_absolute_resume(self):
         self.store.import_closed(self.historical,digest(self.historical))
         session=Session(self.store,str(uuid.uuid4()),self.root/'attempt')
@@ -63,11 +67,11 @@ class MissionTests(unittest.TestCase):
         a=self.store.reserve(str(uuid.uuid4()),self.root)
         result=dict(action_uuid=a['parent_action_uuid'],status=6,error_code=0,missed_waypoints=[dict(index=0,error_code=106)],
             final_measured_and_commanded_stop=True)
-        self.store.finish_attempt(result,True);self.store.finish_attempt(result,True)
+        self.finish(result,True);self.finish(result,True)
         self.assertFalse(self.store.state()['result_flags']['operational_complete'])
         self.assertEqual(self.store.state()['budgets']['per_index_reserved'],[2,0,0,0,0,0,0])
         for _ in range(2):
-            a=self.store.reserve(str(uuid.uuid4()),self.root);result['action_uuid']=a['parent_action_uuid'];self.store.finish_attempt(result,True)
+            a=self.store.reserve(str(uuid.uuid4()),self.root);result['action_uuid']=a['parent_action_uuid'];self.finish(result,True)
         self.assertEqual(self.store.state()['budgets']['per_index_reserved'][0],6)
         self.assertEqual(self.store.state()['budgets']['per_index_parent_dispatches'][0],3)
         with self.assertRaisesRegex(Hold,'FAILED_BUDGET'):self.store.reserve(str(uuid.uuid4()),self.root)
@@ -75,14 +79,14 @@ class MissionTests(unittest.TestCase):
         a=self.store.reserve(str(uuid.uuid4()),self.root)
         result=dict(action_uuid=a['parent_action_uuid'],status=6,error_code=0,
             final_measured_and_commanded_stop=True,missed_waypoints=[dict(index=0,error_code=208)])
-        self.store.finish_attempt(result,True)
+        self.finish(result,True)
         self.assertEqual(self.store.state()['lifecycle'],'NEEDS_TASK_DECISION')
         result['cancel_reason']='input_became_invalid:scan_old';result['missed_waypoints']=[];result['status']=5
-        self.store.finish_attempt(result,True)
+        self.finish(result,True)
         self.assertEqual(self.store.state()['lifecycle'],'PAUSED_INPUT_HEALTH')
-        result['stop_signals']=[2];self.store.finish_attempt(result,True)
+        result['stop_signals']=[2];self.finish(result,True)
         self.assertEqual(self.store.state()['lifecycle'],'CANCELED')
-        self.store.finish_attempt(result,False)
+        self.finish(result,False)
         self.assertEqual(self.store.state()['lifecycle'],'HOLD')
     def test_runtime_identity_is_checked_against_mission(self):
         session=Session(self.store,str(uuid.uuid4()),self.root)

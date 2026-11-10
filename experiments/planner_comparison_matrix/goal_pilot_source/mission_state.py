@@ -11,7 +11,7 @@ import sqlite3
 import time
 import uuid
 
-from waypoint_contract import validate_route, strict_stopped, angular_difference
+from waypoint_contract import validate_route, strict_stopped, angular_difference, evidence_json
 
 
 class Hold(RuntimeError):
@@ -291,11 +291,30 @@ class MissionStore:
         index=progress['accepted_prefix_count'];progress['next_index']=index if index<len(s['route']) else None
         s['current_target']=s['route'][index] if index<len(s['route']) else None
 
-    def finish_attempt(self, result, children_quiescent):
+    def finish_attempt(self, result, children_quiescent, *, result_path):
         with self.transaction('ATTEMPT_TERMINAL') as s:
             a=s['attempt']
             if result.get('action_uuid')!=a['parent_action_uuid']:
                 raise Hold('Terminal result does not match owned Action UUID')
+            # A reconcile observation has its own output, independent of the dispatch.
+            # Bind the exact persisted observation before changing any mission state.
+            try:
+                native_path=Path(result_path).resolve(strict=True)
+                native_raw=native_path.read_bytes()
+                persisted=json.loads(native_raw)
+            except (OSError,ValueError,TypeError) as error:
+                raise Hold('Native result evidence unavailable or invalid') from error
+            if (encoded(persisted)!=encoded(json.loads(evidence_json(result)))
+                    or type(children_quiescent) is not bool
+                    or persisted.get('children_quiescent') is not children_quiescent):
+                raise Hold('Native result evidence differs from terminal observation')
+            evidence=dict(path=str(native_path),sha256=digest(native_raw))
+            history=a.setdefault('native_result_history',[])
+            if a.get('native_result') and a['native_result'] not in history:
+                history.append(copy.deepcopy(a['native_result']))
+            if any(item['path']==evidence['path'] and item['sha256']!=evidence['sha256'] for item in history):
+                raise Hold('Native result evidence path was reused with different bytes')
+            if evidence not in history:history.append(evidence)
             status=result.get('status');missed=result.get('missed_waypoints')
             a.update(native_status=status,native_error_code=result.get('error_code'),missed_waypoints=missed,
                 native_error_msg=result.get('error_msg'),
@@ -317,8 +336,7 @@ class MissionStore:
                     error=dict(xy_m=math.hypot(pose['x']-goal['pose'][0],pose['y']-goal['pose'][1]),
                         yaw_rad=abs(angular_difference(pose['yaw'],goal['pose'][2])),original_pose_snapshot=pose)
                 a['failure']=dict(index=failed,id=goal['id'],original_goal_map=goal['pose'],actual_error=error)
-            native_path=Path(a['output'])/'native_result.json' if a.get('output') else None
-            a['native_result']=dict(path=str(native_path),sha256=digest(native_path.read_bytes())) if native_path and native_path.is_file() else None
+            a['native_result']=evidence
             a['bt_recovery_accounting']=result.get('bt_recovery_accounting')
             s['stop']=dict(state='PASSED' if a['stopped'] else 'UNPROVEN',source_action_uuid=a['parent_action_uuid'],
                 receipt=result.get('owned_goal_shutdown',{}).get('stop'),evidence=a['native_result'])
