@@ -50,6 +50,29 @@ def signal_before_send_batch(node,options,route,trace):
     return method('run_batch',ns)(node)
 
 class StorageTests(unittest.TestCase):
+    def test_health_guard_uses_one_consistent_snapshot_and_live_boot_deadline(self):
+        from mission_continuation import CLIENT_SOURCES
+        from mission_state import digest,boot_clock
+        state=self.worker.state();boot,now=boot_clock()
+        ready=dict(variant=state['variant'],mission_identity=dict(state['identity'],verified=True),
+            recovery_runtime=dict(verified=True),waypoint_contract=dict(mission_resume=dict(
+                schema='matrix.mission.resume_capability.v1',bt_retries=state['policy']['bt_retries'],
+                client_sources_sha256={name:digest((SOURCE/name).read_bytes()) for name in CLIENT_SOURCES})))
+        session=Session(self.worker,str(uuid.uuid4()),self.root/'health')
+        with patch.object(self.worker,'state',wraps=self.worker.state) as reads:
+            session.validate_ready(ready);self.assertEqual(reads.call_count,1)
+        state['budgets'].update(deadline_boot_id=boot,deadline_boottime_sec=now+100)
+        with patch.object(self.worker,'state',return_value=state):
+            with patch('mission_state.boot_clock',return_value=(boot,now+101)):
+                with self.assertRaisesRegex(Hold,'FAILED_BUDGET'):session.validate_ready(ready)
+            with patch('mission_state.boot_clock',return_value=('changed-boot',now)):
+                with self.assertRaisesRegex(Hold,'CLOCK_UNTRUSTED'):session.validate_ready(ready)
+        before=self.worker.state()
+        with patch('mission_storage.copy.deepcopy',side_effect=AssertionError('unnecessary copy')):
+            self.assertGreater(self.worker.remaining(),0)
+            self.worker.check_identity(before['identity'])
+        self.assertEqual(self.worker.state(),before)
+
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name)
         self.owner_ids=[];self.delays={};self.phases=[];self.connections=[];self.settings=[];outer=self

@@ -11,7 +11,8 @@ import signal
 import time
 import uuid
 
-from mission_state import MissionStore, Hold, atomic_json, digest, validate_identity
+from mission_state import (MissionStore, Hold, atomic_json, digest, validate_identity,
+                           check_identity_state, remaining_state)
 from waypoint_contract import OrderedVisits, evidence_json, validate_route
 from mission_continuation import CLIENT_SOURCES
 
@@ -88,10 +89,10 @@ class Session:
             raise Hold('Runtime BT retry limit differs from mission policy')
         actual=ready.get('mission_identity',{})
         if actual.get('verified') is not True:raise Hold('Unverified runtime mission identity')
-        self.store.check_identity(actual)
+        check_identity_state(state,actual)
         if ready.get('variant') != state['variant']:
             raise Hold('Runtime variant differs from mission')
-        if self.store.remaining() < 1:
+        if remaining_state(state) < 1:
             raise Hold('FAILED_BUDGET: mission deadline expired')
 
     def reserve(self):
@@ -353,7 +354,10 @@ def main(argv=None):
             if args.operation in ('reconcile','cancel'):
                 if attempt and not (attempt.get('children_quiescent') and attempt.get('stopped')):
                     run_attempt(args,store,args.output/'settle',reconcile=True)
-                outcome='HELD' if not store.state().get('attempt',{}).get('children_quiescent') else 'CANCELED'
+                settled_attempt=store.state().get('attempt') or {}
+                settled=all(settled_attempt.get(key) for key in
+                    ('terminal_confirmed','children_quiescent','stopped'))
+                outcome='CANCELED' if settled else 'HELD'
                 code=10 if outcome=='HELD' else 11
             else:
                 outcome='HELD';code=10
