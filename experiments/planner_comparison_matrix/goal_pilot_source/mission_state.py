@@ -76,12 +76,12 @@ def validate_visit(route, index, visit, legacy=False):
         raise Hold('New visit lacks post-zero advancing original Odom dwell')
 
 
-def failure_decision(result, terminal, quiescent, stopped):
+def failure_decision(result, terminal, quiescent, stopped, *, operator_cancel=False):
     """Executed by finish_attempt and consumed by the real CLI retry loop."""
     if not terminal:return 'HOLD','UNKNOWN_DISPATCH'
     if not quiescent or not stopped:return 'HOLD','CHILD_OR_STOP_UNPROVEN'
     reason=result.get('cancel_reason') or ''
-    if result.get('stop_signals') or reason in ('scheduled_cancel','pilot_interrupted'):
+    if operator_cancel or result.get('stop_signals') or reason in ('scheduled_cancel','pilot_interrupted'):
         return 'CANCELED','OPERATOR_CANCEL'
     codes={v.get('error_code') for v in result.get('missed_waypoints') or []}
     if reason.startswith('input_became_invalid:') or codes & {102,202}:
@@ -91,7 +91,52 @@ def failure_decision(result, terminal, quiescent, stopped):
     if codes & {101,201}:return 'NEEDS_TASK_DECISION','INVALID_RUNTIME_CONFIGURATION'
     if codes & {205,206}:return 'RECOVERABLE_FAILURE','BOUNDED_OBSTACLE_WAIT'
     if codes & {104,105,106,107,207}:return 'RECOVERABLE_FAILURE','BOUNDED_ORIGINAL_GOAL_REPLAN'
+    if result.get('status')==5:return 'HOLD','UNKNOWN_CANCEL_CAUSE'
     return 'NEEDS_TASK_DECISION','UNCLASSIFIED_TERMINAL_OR_INDEPENDENT_EVIDENCE_FAILURE'
+
+
+def terminal_fields(result):
+    value={key:result.get(key) for key in ('status','error_code','missed_waypoints')}
+    value['error_msg']=result.get('error_msg') or ''
+    return value
+
+
+def terminal_authority(state, attempt, current, history):
+    """Return the original raw result, never a result merged with a later stop."""
+    authority=attempt.get('terminal_authority');selected=None;previous_finished=None
+    binding={key:attempt.get(key) for key in ('attempt_id','parent_action_uuid','identity_epoch_id')}
+    if authority and authority.get('binding')!=binding:
+        raise Hold('Terminal cause attempt/epoch binding differs')
+    for item in history:
+        try:
+            raw=Path(item['path']).read_bytes();observed=json.loads(raw)
+        except (OSError,ValueError,TypeError) as error:
+            raise Hold('Historical terminal evidence unavailable') from error
+        if digest(raw)!=item['sha256'] or observed.get('action_uuid')!=attempt['parent_action_uuid']:
+            raise Hold('Historical terminal evidence hash/UUID differs')
+        if observed.get('route_sha256') not in (None,state['identity']['route_raw_sha256']):
+            raise Hold('Historical terminal route differs')
+        finished=observed.get('finished_ns')
+        if finished is not None:
+            if type(finished) is not int or (previous_finished is not None and finished<previous_finished):
+                raise Hold('Terminal observation time regressed')
+            previous_finished=finished
+        if observed.get('status') in (4,5,6):
+            if selected is None:selected=(item,observed)
+            elif terminal_fields(observed)!=terminal_fields(selected[1]):
+                raise Hold('Conflicting native terminal observations')
+    if selected is None:
+        if authority:raise Hold('Bound terminal authority is absent from history')
+        return current
+    item,original=selected
+    record=dict(schema='matrix.mission.terminal_authority.v1',binding=binding,
+        evidence=copy.deepcopy(item),native=terminal_fields(original),
+        cancel_reason=original.get('cancel_reason'),stop_signals=original.get('stop_signals') or [])
+    if authority and authority!=record:raise Hold('Immutable terminal cause differs')
+    if current.get('status') not in (4,5,6) or terminal_fields(current)!=record['native']:
+        raise Hold('Latest observation cannot replace a confirmed terminal result')
+    attempt['terminal_authority']=record
+    return original
 
 
 class MissionStore:
@@ -392,6 +437,7 @@ class MissionStore:
             if any(item['path']==evidence['path'] and item['sha256']!=evidence['sha256'] for item in history):
                 raise Hold('Native result evidence path was reused with different bytes')
             if evidence not in history:history.append(evidence)
+            cause=terminal_authority(s,a,result,history)
             status=result.get('status');missed=result.get('missed_waypoints')
             a.update(native_status=status,native_error_code=result.get('error_code'),missed_waypoints=missed,
                 native_error_msg=result.get('error_msg'),
@@ -407,14 +453,17 @@ class MissionStore:
             if not successful:s['progress']['last_failed_index']=failed
             a['failure']=None
             if not successful and failed is not None:
-                goal=s['route'][failed];pose=result.get('final_snapshot',{}).get('last',{}).get('pose')
+                goal=s['route'][failed];pose=cause.get('final_snapshot',{}).get('last',{}).get('pose')
                 error=None
                 if pose and all(math.isfinite(pose.get(k,math.nan)) for k in ('x','y','yaw')):
                     error=dict(xy_m=math.hypot(pose['x']-goal['pose'][0],pose['y']-goal['pose'][1]),
                         yaw_rad=abs(angular_difference(pose['yaw'],goal['pose'][2])),original_pose_snapshot=pose)
                 a['failure']=dict(index=failed,id=goal['id'],original_goal_map=goal['pose'],actual_error=error)
             a['native_result']=evidence
-            a['bt_recovery_accounting']=result.get('bt_recovery_accounting')
+            a['latest_stop_observation']=dict(evidence=copy.deepcopy(evidence),
+                parent_action_uuid=a['parent_action_uuid'],children_quiescent=a['children_quiescent'],
+                stopped=a['stopped'])
+            a['bt_recovery_accounting']=cause.get('bt_recovery_accounting')
             s['stop']=dict(state='PASSED' if a['stopped'] else 'UNPROVEN',source_action_uuid=a['parent_action_uuid'],
                 receipt=result.get('owned_goal_shutdown',{}).get('stop'),evidence=a['native_result'])
             # Only a terminal failed native batch proves its later suffix was not entered.
@@ -436,7 +485,8 @@ class MissionStore:
                 s['lifecycle']='COMPLETED_WITH_RECOVERY' if s['result_flags']['recovery_used'] else 'COMPLETED_SINGLE_RUN'
                 s['hold_reason']=None
             else:
-                s['lifecycle'],s['hold_reason']=failure_decision(result,a['terminal_confirmed'],a['children_quiescent'],a['stopped'])
+                s['lifecycle'],s['hold_reason']=failure_decision(cause,a['terminal_confirmed'],a['children_quiescent'],a['stopped'],
+                    operator_cancel=bool(result.get('operator_cancel_requested') or result.get('stop_signals')))
             s['attempts'][-1]=copy.deepcopy(a)
 
     def import_closed(self, result, result_sha, historical_bt_retries=1):

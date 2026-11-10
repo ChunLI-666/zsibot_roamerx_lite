@@ -195,6 +195,7 @@ def run_attempt(args, store, output, reconcile=False):
                 result['children_quiescent']=children
                 result['goals_sent']=int(session.action_uuid is not None and not reconcile)
                 result['stop_signals']=options.stop_signals
+                result['operator_cancel_requested']=args.operation=='cancel'
                 result['finished_ns']=time.time_ns()
                 events=getattr(node,'recovery_handoffs',[])
                 acquired={e['epoch'] for e in events if e.get('accepted') and e.get('operation')=='ACQUIRE'}
