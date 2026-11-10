@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <algorithm>
 #include <atomic>
+#include <array>
 #include <chrono>
 #include <mutex>
 #include <thread>
 #include <behaviortree_cpp/bt_factory.h>
 #include <behaviortree_cpp/action_node.h>
+#include <behaviortree_cpp/condition_node.h>
 #include <rclcpp/rclcpp.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
@@ -22,6 +25,7 @@
 #include "robot_feasible_navigation/footprint_sweep.hpp"
 #include "matrix_recovery_bt/stop_barrier.hpp"
 #include "matrix_recovery_bt/wait_diagnostics.hpp"
+#include "matrix_recovery_bt/recovery_errors.hpp"
 #include "matrix_recovery_bt/srv/recovery_handoff.hpp"
 
 namespace matrix_recovery_bt {
@@ -69,6 +73,11 @@ struct Inputs {
   double scan_age=.3;
   Footprint footprint;
   geometry_msgs::msg::PoseStamped planned_start;
+  bool start_captured=false,plan_invalidated=false,hold_confirmed=false,ownership_unknown=false;
+  std::int64_t start_capture_ros=0,start_capture_steady=0,body_lookup_ros=0,body_lookup_steady=0;
+  nav_msgs::msg::Path certificate_path;
+  int recovery_error=None;
+  Certificate certificate=Certificate::InputWait;
   WaitCounters diagnostics;
   std::uint64_t map_sequence=0,map_requests=0,map_responses=0,collision_map_sequence=0;
   std::int64_t map_requested=0,map_responded=0,collision_checked=0;
@@ -170,6 +179,7 @@ struct Inputs {
   }
   geometry_msgs::msg::PoseStamped body(const std::string & frame) {
     last_tf_frame=frame;
+    body_lookup_ros=node->now().nanoseconds();body_lookup_steady=steady();
     auto t=tf->lookupTransform(frame,"base_link",tf2::TimePointZero);
     if (!stampFresh(t.header.stamp)) {throw std::runtime_error("stale body TF");}
     geometry_msgs::msg::PoseStamped p;p.header=t.header;p.pose.position.x=t.transform.translation.x;
@@ -183,39 +193,48 @@ struct Inputs {
     if (!std::isfinite(norm)||std::abs(norm-1.)>.01) {throw std::runtime_error("invalid body quaternion");}
     last_body=p;body_observed=true;return p;
   }
-  bool certified(const nav_msgs::msg::Path * path=nullptr) {
+  Certificate certified(const nav_msgs::msg::Path * path=nullptr) {
     using namespace robot_feasible_navigation;
     if (!basicHealthy() || !diagnostics.check(bool(map),Reject::MapMissing) ||
       !diagnostics.check(recent(map_receive),Reject::MapReceive) ||
-      !diagnostics.check(stampFresh(map->header.stamp),Reject::MapStamp)) {return false;}
+      !diagnostics.check(stampFresh(map->header.stamp),Reject::MapStamp)) {return Certificate::InputWait;}
     const auto & m=map->metadata;
     if (!m.size_x||!m.size_y||!std::isfinite(m.resolution)||m.resolution<=0 ||
       m.size_x>10000 || m.size_y>10000 || map->data.size()!=std::size_t(m.size_x)*m.size_y ||
-      !std::isfinite(m.origin.position.x)||!std::isfinite(m.origin.position.y)) {diagnostics.check(false,Reject::MapMetadata);return false;}
+      !std::isfinite(m.origin.position.x)||!std::isfinite(m.origin.position.y)) {diagnostics.check(false,Reject::MapMetadata);return Certificate::InputWait;}
     if (std::abs(m.origin.orientation.x)>1e-6 || std::abs(m.origin.orientation.y)>1e-6 ||
-      std::abs(m.origin.orientation.z)>1e-6 || std::abs(m.origin.orientation.w-1)>1e-6) {diagnostics.check(false,Reject::MapOrientation);return false;}
+      std::abs(m.origin.orientation.z)>1e-6 || std::abs(m.origin.orientation.w-1)>1e-6) {diagnostics.check(false,Reject::MapOrientation);return Certificate::InputWait;}
     auto actual=body(map->header.frame_id);
+    geometry_msgs::msg::PoseStamped local;
+    if (path) {
+      if (!diagnostics.check(!path->poses.empty(),Reject::PathMissing) ||
+        !diagnostics.check(path->header.frame_id=="map",Reject::PathFrame)) {return Certificate::InvalidPath;}
+      if (!start_captured) {return Certificate::InvalidPath;}
+      auto current=body("map");
+      if (std::hypot(current.pose.position.x-planned_start.pose.position.x,
+        current.pose.position.y-planned_start.pose.position.y)>.03 ||
+        std::abs(angle(yaw(current.pose),yaw(planned_start.pose)))>.08) {
+        diagnostics.check(false,Reject::BodyDrift);return Certificate::PlanInvalidated;
+      }
+      auto first=path->poses.front();first.header.frame_id=path->header.frame_id;
+      // Transform derived intent at current TF; retain every source sample header.
+      first.header.stamp=actual.header.stamp;
+      local=tf->transform(first,map->header.frame_id);
+      if (std::hypot(local.pose.position.x-actual.pose.position.x,local.pose.position.y-actual.pose.position.y)>.05 ||
+        std::abs(angle(yaw(local.pose),yaw(actual.pose)))>.25) {
+        diagnostics.check(false,Reject::PathStart);return Certificate::PlanInvalidated;
+      }
+    }
     nav2_costmap_2d::Costmap2D cost(m.size_x,m.size_y,m.resolution,m.origin.position.x,m.origin.position.y);
     std::copy(map->data.begin(),map->data.end(),cost.getCharMap());
     const bool free=sweep::commandSweepFree(cost,footprint,actual.pose.position.x,actual.pose.position.y,
       yaw(actual.pose),0,0,1.);
     collision_map=map;collision_body=actual;collision_map_sequence=map_sequence;collision_checked=steady();collision_free=free;
-    if (!diagnostics.check(free,Reject::BodyCollision)) {return false;}
-    if (!path) {return true;}
-    if (!diagnostics.check(!path->poses.empty(),Reject::PathMissing) ||
-      !diagnostics.check(path->header.frame_id=="map",Reject::PathFrame)) {return false;}
-    auto current=body("map");
-    if (std::hypot(current.pose.position.x-planned_start.pose.position.x,
-      current.pose.position.y-planned_start.pose.position.y)>.03 ||
-      std::abs(angle(yaw(current.pose),yaw(planned_start.pose)))>.08) {diagnostics.check(false,Reject::BodyDrift);return false;}
-    auto first=path->poses.front();first.header.frame_id=path->header.frame_id;
-    // Transform a derived intent pose at current TF, never rewrite a sample header.
-    first.header.stamp=actual.header.stamp;
-    auto local=tf->transform(first,map->header.frame_id);
-    if (std::hypot(local.pose.position.x-actual.pose.position.x,local.pose.position.y-actual.pose.position.y)>.05 ||
-      std::abs(angle(yaw(local.pose),yaw(actual.pose)))>.25) {diagnostics.check(false,Reject::PathStart);return false;}
+    if (!diagnostics.check(free,Reject::BodyCollision)) {return Certificate::Blocked;}
+    if (!path) {return Certificate::Valid;}
     return diagnostics.check(sweep::sweepFree(cost,footprint,actual.pose.position.x,actual.pose.position.y,yaw(actual.pose),
-      local.pose.position.x,local.pose.position.y,yaw(local.pose)),Reject::PathSweep);
+      local.pose.position.x,local.pose.position.y,yaw(local.pose)),Reject::PathSweep) ?
+      Certificate::Valid : Certificate::Blocked;
   }
   // Called at most once/second while waiting, plus a terminal failure snapshot.
   // No extra TF lookup, sensor publication, map copy, filesystem write or guard evaluation.
@@ -236,7 +255,25 @@ struct Inputs {
       if (!diagnostics.rejected[i]) {continue;}if(!first){s<<',';}first=false;
       s<<jsonText(reject_names[i])<<':'<<diagnostics.rejected[i];
     }
-    s<<"},\"follow_active\":"<<follow_active<<",\"odom\":";
+    s<<"},\"recovery_error_code\":"<<recovery_error
+      <<",\"ownership_unknown\":"<<ownership_unknown<<",\"hold_confirmed\":"<<hold_confirmed
+      <<",\"plan_invalidated\":"<<plan_invalidated
+      <<",\"planned_start\":"<<(start_captured?poseDiagnostic(planned_start):"null")
+      <<",\"planned_start_capture_ros_ns\":"<<start_capture_ros
+      <<",\"planned_start_capture_steady_ns\":"<<start_capture_steady
+      <<",\"body_lookup_ros_ns\":"<<body_lookup_ros<<",\"body_lookup_steady_ns\":"<<body_lookup_steady
+      <<",\"path_header\":{\"frame\":"<<jsonText(certificate_path.header.frame_id)
+      <<",\"source\":"<<header(certificate_path.header.stamp)
+      <<",\"poses\":"<<certificate_path.poses.size()<<'}';
+    if (!certificate_path.poses.empty()) {
+      s<<",\"path_first\":"<<poseDiagnostic(certificate_path.poses.front());
+    }
+    if(start_captured && body_observed && last_body.header.frame_id==planned_start.header.frame_id) {
+      s<<",\"plan_start_delta_xy_m\":"<<jsonNumber(std::hypot(last_body.pose.position.x-planned_start.pose.position.x,
+        last_body.pose.position.y-planned_start.pose.position.y))
+        <<",\"plan_start_delta_yaw_rad\":"<<jsonNumber(std::abs(angle(yaw(last_body.pose),yaw(planned_start.pose))));
+    }
+    s<<",\"follow_active\":"<<follow_active<<",\"odom\":";
     if(odom){s<<"{\"frame\":"<<jsonText(odom->header.frame_id)<<",\"child_frame\":"<<jsonText(odom->child_frame_id)
       <<",\"source\":"<<header(odom->header.stamp)<<",\"receive_age_sec\":"<<age(odom_receive)<<",\"twist_xy_wz\":"<<twist(odom->twist.twist)<<'}';}else{s<<"null";}
     s<<",\"scan\":";
@@ -297,64 +334,123 @@ public:
       BT::InputPort<double>("padding",0.,""),BT::InputPort<std::string>("odom_topic","/odom/current_pose",""),
       BT::InputPort<std::string>("scan_topic","/laser_scan",""),BT::InputPort<double>("scan_max_age",.3,""),
       BT::InputPort<double>("timeout",30.,""),BT::InputPort<double>("health_stable",1.,""),
-      BT::InputPort<nav_msgs::msg::Path>("path")};
+      BT::InputPort<nav_msgs::msg::Path>("path"),BT::OutputPort<std::uint16_t>("error_code_id")};
   }
   BT::NodeStatus onStart() override {
     if (!config().blackboard->get("matrix_stop_inputs",inputs_)) {
       inputs_=std::make_shared<Inputs>(*this);config().blackboard->set("matrix_stop_inputs",inputs_);
     }
     started_=steady();stable_=0;pending_=false;acquired_=false;inspected_=false;
-    {std::lock_guard<std::mutex> l(inputs_->mutex);inputs_->diagnostics=WaitCounters{};inputs_->last_exception.clear();}
+    {
+      std::lock_guard<std::mutex> l(inputs_->mutex);
+      inputs_->diagnostics=WaitCounters{};
+      inputs_->last_exception.clear();
+      inputs_->recovery_error=None;
+      inputs_->certificate=Certificate::InputWait;
+      if (!release_) {
+        inputs_->start_captured=false;
+        inputs_->certificate_path=nav_msgs::msg::Path{};
+      }
+    }
+    outputError(None);
     phase_="WAIT_HANDOFF_SERVICE";last_diagnostic_=0;
     return onRunning();
   }
   BT::NodeStatus onRunning() override {
     auto & x=*inputs_;
-    if (steady()-started_>getInput<double>("timeout").value()*1e9) {
-      cancelPending();std::lock_guard<std::mutex> l(x.mutex);diagnose("timeout",true);return BT::NodeStatus::FAILURE;
-    }
     std::lock_guard<std::mutex> l(x.mutex);
+    if (x.ownership_unknown) {
+      // Removing a pending client future cannot undo an accepted RELEASE.
+      // No automatic retry may treat this as a confirmed zero-owning epoch.
+      return fail(OwnershipUnknown,"ownership_requires_reconcile");
+    }
+    if (steady()-started_>getInput<double>("timeout").value()*1e9) {
+      const int code=(pending_ || (!release_ && !acquired_)) ? OwnershipUnknown :
+        (x.certificate==Certificate::Blocked ? CollisionWaitTimeout : InputHealthTimeout);
+      return fail(code,"timeout");
+    }
     if (!x.client->service_is_ready()) {return waiting("WAIT_HANDOFF_SERVICE");}
     if (!release_ && !acquired_) {
       if (!pending_) {send(inspected_?"ACQUIRE":"INSPECT",x.epoch);return waiting(inspected_?"WAIT_ACQUIRE_RESPONSE":"WAIT_INSPECT_RESPONSE");}
       if (future_.wait_for(std::chrono::seconds(0))!=std::future_status::ready) {return waiting(phase_);}
       auto r=future_.get();pending_=false;
       if (!inspected_) {
-        if (!r->accepted) {diagnose("inspect_rejected",true);return BT::NodeStatus::FAILURE;}
+        if (!r->accepted) {return fail(OwnershipUnknown,"inspect_rejected");}
         x.epoch=r->epoch;inspected_=true;return waiting("WAIT_ACQUIRE_RESPONSE");
       }
-      if (!r->accepted || r->mode!="HOLD") {diagnose("acquire_rejected",true);return BT::NodeStatus::FAILURE;}
-      x.epoch=r->epoch;x.released=false;acquired_=true;
+      if (!r->accepted || r->mode!="HOLD") {return fail(OwnershipUnknown,"acquire_rejected");}
+      x.epoch=r->epoch;x.released=false;acquired_=true;x.hold_confirmed=true;
       x.barrier.arm(steady(),x.odom?rclcpp::Time(x.odom->header.stamp).nanoseconds():0);
     }
     bool healthy=false;
     nav_msgs::msg::Path path;
     try {
-      if (release_) {path=getInput<nav_msgs::msg::Path>("path").value();}
-      healthy=x.certified(release_?&path:nullptr) && x.diagnostics.check(x.barrier.ready(steady()),Reject::StopDwell);
-    } catch (const std::exception & error) {x.diagnostics.check(false,Reject::Exception);x.last_exception=error.what();healthy=false;}
+      if (release_) {
+        if (!x.hold_confirmed) {return fail(OwnershipUnknown,"release_without_confirmed_hold");}
+        if (x.plan_invalidated) {return fail(PlanStartInvalidated,"plan_already_invalidated");}
+        auto input=getInput<nav_msgs::msg::Path>("path");
+        if (!input) {return fail(InvalidPlanContract,"missing_path_input");}
+        path=input.value();x.certificate_path=path;
+      }
+      x.certificate=x.certified(release_?&path:nullptr);
+      healthy=x.certificate==Certificate::Valid && x.diagnostics.check(x.barrier.ready(steady()),Reject::StopDwell);
+    } catch (const std::exception & error) {
+      x.diagnostics.check(false,Reject::Exception);x.last_exception=error.what();
+      x.certificate=Certificate::InputWait;
+    }
     if (!healthy) {
       stable_=0;
-      if (release_ && pending_) {cancelPending();diagnose("health_lost_during_release",true);return BT::NodeStatus::FAILURE;}
+      if (release_ && pending_) {return fail(OwnershipUnknown,"health_lost_during_release");}
+      if (x.certificate==Certificate::PlanInvalidated) {
+        x.plan_invalidated=true;
+        return fail(PlanStartInvalidated,"plan_start_invalidated");
+      }
+      if (x.certificate==Certificate::InvalidPath) {return fail(InvalidPlanContract,"invalid_plan_contract");}
       return waiting(release_?"WAIT_PLAN_START_CERTIFICATE":"WAIT_STOP_AND_HEALTH");
     }
     if (!release_) {
       if (!stable_) {stable_=steady();}
       if (steady()-stable_<getInput<double>("health_stable").value()*1e9) {return waiting("WAIT_HEALTH_STABLE");}
-      x.planned_start=x.body("map");return BT::NodeStatus::SUCCESS;
+      // Capture only after the unchanged stop/health predicates qualify. A TF
+      // failure here is a finite input wait, not an exception escaping the BT.
+      try {x.planned_start=x.body("map");}
+      catch (const std::exception & error) {
+        x.last_exception=error.what();x.certificate=Certificate::InputWait;stable_=0;
+        return waiting("WAIT_PLAN_START_TF");
+      }
+      x.start_captured=true;x.plan_invalidated=false;
+      x.start_capture_ros=x.node->now().nanoseconds();x.start_capture_steady=steady();
+      diagnose("planned_start_captured",false);
+      outputError(None);return BT::NodeStatus::SUCCESS;
     }
     if (!pending_) {send("RELEASE",x.epoch);return waiting("WAIT_RELEASE_RESPONSE");}
     if (future_.wait_for(std::chrono::seconds(0))!=std::future_status::ready) {return waiting("WAIT_RELEASE_RESPONSE");}
     auto r=future_.get();pending_=false;
-    if (!r->accepted || r->epoch!=x.epoch || r->mode!="CONTROLLER") {diagnose("release_rejected",true);return BT::NodeStatus::FAILURE;}
-    x.released=true;return BT::NodeStatus::SUCCESS;
+    if (!r->accepted || r->epoch!=x.epoch || r->mode!="CONTROLLER") {return fail(OwnershipUnknown,"release_rejected");}
+    x.released=true;x.hold_confirmed=false;outputError(None);return BT::NodeStatus::SUCCESS;
   }
   void onHalted() override {
+    if (release_ && pending_ && inputs_) {
+      std::lock_guard<std::mutex> l(inputs_->mutex);
+      inputs_->ownership_unknown=true;
+      inputs_->recovery_error=OwnershipUnknown;outputError(OwnershipUnknown);
+      diagnose("halt_during_release",true);
+    }
     cancelPending();
     // Gate owns all zero publication. In particular success cleanup and stale
     // halts never publish or close a released epoch under the next FollowPath.
   }
 private:
+  void outputError(int code) {
+    if (config().output_ports.count("error_code_id")) {setOutput("error_code_id",static_cast<std::uint16_t>(code));}
+  }
+  BT::NodeStatus fail(int code,const char * event) {
+    inputs_->recovery_error=code;
+    if (code==OwnershipUnknown) {inputs_->ownership_unknown=true;}
+    outputError(code);
+    cancelPending();diagnose(event,true);
+    return BT::NodeStatus::FAILURE;
+  }
   BT::NodeStatus waiting(const char * phase) {phase_=phase;diagnose("waiting",false);return BT::NodeStatus::RUNNING;}
   void diagnose(const char * event,bool force) noexcept {
     const auto now=steady();if(!force && last_diagnostic_ && now-last_diagnostic_<1000000000LL){return;}
@@ -384,8 +480,45 @@ class ReleaseNode : public StopNode {
 public:
   ReleaseNode(const std::string & n,const BT::NodeConfig & c):StopNode(n,c,true) {}
 };
+
+class BeginStoppedReplanAttempt : public BT::SyncActionNode {
+public:
+  using BT::SyncActionNode::SyncActionNode;
+  static BT::PortsList providedPorts() {
+    return {BT::BidirectionalPort<std::uint16_t>("controller_error_code"),
+      BT::BidirectionalPort<std::uint16_t>("planner_error_code"),BT::BidirectionalPort<std::uint16_t>("recovery_error_code")};
+  }
+  BT::NodeStatus tick() override {
+    const std::array<int,3> prior={getInput<std::uint16_t>("controller_error_code").value_or(0),
+      getInput<std::uint16_t>("planner_error_code").value_or(0),getInput<std::uint16_t>("recovery_error_code").value_or(0)};
+    std::vector<std::array<int,3>> history;
+    (void)config().blackboard->get("matrix_recovery_cause_history",history);
+    if (std::any_of(prior.begin(),prior.end(),[](int code){return code!=0;})) {
+      if (history.size()==16) {history.erase(history.begin());}
+      history.push_back(prior);config().blackboard->set("matrix_recovery_cause_history",history);
+      auto node=config().blackboard->get<rclcpp::Node::SharedPtr>("node");
+      RCLCPP_WARN(node->get_logger(),"matrix_recovery_cause_v1 prior_controller=%d prior_planner=%d prior_recovery=%d history_size=%zu",
+        prior[0],prior[1],prior[2],history.size());
+    }
+    setOutput("controller_error_code",std::uint16_t{0});setOutput("planner_error_code",std::uint16_t{0});
+    setOutput("recovery_error_code",std::uint16_t{0});
+    return BT::NodeStatus::SUCCESS;
+  }
+};
+
+class WouldAStoppedPlanRecoveryHelp : public BT::ConditionNode {
+public:
+  using BT::ConditionNode::ConditionNode;
+  static BT::PortsList providedPorts() {return {BT::InputPort<std::uint16_t>("error_code")};}
+  BT::NodeStatus tick() override {
+    return getInput<std::uint16_t>("error_code").value_or(0)==PlanStartInvalidated ?
+      BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
+  }
+};
 }
 BT_REGISTER_NODES(factory) {
+  factory.registerNodeType<matrix_recovery_bt::BeginStoppedReplanAttempt>("BeginStoppedReplanAttempt");
+  factory.registerNodeType<matrix_recovery_bt::WouldAStoppedPlanRecoveryHelp>("WouldAStoppedPlanRecoveryHelp");
   factory.registerNodeType<matrix_recovery_bt::StopNode>("WaitForStoppedAndHealthy");
   factory.registerNodeType<matrix_recovery_bt::ReleaseNode>("ValidateStoppedPlanStart");
 }

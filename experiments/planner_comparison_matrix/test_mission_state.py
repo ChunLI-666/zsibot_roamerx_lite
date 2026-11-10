@@ -25,6 +25,16 @@ def fixture():
     return raw,identity,policy,result
 
 class MissionTests(unittest.TestCase):
+    def test_typed_stopped_recovery_codes_preserve_unknown_zero_boundary(self):
+        from mission_state import failure_decision
+        cases={60001:'RECOVERABLE_FAILURE',60002:'PAUSED_INPUT_HEALTH',
+            60003:'HOLD',60004:'NEEDS_TASK_DECISION',60005:'RECOVERABLE_FAILURE',
+            0:'NEEDS_TASK_DECISION',60100:'NEEDS_TASK_DECISION'}
+        for code,expected in cases.items():
+            result=dict(status=6,error_code=0,missed_waypoints=[dict(index=0,error_code=code)])
+            self.assertEqual(failure_decision(result,True,True,True)[0],expected)
+            self.assertEqual(failure_decision(result,True,True,False)[0],'HOLD')
+
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name)
         self.store=MissionStore(self.root/'state.db',self.root/'resource.lock')

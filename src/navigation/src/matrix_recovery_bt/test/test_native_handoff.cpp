@@ -27,6 +27,7 @@
 #include <nav2_costmap_2d/costmap_2d_publisher.hpp>
 #include <rcutils/logging.h>
 #include "matrix_recovery_bt/srv/recovery_handoff.hpp"
+#include "matrix_recovery_bt/recovery_errors.hpp"
 using namespace std::chrono_literals;
 using Service=matrix_recovery_bt::srv::RecoveryHandoff;
 using Plan=nav2_msgs::action::ComputePathToPose;
@@ -84,6 +85,8 @@ protected:
   std::atomic<int> plans{0},follows{0},cancels{0},odom_count{0};
   std::atomic<bool> moving{false},stale{false};
   std::atomic<bool> actual_contract{false},stale_tf{false};
+  std::atomic<double> map_shift{0.};
+  bool drift_after_first_plan=false,invalid_path_start=false,block_body_after_plan=false;
   int planning_ms=450,following_ms=40;
   void SetUp() override {
     {std::lock_guard<std::mutex> l(diagnostic_mutex);diagnostic_lines.clear();}
@@ -99,16 +102,21 @@ protected:
     output=node->create_subscription<geometry_msgs::msg::Twist>("/cmd_vel_nav",100,[this](geometry_msgs::msg::Twist::ConstSharedPtr v){std::lock_guard<std::mutex> l(mutex);commands.push_back(v->linear.x);});
     map=node->create_service<nav2_msgs::srv::GetCostmap>("/local_costmap/get_costmap",[this](const nav2_msgs::srv::GetCostmap::Request::SharedPtr,nav2_msgs::srv::GetCostmap::Response::SharedPtr r){
       auto & m=r->map;m.header.frame_id="odom";m.header.stamp=node->now();m.metadata.size_x=150;m.metadata.size_y=150;
-      m.metadata.resolution=.02;m.metadata.origin.position.x=-1.5;m.metadata.origin.position.y=-1.5;m.metadata.origin.orientation.w=1.;m.data.resize(22500,0);
+      m.metadata.resolution=.02;m.metadata.origin.position.x=-1.5;m.metadata.origin.position.y=-1.5;m.metadata.origin.orientation.w=1.;
+      m.data.resize(22500,block_body_after_plan && plans>0 ? 254 : 0);
     });
     planner=rclcpp_action::create_server<Plan>(node,"compute_path_to_pose",
       [](const auto &,const auto &){return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;},
       [this](const auto &){++cancels;return rclcpp_action::CancelResponse::ACCEPT;},
-      [this](const auto & g){actions.emplace_back([this,g]{++plans;std::this_thread::sleep_for(std::chrono::milliseconds(planning_ms));
+      [this](const auto & g){actions.emplace_back([this,g]{
+        const int plan_number=++plans;const double planned_shift=map_shift.load();
+        std::this_thread::sleep_for(std::chrono::milliseconds(planning_ms));
         auto result=std::make_shared<Plan::Result>();result->path.header.frame_id="map";result->path.header.stamp=node->now();
         geometry_msgs::msg::PoseStamped start;start.header=result->path.header;start.pose.orientation.w=1.;
         if(actual_contract){start=bodyInMap();start.header=result->path.header;}
+        start.pose.position.x+=planned_shift+(invalid_path_start?.1:0.);
         result->path.poses={start,g->get_goal()->goal};
+        if(drift_after_first_plan && plan_number==1){map_shift=.06;std::this_thread::sleep_for(150ms);}
         if(g->is_canceling()){g->canceled(result);}else {g->succeed(result);}});});
     follower=rclcpp_action::create_server<Follow>(node,"follow_path",
       [](const auto &,const auto &){return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;},
@@ -149,6 +157,7 @@ protected:
     if(actual_contract){t.transform.translation.x=-8.218;t.transform.translation.y=11.516;
       t.transform.rotation.z=std::sin(-2.278/2);t.transform.rotation.w=std::cos(-2.278/2);
       u.transform.translation.x=.16;u.transform.translation.y=.01;u.transform.rotation.z=std::sin(.07/2);u.transform.rotation.w=std::cos(.07/2);}
+    t.transform.translation.x+=map_shift.load();
     tf->sendTransform(std::vector<geometry_msgs::msg::TransformStamped>{t,u});
   }
   void actualCostmap(unsigned char initial=255) {
@@ -175,18 +184,25 @@ protected:
     static int sequence=0;req->operation_id="native_test:"+std::to_string(++sequence);
     auto future=service->async_send_request(req);if(future.wait_for(3s)!=std::future_status::ready)throw std::runtime_error("service timeout");return future.get();
   }
-  BT::Tree tree(BT::BehaviorTreeFactory & factory) {
+  BT::Tree tree(BT::BehaviorTreeFactory & factory,bool recovery=false,double timeout=5.) {
     factory.registerFromPlugin(PLUGIN_PATH);
     factory.registerFromPlugin("/opt/ros/jazzy/lib/libnav2_compute_path_to_pose_action_bt_node.so");
     factory.registerFromPlugin("/opt/ros/jazzy/lib/libnav2_follow_path_action_bt_node.so");
+    if(recovery){factory.registerFromPlugin("/opt/ros/jazzy/lib/libnav2_recovery_node_bt_node.so");}
     auto board=BT::Blackboard::create();board->set("node",bt);board->set("server_timeout",std::chrono::milliseconds(1000));
     board->set("bt_loop_duration",std::chrono::milliseconds(10));board->set("wait_for_service_timeout",std::chrono::milliseconds(3000));
     geometry_msgs::msg::PoseStamped goal;goal.header.frame_id="map";goal.pose.orientation.w=1.;goal.pose.position.x=.5;
     if(actual_contract){goal=bodyInMap();goal.pose.position.x+=.5;}board->set("goal",goal);
-    std::string attrs=" run_id='native_test' footprint='[[-0.3,-0.2],[0.3,-0.2],[0.3,0.2],[-0.3,0.2]]' health_stable='0.1' timeout='5'";
+    std::string attrs=" run_id='native_test' footprint='[[-0.3,-0.2],[0.3,-0.2],[0.3,0.2],[-0.3,0.2]]' health_stable='0.1' timeout='"+std::to_string(timeout)+"'";
     // Omit both timing ports: exercise the production defaults of 1s and 30s.
     if(actual_contract){attrs=" run_id='native_test' footprint='[[-0.647,-0.53],[0.647,-0.53],[0.647,0.53],[-0.647,0.53]]' padding='0.15'";}
-    return factory.createTreeFromText("<root BTCPP_format='4'><BehaviorTree ID='Test'><Sequence><WaitForStoppedAndHealthy"+attrs+"/><ComputePathToPose goal='{goal}' path='{path}' planner_id='GridBased' use_start='false'/><ValidateStoppedPlanStart"+attrs+" path='{path}'/><FollowPath path='{path}' controller_id='FollowPath'/></Sequence></BehaviorTree></root>",board);
+    attrs+=" error_code_id='{recovery_error_code}'";
+    auto sequence="<Sequence><BeginStoppedReplanAttempt controller_error_code='{follow_path_error_code}' planner_error_code='{compute_path_error_code}' recovery_error_code='{recovery_error_code}'/>"
+      "<WaitForStoppedAndHealthy"+attrs+"/><ComputePathToPose goal='{goal}' path='{path}' planner_id='GridBased' use_start='false' error_code_id='{compute_path_error_code}'/>"
+      "<ValidateStoppedPlanStart"+attrs+" path='{path}'/><FollowPath path='{path}' controller_id='FollowPath' error_code_id='{follow_path_error_code}'/></Sequence>";
+    if(recovery){sequence="<RecoveryNode number_of_retries='1'>"+sequence+
+      "<WouldAStoppedPlanRecoveryHelp error_code='{recovery_error_code}'/></RecoveryNode>";}
+    return factory.createTreeFromText("<root BTCPP_format='4'><BehaviorTree ID='Test'>"+sequence+"</BehaviorTree></root>",board);
   }
   BT::NodeStatus run(BT::Tree & tree,int ms=6000) {
     auto until=std::chrono::steady_clock::now()+std::chrono::milliseconds(ms);auto state=BT::NodeStatus::RUNNING;
@@ -227,6 +243,64 @@ TEST_F(Native, StaleOdomDuringPlanPreventsFollowPath) {
   for(int i=0;i<400 && !plans;++i){task.tickOnce();std::this_thread::sleep_for(10ms);}
   ASSERT_EQ(plans,1);stale=true;EXPECT_EQ(run(task,1000),BT::NodeStatus::RUNNING);EXPECT_EQ(follows,0);
   task.haltTree();EXPECT_EQ(call("INSPECT")->mode,"HOLD");
+}
+TEST_F(Native, FreshPlanStartDriftFailsTypedBeforeReleaseWithoutThirtySecondWait) {
+  drift_after_first_plan=true;planning_ms=100;
+  BT::BehaviorTreeFactory factory;auto task=tree(factory);
+  const auto started=std::chrono::steady_clock::now();
+  EXPECT_EQ(run(task),BT::NodeStatus::FAILURE);
+  EXPECT_LT(std::chrono::steady_clock::now()-started,3s);
+  EXPECT_EQ(task.rootBlackboard()->get<int>("recovery_error_code"),matrix_recovery_bt::PlanStartInvalidated);
+  EXPECT_EQ(plans,1);EXPECT_EQ(follows,0);EXPECT_EQ(call("INSPECT")->mode,"HOLD");
+  const auto diagnostic=diagnosticWith("plan_start_invalidated");
+  EXPECT_NE(diagnostic.find("\"planned_start\":{\"frame\":\"map\""),std::string::npos);
+  EXPECT_NE(diagnostic.find("\"plan_start_delta_xy_m\":"),std::string::npos);
+}
+TEST_F(Native, OneNativeRetryRecapturesActualStartAndClearsCurrentErrorOnly) {
+  drift_after_first_plan=true;planning_ms=100;
+  BT::BehaviorTreeFactory factory;auto task=tree(factory,true);
+  EXPECT_EQ(run(task),BT::NodeStatus::SUCCESS);
+  EXPECT_EQ(plans,2);EXPECT_EQ(follows,1);
+  EXPECT_EQ(task.rootBlackboard()->get<int>("recovery_error_code"),0);
+  const auto history=task.rootBlackboard()->get<std::vector<std::array<int,3>>>("matrix_recovery_cause_history");
+  ASSERT_EQ(history.size(),1U);EXPECT_EQ(history[0][2],matrix_recovery_bt::PlanStartInvalidated);
+}
+TEST_F(Native, FreshPathStartMismatchInvalidatesEvenWhenNewCostmapBlocksBody) {
+  invalid_path_start=true;block_body_after_plan=true;planning_ms=450;
+  BT::BehaviorTreeFactory factory;auto task=tree(factory);
+  const auto started=std::chrono::steady_clock::now();
+  EXPECT_EQ(run(task),BT::NodeStatus::FAILURE);
+  EXPECT_LT(std::chrono::steady_clock::now()-started,3s);
+  EXPECT_EQ(task.rootBlackboard()->get<int>("recovery_error_code"),matrix_recovery_bt::PlanStartInvalidated);
+  EXPECT_EQ(plans,1);EXPECT_EQ(follows,0);EXPECT_EQ(call("INSPECT")->mode,"HOLD");
+}
+TEST_F(Native, RepeatedInvalidPathStartExhaustsExactlyOneNativeRetry) {
+  invalid_path_start=true;planning_ms=50;
+  BT::BehaviorTreeFactory factory;auto task=tree(factory,true);
+  EXPECT_EQ(run(task),BT::NodeStatus::FAILURE);
+  EXPECT_EQ(plans,2);EXPECT_EQ(follows,0);EXPECT_EQ(call("INSPECT")->mode,"HOLD");
+  EXPECT_EQ(task.rootBlackboard()->get<int>("recovery_error_code"),matrix_recovery_bt::PlanStartInvalidated);
+}
+TEST_F(Native, StaleInputsHaveFiniteTypedHealthWaitWithoutGeometricRetry) {
+  stale=true;BT::BehaviorTreeFactory factory;auto task=tree(factory,true,.8);
+  EXPECT_EQ(run(task,2000),BT::NodeStatus::FAILURE);
+  EXPECT_EQ(plans,0);EXPECT_EQ(follows,0);
+  EXPECT_EQ(task.rootBlackboard()->get<int>("recovery_error_code"),matrix_recovery_bt::InputHealthTimeout);
+  EXPECT_EQ(call("INSPECT")->mode,"HOLD");
+}
+TEST_F(Native, HaltWithUnacknowledgedReleaseRequiresReconcileEvenAfterLateReply) {
+  planning_ms=800;BT::BehaviorTreeFactory factory;auto task=tree(factory);
+  for(int i=0;i<400 && !plans;++i){task.tickOnce();std::this_thread::sleep_for(10ms);}
+  ASSERT_EQ(plans,1);
+  struct ResumeOwnedGate {pid_t pid;~ResumeOwnedGate(){kill(pid,SIGCONT);}} resume{gate};
+  ASSERT_EQ(kill(gate,SIGSTOP),0);
+  EXPECT_EQ(run(task,1200),BT::NodeStatus::RUNNING);
+  task.haltTree();
+  EXPECT_EQ(task.rootBlackboard()->get<int>("recovery_error_code"),matrix_recovery_bt::OwnershipUnknown);
+  kill(gate,SIGCONT);std::this_thread::sleep_for(150ms);
+  EXPECT_EQ(run(task,500),BT::NodeStatus::FAILURE);
+  EXPECT_EQ(task.rootBlackboard()->get<int>("recovery_error_code"),matrix_recovery_bt::OwnershipUnknown);
+  EXPECT_EQ(follows,0);EXPECT_EQ(plans,1);
 }
 TEST_F(Native, HaltWhileStoppingNeverStartsEitherAction) {
   moving=true;BT::BehaviorTreeFactory factory;auto task=tree(factory);

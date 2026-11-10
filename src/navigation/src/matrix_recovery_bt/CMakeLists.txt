@@ -29,6 +29,7 @@ if(BUILD_TESTING)
   target_include_directories(test_stop_barrier PRIVATE include)
   find_package(rclcpp_action REQUIRED)
   ament_add_gtest(test_native_handoff test/test_native_handoff.cpp TIMEOUT 120)
+  target_include_directories(test_native_handoff PRIVATE include)
   ament_target_dependencies(test_native_handoff ${dependencies} rclcpp_action)
   target_link_libraries(test_native_handoff "${typesupport}")
   target_compile_definitions(test_native_handoff PRIVATE

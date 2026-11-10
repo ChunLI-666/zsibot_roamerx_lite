@@ -6,6 +6,8 @@ from pathlib import Path
 import uuid
 from xml.sax.saxutils import quoteattr
 
+ERROR_CODE_NAMES = ['follow_path_error_code', 'compute_path_error_code', 'recovery_error_code']
+
 
 def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
@@ -49,15 +51,16 @@ def tree(recovery):
         run_id=recovery['run_id'],footprint=json.dumps(recovery['footprint']),padding=recovery['padding'],
         odom_topic=recovery['odom_topic'],scan_topic=recovery['scan_topic'],scan_max_age=recovery['scan_max_age'],
         timeout=recovery['stop_timeout_sec'],health_stable=recovery['health_stable_sec']).items())
-    execute=('<Sequence><SetBlackboard output_key="follow_path_error_code" value="0"/>'
-        '<SetBlackboard output_key="compute_path_error_code" value="0"/>'
-        '<WaitForStoppedAndHealthy '+attrs+'/>'
+    execute=('<Sequence><BeginStoppedReplanAttempt controller_error_code="{follow_path_error_code}" '
+        'planner_error_code="{compute_path_error_code}" recovery_error_code="{recovery_error_code}"/>'
+        '<WaitForStoppedAndHealthy '+attrs+' error_code_id="{recovery_error_code}"/>'
         '<ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased" use_start="false" error_code_id="{compute_path_error_code}"/>'
-        '<ValidateStoppedPlanStart '+attrs+' path="{path}"/>'
+        '<ValidateStoppedPlanStart '+attrs+' path="{path}" error_code_id="{recovery_error_code}"/>'
         '<FollowPath path="{path}" controller_id="FollowPath" goal_checker_id="Checker" progress_checker_id="Progress" error_code_id="{follow_path_error_code}"/>'
         '</Sequence>')
     recover=('<Fallback><WouldAControllerRecoveryHelp error_code="{follow_path_error_code}"/>'
-             '<WouldAPlannerRecoveryHelp error_code="{compute_path_error_code}"/></Fallback>')
+             '<WouldAPlannerRecoveryHelp error_code="{compute_path_error_code}"/>'
+             '<WouldAStoppedPlanRecoveryHelp error_code="{recovery_error_code}"/></Fallback>')
     return ('<root BTCPP_format="4" main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree">'
             '<RecoveryNode number_of_retries="'+str(recovery['bt_retries'])+'" name="MeasuredStoppedOriginalGoalReplan">'
             +execute+recover+'</RecoveryNode></BehaviorTree></root>\n')
@@ -81,6 +84,9 @@ def runtime_identity(manifest, parameters, identities, receipt, out, runtime):
     def digest(value):
         return hashlib.sha256(json.dumps(value,sort_keys=True,separators=(',',':'),ensure_ascii=False,allow_nan=False).encode()).hexdigest()
     recovery=manifest['recovery']; commit=receipt['repository_commit']
+    actual_errors=parameters.get('bt_navigator',{}).get('error_code_names',{})
+    if actual_errors.get('type')!=9 or actual_errors.get('string_array_value')!=ERROR_CODE_NAMES:
+        raise RuntimeError('Actual recovery error_code_names mismatch')
     origin=manifest.get('deployment_source_snapshot',{}).get('origin')
     source=origin or manifest['source_repository_observation']
     if (source.get('commit',source.get('head'))!=commit or source.get('status') or

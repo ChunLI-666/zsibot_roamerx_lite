@@ -521,6 +521,7 @@ def prepare(args):
     if recovery:
         d['matrix_zero_handoff']={'ros__parameters':dict(use_sim_time=False,run_id=recovery['run_id'],raw_topic=recovery['raw_topic'])}
         d['bt_navigator']['ros__parameters']['plugin_lib_names']=['matrix_recovery_nodes']
+        d['bt_navigator']['ros__parameters']['error_code_names']=list(recovery_navigation.ERROR_CODE_NAMES)
     bt=out/'navigate.xml';bt.write_text(navigation_tree(args.variant,recovery))
     manifest['controller_recovery']=dict(enabled=recovery is not None,maximum_retries=1 if recovery else 0,policy='Measured checked zero and fresh continuous Odom stop, current-body original-goal replan, fenced release before FollowPath; no fixed delay')
     d['bt_navigator']['ros__parameters']['default_nav_to_pose_bt_xml']=str(bt)
