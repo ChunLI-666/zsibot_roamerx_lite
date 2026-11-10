@@ -58,7 +58,8 @@ class Fixture:
     def __init__(self,root,duration=1200.,with_b=False,actual=False):
         self.root=root;self.actual=actual
         if actual:
-            workspace=Path(os.environ.get('MATRIX_EVIDENCE_ROOT',str(HERE.parents[4])))
+            workspace=Path(os.environ['MATRIX_EVIDENCE_ROOT']) if os.environ.get('MATRIX_EVIDENCE_ROOT') else next(
+                (ancestor for ancestor in HERE.parents if (ancestor/'analysis_outputs').is_dir()),HERE)
             source=workspace/'analysis_outputs/planner_comparison_20261105/space_agent_recovery_20261110'
             evidence=source/'astra/reconcile_evidence_fix_v1'
             old=evidence/'A15_readonly/reconcile_000/state.copy.json'
