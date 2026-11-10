@@ -8,6 +8,7 @@ import math
 import os
 from pathlib import Path
 import sqlite3
+import resource
 import time
 import uuid
 
@@ -99,6 +100,8 @@ class MissionStore:
         self.path = Path(path).resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.locks = []
+        self.timing_sink=None
+        self.timing_drops=0
         try:
             # Caller supplies a stable resource lock shared across A/B missions.
             for lock in ([Path(resource)] if resource else [])+[self.path.with_suffix('.lock')]:
@@ -142,6 +145,28 @@ class MissionStore:
             raise Hold('Mission has not been created')
         return json.loads(row[0])
 
+    @contextmanager
+    def timing(self,stage):
+        """Observe caller blocking; never weaken durability or change transaction outcome."""
+        sink=self.timing_sink
+        if sink is None:
+            yield;return
+        start=time.monotonic_ns();unix=time.time_ns();cpu=time.thread_time_ns()
+        usage=resource.getrusage(resource.RUSAGE_THREAD);success=False
+        try:
+            yield;success=True
+        finally:
+            end=time.monotonic_ns();after=resource.getrusage(resource.RUSAGE_THREAD)
+            sample=dict(stage=stage,started_unix_ns=unix,finished_unix_ns=time.time_ns(),
+                started_steady_ns=start,finished_steady_ns=end,wall_ns=end-start,
+                thread_cpu_ns=time.thread_time_ns()-cpu,success=success,
+                thread_inblock_delta=after.ru_inblock-usage.ru_inblock,thread_oublock_delta=after.ru_oublock-usage.ru_oublock,
+                voluntary_context_switches=after.ru_nvcsw-usage.ru_nvcsw,
+                involuntary_context_switches=after.ru_nivcsw-usage.ru_nivcsw,
+                io_boundary='getrusage thread block-operation counters; not bytes or proof of device latency')
+            try:sink(sample)
+            except Exception:self.timing_drops+=1
+
     def create(self, route_raw, identity, policy, mission_id=None):
         validate_identity(identity)
         document = json.loads(route_raw); route = validate_route(document)
@@ -171,7 +196,7 @@ class MissionStore:
 
     @contextmanager
     def transaction(self, kind, expected=None, before_commit=None):
-        self.db.execute('BEGIN IMMEDIATE')
+        with self.timing(kind+':begin'):self.db.execute('BEGIN IMMEDIATE')
         try:
             state = self.state()
             if expected is not None and expected != state['revision']:
@@ -182,12 +207,13 @@ class MissionStore:
             state['updated'] = dict(unix_ns=time.time_ns(),boot_id=boot,boottime_sec=now)
             if state['budgets']['deadline_boot_id']==boot and state['budgets']['deadline_boottime_sec'] is not None:
                 state['budgets']['remaining_sec']=max(0.,state['budgets']['deadline_boottime_sec']-now)
-            self.db.execute('UPDATE mission SET revision=?,state=? WHERE id=1', (state['revision'],encoded(state)))
-            self.db.execute('INSERT INTO events(revision,kind,payload) VALUES (?,?,?)',
-                (state['revision'],kind,encoded(dict(attempt_id=(state.get('attempt') or {}).get('attempt_id'),
-                                                  progress=state['progress']['accepted_prefix_count'],time_ns=time.time_ns()))))
+            with self.timing(kind+':encode_and_write'):
+                self.db.execute('UPDATE mission SET revision=?,state=? WHERE id=1', (state['revision'],encoded(state)))
+                self.db.execute('INSERT INTO events(revision,kind,payload) VALUES (?,?,?)',
+                    (state['revision'],kind,encoded(dict(attempt_id=(state.get('attempt') or {}).get('attempt_id'),
+                                                      progress=state['progress']['accepted_prefix_count'],time_ns=time.time_ns()))))
             if before_commit is not None:before_commit(state)
-            self.db.execute('COMMIT')
+            with self.timing(kind+':commit'):self.db.execute('COMMIT')
         except BaseException:
             self.db.execute('ROLLBACK'); raise
 
@@ -428,7 +454,8 @@ class MissionStore:
 
     def export(self, output):
         path=Path(output);path.mkdir(parents=True,exist_ok=True)
-        state=self.state();atomic_json(path/'state.json',state)
+        state=self.state()
+        with self.timing('export_state:atomic_file_and_directory_fsync'):atomic_json(path/'state.json',state)
         result=dict(schema='matrix.mission.result.v1',mission_id=state['mission_id'],revision=state['revision'],
             lifecycle=state['lifecycle'],identity=state['identity'],progress=state['progress'],
             result_flags=state['result_flags'],attempts=state['attempts'],budgets=state['budgets'],
@@ -436,5 +463,5 @@ class MissionStore:
         result['identity_epoch_id']=state['identity_epoch_id']
         result['identity_policy_epochs']=state.get('identity_policy_epochs',[])
         result['continuation_authorizations']=state.get('continuation_authorizations',[])
-        atomic_json(path/'result.json',result)
+        with self.timing('export_result:atomic_file_and_directory_fsync'):atomic_json(path/'result.json',result)
         return state

@@ -142,6 +142,8 @@ def run_attempt(args, store, output, reconcile=False):
     old={n:signal.signal(n,lambda n,f:options.stop_signals.append(n)) for n in (signal.SIGINT,signal.SIGTERM)}
     try:
         node=WaypointPilot(options,output,state['route'],source_manifest,mission=session)
+        if callable(getattr(node,'emit',None)):
+            store.timing_sink=lambda sample:node.emit('mission_persistence_timing',request_id=args.request_id,**sample)
         if reconcile:
             attempt=state.get('attempt')
             if not attempt:raise Hold('No dispatch to reconcile')
@@ -184,6 +186,8 @@ def run_attempt(args, store, output, reconcile=False):
                 result['owned_goal_shutdown']=node.finalize_own_goal()
                 result['ordered']=node.ordered.summary()
                 result['final_measured_and_commanded_stop']=bool(node.stop_evidence and node.stop_evidence.get('observed'))
+                store.timing_sink=None  # Evidence writer closes below; terminal DB work follows it.
+                result['mission_persistence_timing_drops']=store.timing_drops
                 result['evidence_writer']=node.finish_evidence()
                 result['camera_recording_quality']=result['evidence_writer'].get('camera_recording_quality')
                 result['strict_scan_timing_status']='FAIL' if (node.strict_scan_latency_first_fault or node.scan_aging_episodes) else 'NO_STRICT_SCAN_FAULT_RECORDED'
