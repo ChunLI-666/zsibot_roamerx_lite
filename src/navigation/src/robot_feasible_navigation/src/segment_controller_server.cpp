@@ -803,6 +803,7 @@ void SegmentControllerServer::computeControl()
 
 void SegmentControllerServer::clearSegmentState()
 {
+  track_braking_ = TrackBraking::None;
   track_approach_pending_ = false;
   terminal_center_approach_pending_ = terminal_rotation_started_ = false;
   goal_binding_error_ = 0.;
@@ -884,6 +885,7 @@ void SegmentControllerServer::setPlannerPath(
 
 void SegmentControllerServer::installActiveSegment()
 {
+  track_braking_ = TrackBraking::None;
   track_approach_pending_ = false;
   terminal_center_approach_pending_ = false;
   if (!coordinator_.terminalRotationRun()) {terminal_rotation_started_ = false;}
@@ -1217,9 +1219,29 @@ void SegmentControllerServer::restoreOrderedSegment()
   publishSegmentStop();
 }
 
+void SegmentControllerServer::latchTrackBraking(
+  TrackBraking target, const geometry_msgs::msg::PoseStamped & pose,
+  const geometry_msgs::msg::Twist & measured)
+{
+  if (track_braking_ != TrackBraking::None || coordinator_.rotating() ||
+    terminal_rotation_active_ || coordinator_.stopped(measured)) {return;}
+  track_braking_ = target;
+  RCLCPP_INFO(get_logger(), "TRACK braking latched: target=%d segment=%zu path_stamp_ns=%lld "
+    "pose_stamp_ns=%lld actual=(%.6f,%.6f,%.6f) measured=(%.6f,%.6f,%.6f) requested=(0,0,0)",
+    static_cast<int>(target),coordinator_.index(),
+    static_cast<long long>(rclcpp::Time(current_path_.header.stamp).nanoseconds()),
+    static_cast<long long>(rclcpp::Time(pose.header.stamp).nanoseconds()),
+    pose.pose.position.x,pose.pose.position.y,SegmentCoordinator::yaw(pose.pose),
+    measured.linear.x,measured.linear.y,measured.angular.z);
+}
+
 void SegmentControllerServer::computeAndPublishVelocity()
 {
   if (final_stop_zero_this_cycle_) {return;}  // The checked final zero was already published.
+  if (track_braking_ != TrackBraking::None) {
+    publishSegmentStop();
+    return;  // Revalidation belongs to the measured-stop phase check.
+  }
   geometry_msgs::msg::PoseStamped pose;
 
   if (!getRobotPose(pose)) {
@@ -1238,7 +1260,8 @@ void SegmentControllerServer::computeAndPublishVelocity()
   }
 
   geometry_msgs::msg::Twist measured;
-  if (!measuredVelocity(measured) || segment_braking_ || rotation_anchor_waiting_ ||
+  if (!measuredVelocity(measured) || track_braking_ != TrackBraking::None ||
+    segment_braking_ || rotation_anchor_waiting_ ||
     !coordinator_.executionReady(measured))
   {
     publishSegmentStop();
@@ -1269,6 +1292,8 @@ void SegmentControllerServer::computeAndPublishVelocity()
       // A fresh pose can enter the center after the phase check. Stop this cycle;
       // the next ordinary phase check may admit FINAL with the same original goal.
       segment_braking_ = true;
+      latchTrackBraking(coordinator_.finalSegment() ? TrackBraking::TerminalRotation :
+        TrackBraking::OrderedHandoff, actual, measured);
       publishSegmentStop();
       return;
     }
@@ -1419,7 +1444,7 @@ void SegmentControllerServer::installPendingPlannerGoal(const Action::Goal & goa
     throw nav2_core::InvalidPath(e.what());
   }
   if (compatible && ((coordinator_.rotating() && !coordinator_.entryStopPending()) ||
-    terminal_rotation_active_ || terminal_braking_))
+    terminal_rotation_active_ || terminal_braking_ || track_braking_ != TrackBraking::None))
   {
     queued_path_ = goal.path;  // Preserve the unfinished angular phase and its measured progress.
     RCLCPP_DEBUG(get_logger(), "Queued compatible replan until the current rotation stops");
@@ -1496,7 +1521,7 @@ bool SegmentControllerServer::isGoalReached()
   const auto path_pose=toPathPose(actual);
   coordinator_.observe(path_pose.pose);
   const auto [xy_tolerance, yaw_tolerance] = originalGoalTolerances();
-  enforceTrackApproachRegion(path_pose, xy_tolerance);
+  if (track_braking_ == TrackBraking::None) {enforceTrackApproachRegion(path_pose, xy_tolerance);}
   geometry_msgs::msg::Twist measured;std::int64_t original_odom_stamp=0;
   if (!measuredVelocity(measured,&original_odom_stamp)) {
     resetFinalGoalStop();
@@ -1509,12 +1534,50 @@ bool SegmentControllerServer::isGoalReached()
   // remaining ordered progress before consulting even a stateful final checker.
   bool terminal_eligible = coordinator_.terminalWindowEligible(
     path_pose.pose, original_goal_->pose, xy_tolerance);
-  if ((terminal_rotation_active_ || terminal_braking_) && queued_path_) {
+  if ((terminal_rotation_active_ || terminal_braking_ || track_braking_ != TrackBraking::None) && queued_path_) {
     SegmentCoordinator pending(coordinator_.config());
     pending.setPath(executionInput(*queued_path_));
     pending.observe(path_pose.pose);
     terminal_eligible = terminal_eligible && pending.terminalWindowEligible(
       path_pose.pose, original_goal_->pose, xy_tolerance);
+  }
+
+  if (track_braking_ != TrackBraking::None) {
+    // Admission to braking is monotonic for this TRACK. A newer pose outside
+    // the center or a changing rotation sweep cannot re-arm translation while
+    // the downstream smoother/plant is still stopping.
+    segment_braking_ = true;
+    publishSegmentStop();
+    if (!coordinator_.stopped(measured)) {
+      resetFinalGoalStop();
+      if (!current_progress_checker_.empty() &&
+        !progress_checkers_[current_progress_checker_]->check(actual))
+      {throw nav2_core::FailedToMakeProgress("Failed to make progress while braking TRACK");}
+      return false;
+    }
+    bool compatible = false;
+    if (track_braking_ == TrackBraking::OriginalGoal) {
+      compatible = terminal_eligible && SegmentCoordinator::originalGoalGeometryReached(
+        path_pose.pose, original_goal_->pose, xy_tolerance, yaw_tolerance);
+    } else if (track_braking_ == TrackBraking::TerminalRotation) {
+      compatible = terminal_eligible && terminalCenterReached(path_pose, xy_tolerance) &&
+        rotationSweepFree(actual, *original_goal_);
+    } else {
+      compatible = intermediateSegmentReached(actual, path_pose, xy_tolerance);
+    }
+    RCLCPP_INFO(get_logger(), "TRACK braking measured stop: target=%d segment=%zu compatible=%d "
+      "pose_stamp_ns=%lld actual=(%.6f,%.6f,%.6f) measured=(%.6f,%.6f,%.6f) requested=(0,0,0)",
+      static_cast<int>(track_braking_),coordinator_.index(),static_cast<int>(compatible),
+      static_cast<long long>(rclcpp::Time(path_pose.header.stamp).nanoseconds()),
+      path_pose.pose.position.x,path_pose.pose.position.y,SegmentCoordinator::yaw(path_pose.pose),
+      measured.linear.x,measured.linear.y,measured.angular.z);
+    if (!compatible) {
+      throw nav2_core::NoValidControl(
+        "TRACK braking stopped at incompatible original handoff; fresh original-goal replan required");
+    }
+    track_braking_ = TrackBraking::None;
+    // Continue the normal original-goal and ordered-phase checks at this same
+    // measured stop. No planner/checker/progress state is reset here.
   }
 
   // Single NavigateToPose acceptance is the original user goal, not exhaustion of an
@@ -1526,6 +1589,7 @@ bool SegmentControllerServer::isGoalReached()
     // Only final original-goal acceptance changes. The coordinator's mandatory
     // prefix/segment stop remains authoritative and unchanged.
     segment_braking_=true;
+    latchTrackBraking(TrackBraking::OriginalGoal, path_pose, measured);
     const auto zero_command_stamp=publishFinalGoalStop(actual);
     const bool measured_stopped=OriginalGoalStopDwell::measuredStopped(
       measured.linear.x,measured.linear.y,measured.angular.z);
@@ -1580,6 +1644,7 @@ bool SegmentControllerServer::isGoalReached()
   if (terminal_eligible && sweep_free && !terminal_retry_blocked_ &&
     terminalCenterReached(path_pose, xy_tolerance)) {
     terminal_braking_ = segment_braking_ = true;
+    latchTrackBraking(TrackBraking::TerminalRotation, path_pose, measured);
     if (coordinator_.stopped(measured)) {
       coordinator_.executionReady(measured);
       activateTerminalRotation(path_pose);
@@ -1644,6 +1709,7 @@ bool SegmentControllerServer::isGoalReached()
   }
   if (!coordinator_.finalSegment()) {
     segment_braking_ = intermediateSegmentReached(actual, path_pose, xy_tolerance);
+    if (segment_braking_) {latchTrackBraking(TrackBraking::OrderedHandoff, path_pose, measured);}
     if (segment_braking_ && coordinator_.stopped(measured)) {
       if (queued_path_) {
         // This snapshot was generated DURING the completed turn. Its original start

@@ -318,6 +318,67 @@ TEST_F(ControllerPhase, SafeNextTurnStillRequiresMeasuredStopBeforeAdvance) {
   s->measured.linear.x=0.;ASSERT_FALSE(s->tick());EXPECT_EQ(s->segmentIndex(),1U);
   EXPECT_FALSE(s->repairPending());EXPECT_DOUBLE_EQ(s->controlXY(),.15);
 }
+TEST_F(ControllerPhase, A17CenterLossCannotRearmOldTrackWhileMeasuredMoving) {
+  s->centerEntry(.05);s->guardNextTurn(true);
+  s->actual=pose(.04,pi,s->ns);s->load(approach(s->ns));
+  s->measured.linear.x=.61;s->zeroCycle();
+  const int computes=s->sink->unexpected_compute;
+  const int resets=s->progress->resets;
+  // Original A17 ordering: center admitted zero, newer pose outside center,
+  // measured motion persists. Sweep loss also must not release the brake.
+  double elapsed=0.;
+  for(double xy : {.055,.070,.14,.18}) {
+    elapsed+=.05;s->time(elapsed);s->actual=pose(-xy,pi,s->ns);
+    s->sweep_free=false;s->zeroCycle();
+    EXPECT_EQ(s->sink->unexpected_compute,computes);
+    EXPECT_EQ(s->segmentIndex(),0U);EXPECT_FALSE(s->finalActive());
+  }
+  s->measured.linear.x=0.;
+  EXPECT_THROW(s->tick(),nav2_core::NoValidControl);
+  EXPECT_EQ(s->progress->resets,resets);
+}
+TEST_F(ControllerPhase, A17ComputeFirstCenterEntryLatchesThroughNextPhaseCheck) {
+  s->centerEntry(.05);s->guardNextTurn(true);s->blockShortcut();
+  s->actual=pose(.07,pi,s->ns);s->load(approach(s->ns));s->blockShortcut();
+  s->actual=pose(.18,pi,s->ns);ASSERT_FALSE(s->tick()); // Satisfy the original entry-stop barrier.
+  s->actual=pose(.07,pi,s->ns);
+  s->measured.linear.x=.4;ASSERT_FALSE(s->tick());
+  s->actual=pose(.02,pi,s->ns);s->emitSameCycle();
+  s->actual=pose(-.07,pi,s->ns);s->zeroCycle();
+  EXPECT_EQ(s->sink->unexpected_compute,0);EXPECT_EQ(s->segmentIndex(),0U);
+  s->measured.linear.x=0.;EXPECT_THROW(s->tick(),nav2_core::NoValidControl);
+}
+TEST_F(ControllerPhase, LatchedBrakeRetainsZeroAcrossStaleOdomAndCompatibleReplan) {
+  s->centerEntry(.05);s->guardNextTurn(true);
+  s->actual=pose(.02,pi,s->ns);s->load(approach(s->ns));
+  s->measured.linear.x=.4;s->zeroCycle();
+  s->odom_valid=false;s->actual=pose(-.06,pi,s->ns);s->zeroCycle();
+  s->time(.1);s->external(approach(s->ns));s->odom_valid=true;s->zeroCycle();
+  EXPECT_EQ(s->sink->unexpected_compute,0);EXPECT_EQ(s->segmentIndex(),0U);
+  s->measured.linear.x=0.;EXPECT_THROW(s->tick(),nav2_core::NoValidControl);
+}
+TEST_F(ControllerPhase, LatchedBrakeStoppedInsideCenterRechecksWholeTurn) {
+  s->centerEntry(.05);s->guardNextTurn(true);
+  s->actual=pose(.02,pi,s->ns);s->load(approach(s->ns));
+  s->measured.linear.x=.4;s->zeroCycle();
+  s->measured.linear.x=0.;s->sweep_free=false;
+  EXPECT_THROW(s->tick(),nav2_core::NoValidControl);
+  EXPECT_FALSE(s->finalActive());EXPECT_EQ(s->sink->unexpected_compute,0);
+}
+TEST_F(ControllerPhase, LatchedBrakeCompatibleStopAdmitsNormalFinalAndKeepsProgressBudget) {
+  s->centerEntry(.05);s->guardNextTurn(true);
+  s->actual=pose(.02,pi,s->ns);s->load(approach(s->ns));
+  s->measured.linear.x=.4;s->zeroCycle();const int resets=s->progress->resets;
+  s->measured.linear.x=0.;ASSERT_FALSE(s->tick());
+  EXPECT_TRUE(s->finalActive());EXPECT_EQ(s->progress->resets,resets);
+}
+TEST_F(ControllerPhase, LatchedTrackBrakeCannotExtendOriginalProgressDeadline) {
+  s->centerEntry(.05);s->guardNextTurn(true);
+  s->actual=pose(.02,pi,s->ns);s->load(approach(s->ns));
+  s->measured.linear.x=.4;s->zeroCycle();
+  s->time(10.1);EXPECT_THROW(s->zeroCycle(),nav2_core::FailedToMakeProgress);
+  EXPECT_EQ(s->sink->unexpected_compute,0);
+}
 TEST_F(ControllerPhase, SameCycleFreshPoseCannotBypassUnsafeNextTurnGate) {
   s->guardNextTurn(true);s->actual=pose(-.2,0,s->ns);s->load(microTrack(s->ns));s->sweep_free=false;
   ASSERT_FALSE(s->tick());EXPECT_FALSE(s->repairPending());
@@ -337,12 +398,13 @@ TEST_F(ControllerPhase, TemporaryClearanceDuringBrakingDoesNotEraseRepairBound) 
   s->actual=pose(.18,0,s->ns);s->measured.linear.x=0.;
   EXPECT_THROW(s->tick(),nav2_core::NoValidControl);EXPECT_EQ(s->segmentIndex(),0U);
 }
-TEST_F(ControllerPhase, FreshPoseOutsideRepairBoundCannotHideBehindSameCycleBrakingZero) {
+TEST_F(ControllerPhase, AcceptedBrakingKeepsZeroOutsideRepairBoundUntilMeasuredStop) {
   s->guardNextTurn(true);s->actual=pose(0,0,s->ns);s->load(microTrack(s->ns));s->sweep_free=false;s->tick();
   s->sweep_free=true;s->measured.linear.x=.1;s->tick();
   const int zeros=s->zeros;s->actual=pose(.18,0,s->ns);
-  EXPECT_THROW(s->emitSameCycle(),nav2_core::NoValidControl);
-  EXPECT_EQ(s->zeros,zeros);EXPECT_EQ(s->segmentIndex(),0U);EXPECT_TRUE(s->repairPending());
+  EXPECT_NO_THROW(s->emitSameCycle());
+  EXPECT_EQ(s->zeros,zeros+1);EXPECT_EQ(s->segmentIndex(),0U);EXPECT_TRUE(s->repairPending());
+  s->measured.linear.x=0.;EXPECT_THROW(s->tick(),nav2_core::NoValidControl);
 }
 TEST_F(ControllerPhase, DisabledGuardKeepsExistingSubFiveMillimeterConfiguration) {
   ASSERT_NO_THROW(s->configurePhaseXY(.001,false));

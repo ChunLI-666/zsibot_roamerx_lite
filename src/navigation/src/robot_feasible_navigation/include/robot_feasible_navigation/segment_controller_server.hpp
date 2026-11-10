@@ -297,6 +297,10 @@ protected:
   std::unique_ptr<nav2_core::GoalChecker> intermediate_goal_checker_;
   std::optional<nav_msgs::msg::Path> queued_path_;
   bool segment_braking_{false};
+  enum class TrackBraking {None, OrderedHandoff, TerminalRotation, OriginalGoal};
+  TrackBraking track_braking_{TrackBraking::None};
+  void latchTrackBraking(TrackBraking target,
+    const geometry_msgs::msg::PoseStamped & pose, const geometry_msgs::msg::Twist & measured);
   std::optional<geometry_msgs::msg::PoseStamped> original_goal_;
   bool terminal_braking_{false};
   bool terminal_rotation_active_{false};
