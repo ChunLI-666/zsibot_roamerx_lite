@@ -2,6 +2,7 @@
 """Explicit durable native FollowWaypoints entry. inspect/import require no ROS."""
 import argparse
 import copy
+from collections import deque
 import hashlib
 import json
 import os
@@ -68,6 +69,8 @@ class Session:
         state = store.state()
         self.start_index = state['progress']['next_index']
         self.action_uuid = None
+        self.send_invoked=False
+        self.pending_visits=deque();self.last_visit_key=None;self.storage_failure=None
 
     def ordered(self, route):
         prefix = [copy.deepcopy(r['visit']) for r in self.store.state()['progress']['accepted_receipts']]
@@ -92,18 +95,43 @@ class Session:
             raise Hold('FAILED_BUDGET: mission deadline expired')
 
     def reserve(self):
-        attempt=self.store.reserve(self.request_id,self.output)
-        self.action_uuid=uuid.UUID(attempt['parent_action_uuid'])
-        self.store.export(self.output.parent)
+        try:
+            if hasattr(self.store,'call'):
+                self.store.call('reserve',self.request_id,self.output,output=self.output.parent)
+            else:
+                self.store.reserve(self.request_id,self.output);self.store.export(self.output.parent)
+        finally:
+            # Even export/pump failure after COMMIT retains this operation's UUID.
+            attempt=self.store.state().get('attempt') or {}
+            if attempt.get('request_id')==self.request_id and attempt.get('output')==str(self.output.resolve()):
+                self.action_uuid=uuid.UUID(attempt['parent_action_uuid'])
         return self.action_uuid
 
     def acknowledge(self, accepted):
-        self.store.acknowledge(str(self.action_uuid),accepted)
-        self.store.export(self.output.parent)
+        if hasattr(self.store,'call'):
+            self.store.call('acknowledge',str(self.action_uuid),accepted,output=self.output.parent)
+        else:
+            self.store.acknowledge(str(self.action_uuid),accepted);self.store.export(self.output.parent)
+        self.drain()
 
-    def observe(self, ordered):
-        if self.action_uuid and self.store.observe(str(self.action_uuid),ordered):
-            self.store.export(self.output.parent)
+    def observe(self, ordered, *, defer=False):
+        if not self.action_uuid or ordered.active is None:return
+        key=(ordered.active,tuple((v['index'],digest(v['passed'])) for v in ordered.visits if v.get('passed') is not None))
+        if key!=self.last_visit_key:
+            if len(self.pending_visits)>=64:raise Hold('Critical visit storage queue overflow')
+            self.pending_visits.append(copy.deepcopy(ordered));self.last_visit_key=key
+        if not defer:self.drain()
+
+    def drain(self):
+        if self.storage_failure is not None:raise Hold('Prior storage checkpoint failed') from self.storage_failure
+        while self.pending_visits:
+            ordered=self.pending_visits[0]
+            try:
+                if hasattr(self.store,'call'):
+                    self.store.call('observe',str(self.action_uuid),ordered,output=self.output.parent,export_if_changed=True)
+                elif self.store.observe(str(self.action_uuid),ordered):self.store.export(self.output.parent)
+            except BaseException as error:self.storage_failure=error;raise
+            self.pending_visits.popleft()
 
 
 def runtime_args(args, output, state):
@@ -142,6 +170,7 @@ def run_attempt(args, store, output, reconcile=False):
     old={n:signal.signal(n,lambda n,f:options.stop_signals.append(n)) for n in (signal.SIGINT,signal.SIGTERM)}
     try:
         node=WaypointPilot(options,output,state['route'],source_manifest,mission=session)
+        if hasattr(store,'pump'):store.pump=getattr(node,'pump_storage_wait',None)
         if callable(getattr(node,'emit',None)):
             store.timing_sink=lambda sample:node.emit('mission_persistence_timing',request_id=args.request_id,**sample)
         if reconcile:
@@ -184,6 +213,10 @@ def run_attempt(args, store, output, reconcile=False):
         try:
             if node is not None:
                 result['owned_goal_shutdown']=node.finalize_own_goal()
+                try:session.drain()
+                except Exception as error:
+                    result['storage_checkpoint_error']=dict(type=type(error).__name__,message=str(error))
+                if hasattr(store,'pump'):store.pump=None
                 result['ordered']=node.ordered.summary()
                 result['final_measured_and_commanded_stop']=bool(node.stop_evidence and node.stop_evidence.get('observed'))
                 store.flush_state_read_timing('attempt_finalization')
@@ -193,7 +226,11 @@ def run_attempt(args, store, output, reconcile=False):
                 result['camera_recording_quality']=result['evidence_writer'].get('camera_recording_quality')
                 result['strict_scan_timing_status']='FAIL' if (node.strict_scan_latency_first_fault or node.scan_aging_episodes) else 'NO_STRICT_SCAN_FAULT_RECORDED'
                 result['children_quiescent']=children
-                result['goals_sent']=int(session.action_uuid is not None and not reconcile)
+                result['goals_sent']=int(session.send_invoked and not reconcile)
+                result['send_goal_async_invoked']=bool(session.send_invoked)
+                if session.action_uuid and not reconcile and not session.send_invoked:
+                    result.update(status=None,error_code=None,missed_waypoints=None,
+                        dispatch_state='NOT_SENT_AFTER_INTENT')
                 result['stop_signals']=options.stop_signals
                 result['operator_cancel_requested']=args.operation=='cancel'
                 result['finished_ns']=time.time_ns()
@@ -209,7 +246,10 @@ def run_attempt(args, store, output, reconcile=False):
                     result.setdefault('action_uuid',str(session.action_uuid))
                 atomic_json(output/'native_result.json',json.loads(evidence_json(result)))
                 if session.action_uuid:
-                    store.finish_attempt(result,children,result_path=output/'native_result.json')
+                    if not reconcile and not session.send_invoked:
+                        store.record_not_sent(str(session.action_uuid),result_path=output/'native_result.json',send_invoked=False)
+                    elif not result.get('storage_checkpoint_error'):
+                        store.finish_attempt(result,children,result_path=output/'native_result.json')
         finally:
             try:
                 if node is not None:node.destroy_node()
@@ -262,7 +302,10 @@ def main(argv=None):
             operation_outcome='VALIDATED_ONLY',goals_sent=0,reason='--execute absent; no store opened or reservation made')))
         return 0
     args.output=args.output.resolve()
-    store=MissionStore(args.store,args.resource_lock)
+    if args.operation in ('start','resume','reconcile','cancel'):
+        from mission_storage import StorageWorker
+        store=StorageWorker(args.store,args.resource_lock)
+    else:store=MissionStore(args.store,args.resource_lock)
     try:
         arguments={k:str(v) if isinstance(v,Path) else v for k,v in vars(args).items()}
         arguments['input_sha256']={key:digest(getattr(args,key).read_bytes()) for key in
@@ -301,6 +344,8 @@ def main(argv=None):
         else:
             if not args.ready:raise ValueError('--ready required for ROS operations')
             attempt=store.state().get('attempt')
+            if attempt and attempt.get('dispatch_state')=='NOT_SENT_AFTER_INTENT':
+                raise Hold('NOT_SENT_AFTER_INTENT: no automatic cross-operation dispatch')
             if attempt and not attempt.get('terminal_confirmed'):
                 run_attempt(args,store,args.output/'reconcile',reconcile=True)
                 attempt=store.state()['attempt']
@@ -319,6 +364,7 @@ def main(argv=None):
                     if s['result_flags']['operational_complete']:outcome='COMPLETED';code=0;break
                     if s['lifecycle']=='NEEDS_TASK_DECISION':outcome='NEEDS_TASK_DECISION';code=14;break
                     if s['lifecycle']=='CANCELED':outcome='CANCELED';code=11;break
+                    if s['lifecycle']=='HOLD':break
                     if result.get('cancel_reason') in ('scheduled_cancel','pilot_interrupted') or result.get('stop_signals'):
                         outcome='CANCELED';code=11;break
                     a=s.get('attempt') or {}

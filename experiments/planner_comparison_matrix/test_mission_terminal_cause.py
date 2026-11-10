@@ -47,6 +47,8 @@ class CauseTests(unittest.TestCase):
         self.finish(dict(operator_cancel_requested=True));s=self.store.state()
         self.assertEqual(s['lifecycle'],'CANCELED')
         self.assertTrue(s['attempt']['terminal_authority']['cancel_reason'].startswith('input_became_invalid:'))
+        self.finish()
+        self.assertEqual(self.store.state()['lifecycle'],'CANCELED')
     def test_unknown_cancel_remains_hold(self):
         self.finish();a=self.store.reserve(str(uuid.uuid4()),self.root/'next')
         r=observation(a['parent_action_uuid'],True);p=self.root/'unknown.json';atomic_json(p,r)
@@ -57,6 +59,15 @@ class CauseTests(unittest.TestCase):
         before=self.store.state()
         with self.assertRaisesRegex(Hold,'binding'):self.finish()
         self.assertEqual(self.store.state(),before)
+    def test_native_missed_index_code_match_does_not_require_optional_observer_goal_copy(self):
+        self.finish();a=self.store.reserve(str(uuid.uuid4()),self.root/'next')
+        original=observation(a['parent_action_uuid'],False)
+        original.update(status=6,missed_waypoints=[dict(index=0,error_code=106,goal=dict(frame_id='map',x=0.,y=0.))])
+        p=self.root/'aborted.json';atomic_json(p,original);self.store.finish_attempt(original,True,result_path=p)
+        later=observation(a['parent_action_uuid'],True);later.update(status=6,missed_waypoints=[dict(index=0,error_code=106)])
+        q=self.root/'aborted_stop.json';atomic_json(q,later);self.store.finish_attempt(later,True,result_path=q)
+        self.assertEqual(self.store.state()['lifecycle'],'RECOVERABLE_FAILURE')
+        self.assertEqual(self.store.state()['attempt']['terminal_authority']['evidence']['path'],str(p))
 
 class A16Tests(unittest.TestCase):
     def test_sealed_a16_real_store_and_real_cli_reconciliation(self):

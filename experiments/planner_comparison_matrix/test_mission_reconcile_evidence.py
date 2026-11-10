@@ -41,10 +41,14 @@ def cli_fixture():
     transport=ModuleType('waypoint_batch');transport.freeze_sources=lambda *args:{}
     class Pilot:
         def __init__(self,options,output,route,source_manifest,mission):
+            self.mission=mission
             self.ordered=mission.ordered(route);self.stop_evidence=sample['owned_goal_shutdown']['stop']
             self.strict_scan_latency_first_fault=None;self.scan_aging_episodes=[]
             self.latest_ready={};self.recovery_handoffs=[]
         def run_batch(self):
+            if sample.get('fixture_unsent_start'):
+                self.mission.reserve()
+                return dict(status=None,classification='fixture_post_intent_health_not_restored')
             raise AssertionError('Reconciliation must never send a new goal')
         def cancel_own(self,reason):
             trace['cancelled_uuids'].append(str(uuid.UUID(bytes=self.owned_identity.value)))

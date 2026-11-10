@@ -97,7 +97,7 @@ class MissionTests(unittest.TestCase):
         source=HERE/'goal_pilot_source'
         ready=dict(variant='official',recovery_runtime=dict(verified=True),mission_identity=dict(self.identity,verified=True),
             waypoint_contract=dict(mission_resume=dict(schema='matrix.mission.resume_capability.v1',bt_retries=1,
-            client_sources_sha256={n:digest((source/n).read_bytes()) for n in ('mission_state.py','mission_resume.py','mission_continuation.py')})))
+            client_sources_sha256={n:digest((source/n).read_bytes()) for n in ('mission_state.py','mission_resume.py','mission_continuation.py','mission_storage.py')})))
         session.validate_ready(ready)
         for key in ('source_sha','effective_config_sha256','map_contract_sha256','footprint_sha256'):
             altered=copy.deepcopy(ready);altered['mission_identity'][key]='c'*len(self.identity[key])
