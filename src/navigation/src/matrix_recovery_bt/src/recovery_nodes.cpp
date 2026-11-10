@@ -21,6 +21,7 @@
 #include <nav2_costmap_2d/footprint.hpp>
 #include "robot_feasible_navigation/footprint_sweep.hpp"
 #include "matrix_recovery_bt/stop_barrier.hpp"
+#include "matrix_recovery_bt/wait_diagnostics.hpp"
 #include "matrix_recovery_bt/srv/recovery_handoff.hpp"
 
 namespace matrix_recovery_bt {
@@ -35,6 +36,12 @@ static double yaw(const geometry_msgs::msg::Pose & p) {
     1-2*(p.orientation.y*p.orientation.y+p.orientation.z*p.orientation.z));
 }
 static double angle(double a,double b) {return std::atan2(std::sin(a-b),std::cos(a-b));}
+static std::string poseDiagnostic(const geometry_msgs::msg::PoseStamped & p) {
+  std::ostringstream s;s<<"{\"frame\":"<<jsonText(p.header.frame_id)<<",\"stamp_ns\":"<<rclcpp::Time(p.header.stamp).nanoseconds()
+    <<",\"xyz\":["<<jsonNumber(p.pose.position.x)<<','<<jsonNumber(p.pose.position.y)<<','<<jsonNumber(p.pose.position.z)
+    <<"],\"quaternion_xyzw\":["<<jsonNumber(p.pose.orientation.x)<<','<<jsonNumber(p.pose.orientation.y)<<','
+    <<jsonNumber(p.pose.orientation.z)<<','<<jsonNumber(p.pose.orientation.w)<<"],\"yaw\":"<<jsonNumber(yaw(p.pose))<<'}';return s.str();
+}
 
 struct Inputs {
   rclcpp::Node::SharedPtr node;
@@ -62,6 +69,14 @@ struct Inputs {
   double scan_age=.3;
   Footprint footprint;
   geometry_msgs::msg::PoseStamped planned_start;
+  WaitCounters diagnostics;
+  std::uint64_t map_sequence=0,map_requests=0,map_responses=0,collision_map_sequence=0;
+  std::int64_t map_requested=0,map_responded=0,collision_checked=0;
+  const char * map_source="none";
+  std::string last_tf_frame,last_exception;
+  geometry_msgs::msg::PoseStamped last_body,collision_body;
+  bool body_observed=false,collision_free=false;
+  nav2_msgs::msg::Costmap::ConstSharedPtr collision_map;
 
   explicit Inputs(const BT::TreeNode & owner) {
     node=owner.config().blackboard->get<rclcpp::Node::SharedPtr>("node");
@@ -90,6 +105,7 @@ struct Inputs {
     subs.push_back(node->create_subscription<nav2_msgs::msg::Costmap>("/local_costmap/costmap_raw",
       rclcpp::QoS(1).reliable().transient_local(),[this](nav2_msgs::msg::Costmap::ConstSharedPtr v) {
         std::lock_guard<std::mutex> l(mutex);map=v;map_receive=steady();
+        ++map_sequence;map_source="raw_topic";
       },options));
     subs.push_back(node->create_subscription<geometry_msgs::msg::Twist>("/cmd_vel_safe",10,
       [this](geometry_msgs::msg::Twist::ConstSharedPtr v) {
@@ -120,11 +136,12 @@ struct Inputs {
     // stopped; never pretend a publication is a fresh sensor sample.
     map_timer=node->create_wall_timer(std::chrono::milliseconds(100),[this] {
       if (map_pending || !map_client->service_is_ready()) {return;}
-      map_pending=true;
+      {std::lock_guard<std::mutex> l(mutex);map_pending=true;++map_requests;map_requested=steady();}
       map_client->async_send_request(std::make_shared<nav2_msgs::srv::GetCostmap::Request>(),
         [this](rclcpp::Client<nav2_msgs::srv::GetCostmap>::SharedFuture f) {
           std::lock_guard<std::mutex> l(mutex);map_pending=false;
           map=std::make_shared<nav2_msgs::msg::Costmap>(f.get()->map);map_receive=steady();
+          ++map_sequence;++map_responses;map_responded=steady();map_source="GetCostmap";
         });
     },group);
     executor.add_callback_group(group,node->get_node_base_interface());
@@ -142,13 +159,17 @@ struct Inputs {
     return recent(safe_receive) && std::isfinite(safe.linear.x) && std::isfinite(safe.linear.y) &&
       std::isfinite(safe.angular.z) && std::hypot(safe.linear.x,safe.linear.y)<=.01 && std::abs(safe.angular.z)<=.01;
   }
-  bool basicHealthy() const {
-    return !follow_active && odom && odom->header.frame_id=="odom" && odom->child_frame_id=="base_link" &&
-      stampFresh(odom->header.stamp) && recent(odom_receive) && normal && valid &&
-      recent(loc_receive,.2) && recent(valid_receive,.2) && scan && stampFresh(scan->header.stamp,scan_age) &&
-      recent(scan_receive,scan_age) && safeStopped();
+  bool basicHealthy() {
+    return diagnostics.check(!follow_active,Reject::FollowActive) && diagnostics.check(bool(odom),Reject::OdomMissing) &&
+      diagnostics.check(odom->header.frame_id=="odom" && odom->child_frame_id=="base_link",Reject::OdomFrame) &&
+      diagnostics.check(stampFresh(odom->header.stamp),Reject::OdomStamp) && diagnostics.check(recent(odom_receive),Reject::OdomReceive) &&
+      diagnostics.check(normal,Reject::Localization) && diagnostics.check(valid,Reject::PoseValid) &&
+      diagnostics.check(recent(loc_receive,.2),Reject::LocalizationReceive) && diagnostics.check(recent(valid_receive,.2),Reject::ValidReceive) &&
+      diagnostics.check(bool(scan),Reject::ScanMissing) && diagnostics.check(stampFresh(scan->header.stamp,scan_age),Reject::ScanStamp) &&
+      diagnostics.check(recent(scan_receive,scan_age),Reject::ScanReceive) && diagnostics.check(safeStopped(),Reject::SafeCommand);
   }
   geometry_msgs::msg::PoseStamped body(const std::string & frame) {
+    last_tf_frame=frame;
     auto t=tf->lookupTransform(frame,"base_link",tf2::TimePointZero);
     if (!stampFresh(t.header.stamp)) {throw std::runtime_error("stale body TF");}
     geometry_msgs::msg::PoseStamped p;p.header=t.header;p.pose.position.x=t.transform.translation.x;
@@ -160,36 +181,110 @@ struct Inputs {
       throw std::runtime_error("nonfinite body");
     }
     if (!std::isfinite(norm)||std::abs(norm-1.)>.01) {throw std::runtime_error("invalid body quaternion");}
-    return p;
+    last_body=p;body_observed=true;return p;
   }
   bool certified(const nav_msgs::msg::Path * path=nullptr) {
     using namespace robot_feasible_navigation;
-    if (!basicHealthy() || !map || !recent(map_receive) || !stampFresh(map->header.stamp)) {return false;}
+    if (!basicHealthy() || !diagnostics.check(bool(map),Reject::MapMissing) ||
+      !diagnostics.check(recent(map_receive),Reject::MapReceive) ||
+      !diagnostics.check(stampFresh(map->header.stamp),Reject::MapStamp)) {return false;}
     const auto & m=map->metadata;
     if (!m.size_x||!m.size_y||!std::isfinite(m.resolution)||m.resolution<=0 ||
       m.size_x>10000 || m.size_y>10000 || map->data.size()!=std::size_t(m.size_x)*m.size_y ||
-      !std::isfinite(m.origin.position.x)||!std::isfinite(m.origin.position.y)) {return false;}
+      !std::isfinite(m.origin.position.x)||!std::isfinite(m.origin.position.y)) {diagnostics.check(false,Reject::MapMetadata);return false;}
     if (std::abs(m.origin.orientation.x)>1e-6 || std::abs(m.origin.orientation.y)>1e-6 ||
-      std::abs(m.origin.orientation.z)>1e-6 || std::abs(m.origin.orientation.w-1)>1e-6) {return false;}
+      std::abs(m.origin.orientation.z)>1e-6 || std::abs(m.origin.orientation.w-1)>1e-6) {diagnostics.check(false,Reject::MapOrientation);return false;}
     auto actual=body(map->header.frame_id);
     nav2_costmap_2d::Costmap2D cost(m.size_x,m.size_y,m.resolution,m.origin.position.x,m.origin.position.y);
     std::copy(map->data.begin(),map->data.end(),cost.getCharMap());
-    if (!sweep::commandSweepFree(cost,footprint,actual.pose.position.x,actual.pose.position.y,
-      yaw(actual.pose),0,0,1.)) {return false;}
+    const bool free=sweep::commandSweepFree(cost,footprint,actual.pose.position.x,actual.pose.position.y,
+      yaw(actual.pose),0,0,1.);
+    collision_map=map;collision_body=actual;collision_map_sequence=map_sequence;collision_checked=steady();collision_free=free;
+    if (!diagnostics.check(free,Reject::BodyCollision)) {return false;}
     if (!path) {return true;}
-    if (path->poses.empty() || path->header.frame_id!="map") {return false;}
+    if (!diagnostics.check(!path->poses.empty(),Reject::PathMissing) ||
+      !diagnostics.check(path->header.frame_id=="map",Reject::PathFrame)) {return false;}
     auto current=body("map");
     if (std::hypot(current.pose.position.x-planned_start.pose.position.x,
       current.pose.position.y-planned_start.pose.position.y)>.03 ||
-      std::abs(angle(yaw(current.pose),yaw(planned_start.pose)))>.08) {return false;}
+      std::abs(angle(yaw(current.pose),yaw(planned_start.pose)))>.08) {diagnostics.check(false,Reject::BodyDrift);return false;}
     auto first=path->poses.front();first.header.frame_id=path->header.frame_id;
     // Transform a derived intent pose at current TF, never rewrite a sample header.
     first.header.stamp=actual.header.stamp;
     auto local=tf->transform(first,map->header.frame_id);
     if (std::hypot(local.pose.position.x-actual.pose.position.x,local.pose.position.y-actual.pose.position.y)>.05 ||
-      std::abs(angle(yaw(local.pose),yaw(actual.pose)))>.25) {return false;}
-    return sweep::sweepFree(cost,footprint,actual.pose.position.x,actual.pose.position.y,yaw(actual.pose),
-      local.pose.position.x,local.pose.position.y,yaw(local.pose));
+      std::abs(angle(yaw(local.pose),yaw(actual.pose)))>.25) {diagnostics.check(false,Reject::PathStart);return false;}
+    return diagnostics.check(sweep::sweepFree(cost,footprint,actual.pose.position.x,actual.pose.position.y,yaw(actual.pose),
+      local.pose.position.x,local.pose.position.y,yaw(local.pose)),Reject::PathSweep);
+  }
+  // Called at most once/second while waiting, plus a terminal failure snapshot.
+  // No extra TF lookup, sensor publication, map copy, filesystem write or guard evaluation.
+  std::string snapshot(const char * event,const char * phase,std::int64_t started,std::int64_t stable,
+    double timeout,double health_stable) const {
+    const auto now=steady(),ros_now=node->now().nanoseconds();const auto b=barrier.diagnostic();
+    auto age=[now](std::int64_t receipt){return receipt?jsonNumber((now-receipt)/1e9):"null";};
+    auto header=[ros_now](const builtin_interfaces::msg::Time & stamp){
+      auto ns=rclcpp::Time(stamp).nanoseconds();return "{\"stamp_ns\":"+std::to_string(ns)+",\"age_sec\":"+jsonNumber((ros_now-ns)/1e9)+"}";};
+    auto twist=[](const geometry_msgs::msg::Twist & v){return '['+jsonNumber(v.linear.x)+','+jsonNumber(v.linear.y)+','+jsonNumber(v.angular.z)+']';};
+    std::ostringstream s;s<<std::boolalpha<<"{\"schema\":\"matrix.recovery.wait_diagnostic.v1\",\"event\":"<<jsonText(event)
+      <<",\"phase\":"<<jsonText(phase)<<",\"run_id\":"<<jsonText(run)<<",\"epoch\":"<<epoch
+      <<",\"ros_now_ns\":"<<ros_now<<",\"steady_now_ns\":"<<now<<",\"elapsed_sec\":"<<jsonNumber((now-started)/1e9)
+      <<",\"timeout_sec\":"<<jsonNumber(timeout)<<",\"health_stable_required_sec\":"<<jsonNumber(health_stable)
+      <<",\"health_stable_elapsed_sec\":"<<(stable?jsonNumber((now-stable)/1e9):"0")
+      <<",\"last_rejection\":"<<jsonText(diagnostics.last)<<",\"rejections\":{";
+    bool first=true;for(std::size_t i=0;i<diagnostics.rejected.size();++i) {
+      if (!diagnostics.rejected[i]) {continue;}if(!first){s<<',';}first=false;
+      s<<jsonText(reject_names[i])<<':'<<diagnostics.rejected[i];
+    }
+    s<<"},\"follow_active\":"<<follow_active<<",\"odom\":";
+    if(odom){s<<"{\"frame\":"<<jsonText(odom->header.frame_id)<<",\"child_frame\":"<<jsonText(odom->child_frame_id)
+      <<",\"source\":"<<header(odom->header.stamp)<<",\"receive_age_sec\":"<<age(odom_receive)<<",\"twist_xy_wz\":"<<twist(odom->twist.twist)<<'}';}else{s<<"null";}
+    s<<",\"scan\":";
+    if(scan){s<<"{\"frame\":"<<jsonText(scan->header.frame_id)<<",\"source\":"<<header(scan->header.stamp)
+      <<",\"receive_age_sec\":"<<age(scan_receive)<<",\"max_age_sec\":"<<jsonNumber(scan_age)<<'}';}else{s<<"null";}
+    s<<",\"normal\":"<<normal<<",\"pose_valid\":"<<valid<<",\"localization_receive_age_sec\":"<<age(loc_receive)
+      <<",\"valid_receive_age_sec\":"<<age(valid_receive)<<",\"safe_command\":{\"receive_age_sec\":"<<age(safe_receive)
+      <<",\"xy_wz\":"<<twist(safe)<<"},\"stop_dwell\":{\"armed\":"<<b.armed<<",\"qualified\":"<<b.qualified
+      <<",\"advancing_and_bounded\":"<<b.advancing_and_bounded<<",\"last_sample_healthy\":"<<b.healthy
+      <<",\"samples_total\":"<<b.samples<<",\"zero_source_ns\":"<<b.zero_source<<",\"zero_steady_ns\":"<<b.zero_steady
+      <<",\"first_source_ns\":"<<b.first_source<<",\"last_source_ns\":"<<b.last_source
+      <<",\"first_steady_ns\":"<<b.first_steady<<",\"last_steady_ns\":"<<b.last_steady
+      <<",\"source_span_sec\":"<<(b.first_source?jsonNumber((b.last_source-b.first_source)/1e9):"0")
+      <<",\"receive_span_sec\":"<<(b.first_steady?jsonNumber((b.last_steady-b.first_steady)/1e9):"0")
+      <<",\"last_receive_age_sec\":"<<age(b.last_steady)<<"},\"tf\":{\"last_requested_frame\":"<<jsonText(last_tf_frame)
+      <<",\"last_exception\":"<<jsonText(last_exception)<<",\"last_valid_body\":"<<(body_observed?poseDiagnostic(last_body):"null")
+      <<"},\"map\":{\"source\":"<<jsonText(map_source)<<",\"sequence\":"<<map_sequence<<",\"receive_age_sec\":"<<age(map_receive)
+      <<",\"rpc_pending\":"<<map_pending<<",\"rpc_requests\":"<<map_requests<<",\"rpc_responses\":"<<map_responses
+      <<",\"rpc_request_age_sec\":"<<age(map_requested)<<",\"rpc_response_age_sec\":"<<age(map_responded);
+    if(map){const auto & m=map->metadata;s<<",\"frame\":"<<jsonText(map->header.frame_id)<<",\"source_header\":"<<header(map->header.stamp)
+      <<",\"size_xy\":["<<m.size_x<<','<<m.size_y<<"],\"data_size\":"<<map->data.size()<<",\"resolution\":"<<jsonNumber(m.resolution)
+      <<",\"origin_xyz\":["<<jsonNumber(m.origin.position.x)<<','<<jsonNumber(m.origin.position.y)<<','<<jsonNumber(m.origin.position.z)
+      <<"],\"origin_quaternion_xyzw\":["<<jsonNumber(m.origin.orientation.x)<<','<<jsonNumber(m.origin.orientation.y)<<','
+      <<jsonNumber(m.origin.orientation.z)<<','<<jsonNumber(m.origin.orientation.w)<<']';}
+    s<<"},\"last_body_collision_check\":";
+    if(collision_map) {
+      const auto & m=collision_map->metadata;std::uint64_t unknown=0,lethal=0;
+      for(auto value:collision_map->data){unknown+=value==255;lethal+=value==254;}
+      s<<"{\"map_sequence\":"<<collision_map_sequence<<",\"checked_age_sec\":"<<age(collision_checked)
+        <<",\"map_frame\":"<<jsonText(collision_map->header.frame_id)<<",\"map_source_header\":"<<header(collision_map->header.stamp)
+        <<",\"body\":"<<poseDiagnostic(collision_body)<<",\"full_body_free\":"<<collision_free
+        <<",\"map_unknown_cells\":"<<unknown<<",\"map_lethal_cells\":"<<lethal;
+      double minx=INFINITY,miny=INFINITY,maxx=-INFINITY,maxy=-INFINITY;
+      const auto heading=yaw(collision_body.pose);for(const auto & p:footprint){
+        const auto x=collision_body.pose.position.x+std::cos(heading)*p.x-std::sin(heading)*p.y;
+        const auto y=collision_body.pose.position.y+std::sin(heading)*p.x+std::cos(heading)*p.y;
+        minx=std::min(minx,x);maxx=std::max(maxx,x);miny=std::min(miny,y);maxy=std::max(maxy,y);}
+      const auto clamp_index=[](double v,unsigned int size){return static_cast<unsigned int>(std::clamp(v,0.,double(size-1)));};
+      const auto x0=clamp_index(std::floor((minx-m.origin.position.x)/m.resolution)-1,m.size_x);
+      const auto x1=clamp_index(std::floor((maxx-m.origin.position.x)/m.resolution)+1,m.size_x);
+      const auto y0=clamp_index(std::floor((miny-m.origin.position.y)/m.resolution)-1,m.size_y);
+      const auto y1=clamp_index(std::floor((maxy-m.origin.position.y)/m.resolution)+1,m.size_y);
+      std::uint64_t u=0,l=0;for(auto y=y0;y<=y1;++y){for(auto x=x0;x<=x1;++x){auto v=collision_map->data[std::size_t(y)*m.size_x+x];u+=v==255;l+=v==254;}}
+      s<<",\"padded_body_aabb_cells_xyxy\":["<<x0<<','<<y0<<','<<x1<<','<<y1<<"],\"body_aabb_unknown_cells\":"<<u
+        <<",\"body_aabb_lethal_cells\":"<<l<<",\"count_boundary\":\"AABB plus one cell; counts are diagnostic, full_body_free is the unchanged polygon sweep result\"} ";
+    }else{s<<"null";}
+    s<<",\"counter_boundary\":\"First rejecting predicate per call; odom callback and BT tick counts, not elapsed durations\"}";
+    return s.str();
   }
 };
 
@@ -209,24 +304,26 @@ public:
       inputs_=std::make_shared<Inputs>(*this);config().blackboard->set("matrix_stop_inputs",inputs_);
     }
     started_=steady();stable_=0;pending_=false;acquired_=false;inspected_=false;
+    {std::lock_guard<std::mutex> l(inputs_->mutex);inputs_->diagnostics=WaitCounters{};inputs_->last_exception.clear();}
+    phase_="WAIT_HANDOFF_SERVICE";last_diagnostic_=0;
     return onRunning();
   }
   BT::NodeStatus onRunning() override {
     auto & x=*inputs_;
     if (steady()-started_>getInput<double>("timeout").value()*1e9) {
-      cancelPending();return BT::NodeStatus::FAILURE;
+      cancelPending();std::lock_guard<std::mutex> l(x.mutex);diagnose("timeout",true);return BT::NodeStatus::FAILURE;
     }
     std::lock_guard<std::mutex> l(x.mutex);
-    if (!x.client->service_is_ready()) {return BT::NodeStatus::RUNNING;}
+    if (!x.client->service_is_ready()) {return waiting("WAIT_HANDOFF_SERVICE");}
     if (!release_ && !acquired_) {
-      if (!pending_) {send(inspected_?"ACQUIRE":"INSPECT",x.epoch);return BT::NodeStatus::RUNNING;}
-      if (future_.wait_for(std::chrono::seconds(0))!=std::future_status::ready) {return BT::NodeStatus::RUNNING;}
+      if (!pending_) {send(inspected_?"ACQUIRE":"INSPECT",x.epoch);return waiting(inspected_?"WAIT_ACQUIRE_RESPONSE":"WAIT_INSPECT_RESPONSE");}
+      if (future_.wait_for(std::chrono::seconds(0))!=std::future_status::ready) {return waiting(phase_);}
       auto r=future_.get();pending_=false;
       if (!inspected_) {
-        if (!r->accepted) {return BT::NodeStatus::FAILURE;}
-        x.epoch=r->epoch;inspected_=true;return BT::NodeStatus::RUNNING;
+        if (!r->accepted) {diagnose("inspect_rejected",true);return BT::NodeStatus::FAILURE;}
+        x.epoch=r->epoch;inspected_=true;return waiting("WAIT_ACQUIRE_RESPONSE");
       }
-      if (!r->accepted || r->mode!="HOLD") {return BT::NodeStatus::FAILURE;}
+      if (!r->accepted || r->mode!="HOLD") {diagnose("acquire_rejected",true);return BT::NodeStatus::FAILURE;}
       x.epoch=r->epoch;x.released=false;acquired_=true;
       x.barrier.arm(steady(),x.odom?rclcpp::Time(x.odom->header.stamp).nanoseconds():0);
     }
@@ -234,22 +331,22 @@ public:
     nav_msgs::msg::Path path;
     try {
       if (release_) {path=getInput<nav_msgs::msg::Path>("path").value();}
-      healthy=x.certified(release_?&path:nullptr) && x.barrier.ready(steady());
-    } catch (const std::exception &) {healthy=false;}
+      healthy=x.certified(release_?&path:nullptr) && x.diagnostics.check(x.barrier.ready(steady()),Reject::StopDwell);
+    } catch (const std::exception & error) {x.diagnostics.check(false,Reject::Exception);x.last_exception=error.what();healthy=false;}
     if (!healthy) {
       stable_=0;
-      if (release_ && pending_) {cancelPending();return BT::NodeStatus::FAILURE;}
-      return BT::NodeStatus::RUNNING;
+      if (release_ && pending_) {cancelPending();diagnose("health_lost_during_release",true);return BT::NodeStatus::FAILURE;}
+      return waiting(release_?"WAIT_PLAN_START_CERTIFICATE":"WAIT_STOP_AND_HEALTH");
     }
     if (!release_) {
       if (!stable_) {stable_=steady();}
-      if (steady()-stable_<getInput<double>("health_stable").value()*1e9) {return BT::NodeStatus::RUNNING;}
+      if (steady()-stable_<getInput<double>("health_stable").value()*1e9) {return waiting("WAIT_HEALTH_STABLE");}
       x.planned_start=x.body("map");return BT::NodeStatus::SUCCESS;
     }
-    if (!pending_) {send("RELEASE",x.epoch);return BT::NodeStatus::RUNNING;}
-    if (future_.wait_for(std::chrono::seconds(0))!=std::future_status::ready) {return BT::NodeStatus::RUNNING;}
+    if (!pending_) {send("RELEASE",x.epoch);return waiting("WAIT_RELEASE_RESPONSE");}
+    if (future_.wait_for(std::chrono::seconds(0))!=std::future_status::ready) {return waiting("WAIT_RELEASE_RESPONSE");}
     auto r=future_.get();pending_=false;
-    if (!r->accepted || r->epoch!=x.epoch || r->mode!="CONTROLLER") {return BT::NodeStatus::FAILURE;}
+    if (!r->accepted || r->epoch!=x.epoch || r->mode!="CONTROLLER") {diagnose("release_rejected",true);return BT::NodeStatus::FAILURE;}
     x.released=true;return BT::NodeStatus::SUCCESS;
   }
   void onHalted() override {
@@ -258,6 +355,16 @@ public:
     // halts never publish or close a released epoch under the next FollowPath.
   }
 private:
+  BT::NodeStatus waiting(const char * phase) {phase_=phase;diagnose("waiting",false);return BT::NodeStatus::RUNNING;}
+  void diagnose(const char * event,bool force) noexcept {
+    const auto now=steady();if(!force && last_diagnostic_ && now-last_diagnostic_<1000000000LL){return;}
+    last_diagnostic_=now;
+    try {
+      const auto text=inputs_->snapshot(event,phase_,started_,stable_,getInput<double>("timeout").value(),getInput<double>("health_stable").value());
+      if(force){RCLCPP_WARN(inputs_->node->get_logger(),"matrix_stop_wait_v1 %s",text.c_str());}
+      else{RCLCPP_INFO(inputs_->node->get_logger(),"matrix_stop_wait_v1 %s",text.c_str());}
+    } catch (...) {++diagnostic_drops_;} // Diagnostics never change the BT result.
+  }
   void send(const std::string & op,std::uint64_t epoch) {
     auto req=std::make_shared<Service::Request>();req->run_id=inputs_->run;req->epoch=epoch;req->operation=op;
     static std::atomic<std::uint64_t> count{0};
@@ -267,6 +374,9 @@ private:
   void cancelPending() {if (pending_ && inputs_) {inputs_->client->remove_pending_request(request_id_);pending_=false;}}
   bool release_,pending_=false,acquired_=false,inspected_=false;
   std::int64_t started_=0,stable_=0,request_id_=0;
+  const char * phase_="NOT_STARTED";
+  std::int64_t last_diagnostic_=0;
+  std::uint64_t diagnostic_drops_=0;
   std::shared_ptr<Inputs> inputs_;
   rclcpp::Client<Service>::SharedFuture future_;
 };
