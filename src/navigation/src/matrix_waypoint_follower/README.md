@@ -26,7 +26,8 @@ Existing original geometry, stop rules, budgets and exclusive action ownership
 are unchanged. Cancel remains exact at the FollowWaypoints parent client;
 upstream child cancellation still requires exclusive NavigateToPose ownership.
 
-Build in a new isolated prefix against `/opt/ros/jazzy`; never install over an
+`COLCON_IGNORE` keeps this experiment out of automatic workspace discovery.
+Build directly with CMake in a new isolated prefix against `/opt/ros/jazzy`; never install over an
 existing receipt. `callback_probe` exercises real DDS and the linked core in
 localhost domain 190. It exposes the production child callback seam, not the
 full parent loop. Full parent tests additionally cover success, rejection,
