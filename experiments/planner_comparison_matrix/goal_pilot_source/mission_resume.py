@@ -129,7 +129,8 @@ def run_attempt(args, store, output, reconcile=False):
         raise Hold('Only isolated Matrix domain185 is supported')
     output.mkdir(parents=True,exist_ok=False)
     state=store.state(); options=runtime_args(args,output,state)
-    options.timeout=min(float(state['policy']['mission_budget_sec']),store.remaining())
+    # An exhausted motion budget must never disable exact-UUID cancellation.
+    options.timeout=10. if reconcile else min(float(state['policy']['mission_budget_sec']),store.remaining())
     if options.timeout <= 0:raise Hold('FAILED_BUDGET')
     source_manifest=freeze_sources(output,args.simulation_scan_max_age_sec)
     for name in ('mission_resume.py','mission_state.py'):
@@ -313,7 +314,8 @@ def main(argv=None):
             workflow_run_id=args.workflow_run_id,operation_outcome=outcome,exit_code=code,
             mission_id=state['mission_id'],revision=state['revision'],attempt_id=(state.get('attempt') or {}).get('attempt_id'),
             parent_action_uuid=(state.get('attempt') or {}).get('parent_action_uuid'),state_path=str(args.output/'state.json'),
-            state_sha256=digest((args.output/'state.json').read_bytes()),result_flags=state['result_flags'])
+            state_sha256=digest((args.output/'state.json').read_bytes()),result_path=str(args.output/'result.json'),
+            result_sha256=digest((args.output/'result.json').read_bytes()),reason=state['hold_reason'],result_flags=state['result_flags'])
         store.finish_operation(args.request_id,response);atomic_json(args.output/'operation.json',response)
         print(encoded_output(response));return code
     finally:

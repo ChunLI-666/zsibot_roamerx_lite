@@ -177,6 +177,8 @@ class MissionStore:
             state['revision'] += 1
             boot, now = boot_clock()
             state['updated'] = dict(unix_ns=time.time_ns(),boot_id=boot,boottime_sec=now)
+            if state['budgets']['deadline_boot_id']==boot and state['budgets']['deadline_boottime_sec'] is not None:
+                state['budgets']['remaining_sec']=max(0.,state['budgets']['deadline_boottime_sec']-now)
             self.db.execute('UPDATE mission SET revision=?,state=? WHERE id=1', (state['revision'],encoded(state)))
             self.db.execute('INSERT INTO events(revision,kind,payload) VALUES (?,?,?)',
                 (state['revision'],kind,encoded(dict(attempt_id=(state.get('attempt') or {}).get('attempt_id'),
@@ -242,6 +244,7 @@ class MissionStore:
             attempt['child_slots_reserved']=child_slots
             s['attempt']=attempt;s['attempts'].append(copy.deepcopy(attempt))
             s['lifecycle']='DISPATCH_INTENT';s['hold_reason']=None;s['candidates']={}
+            s['stop']=dict(state='UNPROVEN');s['progress']['active_index']=index
             if len(s['attempts'])>1: s['result_flags']['recovery_used']=True
         return self.state()['attempt']
 
@@ -295,6 +298,7 @@ class MissionStore:
                 raise Hold('Terminal result does not match owned Action UUID')
             status=result.get('status');missed=result.get('missed_waypoints')
             a.update(native_status=status,native_error_code=result.get('error_code'),missed_waypoints=missed,
+                native_error_msg=result.get('error_msg'),
                 terminal_confirmed=status in (4,5,6) or a['dispatch_state']=='REJECTED',children_quiescent=bool(children_quiescent),
                 stopped=result.get('final_measured_and_commanded_stop',result.get('settled_measured_and_commanded_stop')) is True)
             a['dispatch_state']='TERMINAL_CONFIRMED' if a['terminal_confirmed'] else 'ACCEPTANCE_UNKNOWN'
@@ -305,6 +309,19 @@ class MissionStore:
             if missed and (type(failed) is not int or not a['start_index']<=failed<len(s['route'])):
                 raise Hold('Invalid absolute failed waypoint index')
             if not successful:s['progress']['last_failed_index']=failed
+            a['failure']=None
+            if not successful and failed is not None:
+                goal=s['route'][failed];pose=result.get('final_snapshot',{}).get('last',{}).get('pose')
+                error=None
+                if pose and all(math.isfinite(pose.get(k,math.nan)) for k in ('x','y','yaw')):
+                    error=dict(xy_m=math.hypot(pose['x']-goal['pose'][0],pose['y']-goal['pose'][1]),
+                        yaw_rad=abs(angular_difference(pose['yaw'],goal['pose'][2])),original_pose_snapshot=pose)
+                a['failure']=dict(index=failed,id=goal['id'],original_goal_map=goal['pose'],actual_error=error)
+            native_path=Path(a['output'])/'native_result.json' if a.get('output') else None
+            a['native_result']=dict(path=str(native_path),sha256=digest(native_path.read_bytes())) if native_path and native_path.is_file() else None
+            a['bt_recovery_accounting']=result.get('bt_recovery_accounting')
+            s['stop']=dict(state='PASSED' if a['stopped'] else 'UNPROVEN',source_action_uuid=a['parent_action_uuid'],
+                receipt=result.get('owned_goal_shutdown',{}).get('stop'),evidence=a['native_result'])
             # Only a terminal failed native batch proves its later suffix was not entered.
             if status==6 and not a.get('budget_reconciled') and isinstance(missed,list) and len(missed)==1 and isinstance(failed,int):
                 for i in range(failed+1,len(s['route'])):
@@ -341,6 +358,7 @@ class MissionStore:
                 historical_result_sha256=result_sha,start_index=0,native_status=result['status'],missed_waypoints=missed)
             if type(historical_bt_retries) is not int or historical_bt_retries not in (0,1):raise Hold('Historical BT retry count required')
             a['child_slots_reserved']=1+historical_bt_retries
+            a['budget_reconciled']=True  # Import already excludes the proven unentered suffix.
             s['attempt']=a;s['attempts']=[copy.deepcopy(a)]
             s['candidates']={str(i):visits[i] for i in range(end)}
             self._promote(s,end,'sealed_historical_native_result_and_stopped_visits',True)
@@ -354,12 +372,15 @@ class MissionStore:
             s['budgets']['per_index_parent_dispatches']=[int(i<=end) for i in range(len(visits))]
             s['result_flags'].update(recovery_used=True,strict_timing_status=result.get('strict_scan_timing_status','NOT_EVALUATED'))
             s['lifecycle']='RECOVERABLE_FAILURE'
+            s['stop']=dict(state='PASSED',source_action_uuid=a['parent_action_uuid'],legacy_stop_proof=True,
+                historical_result_sha256=result_sha)
 
     def export(self, output):
         path=Path(output);path.mkdir(parents=True,exist_ok=True)
         state=self.state();atomic_json(path/'state.json',state)
         result=dict(schema='matrix.mission.result.v1',mission_id=state['mission_id'],revision=state['revision'],
             lifecycle=state['lifecycle'],identity=state['identity'],progress=state['progress'],
-            result_flags=state['result_flags'],attempts=state['attempts'],budgets=state['budgets'])
+            result_flags=state['result_flags'],attempts=state['attempts'],budgets=state['budgets'],
+            current_target=state['current_target'],last_attempt=state['attempt'],stop=state['stop'],reason=state['hold_reason'])
         atomic_json(path/'result.json',result)
         return state
