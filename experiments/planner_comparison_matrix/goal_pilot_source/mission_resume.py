@@ -178,32 +178,36 @@ def run_attempt(args, store, output, reconcile=False):
     except Exception as error:
         result.update(functional_status='FAIL',exception_type=type(error).__name__,exception_message=str(error))
     finally:
-        if node is not None:
-            result['owned_goal_shutdown']=node.finalize_own_goal()
-            result['ordered']=node.ordered.summary()
-            result['final_measured_and_commanded_stop']=bool(node.stop_evidence and node.stop_evidence.get('observed'))
-            result['evidence_writer']=node.finish_evidence()
-            result['strict_scan_timing_status']='FAIL' if (node.strict_scan_latency_first_fault or node.scan_aging_episodes) else 'NO_STRICT_SCAN_FAULT_RECORDED'
-            result['children_quiescent']=children
-            result['goals_sent']=int(session.action_uuid is not None and not reconcile)
-            result['stop_signals']=options.stop_signals
-            result['finished_ns']=time.time_ns()
-            events=getattr(node,'recovery_handoffs',[])
-            acquired={e['epoch'] for e in events if e.get('accepted') and e.get('operation')=='ACQUIRE'}
-            released={e['epoch'] for e in events if e.get('accepted') and e.get('operation')=='RELEASE'}
-            entered=sum(v.get('entered') is not None for v in node.ordered.visits[session.start_index:])
-            result['bt_recovery_accounting']=dict(acquired_epochs=sorted(acquired),released_epochs=sorted(released),entered_indices=entered)
-            # Missing native event evidence cannot support a zero-recovery claim.
-            result['bt_recovery_used']=not (entered>0 and len(acquired)==entered and acquired==released
-                and result.get('functional_status')=='PASS' and result['evidence_writer'].get('evidence_complete'))
-            if session.action_uuid:
-                result.setdefault('action_uuid',str(session.action_uuid))
-            atomic_json(output/'native_result.json',json.loads(evidence_json(result)))
-            if session.action_uuid:
-                store.finish_attempt(result,children)
-            node.destroy_node()
-        if rclpy.ok():rclpy.shutdown()
-        for n,handler in old.items():signal.signal(n,handler)
+        try:
+            if node is not None:
+                result['owned_goal_shutdown']=node.finalize_own_goal()
+                result['ordered']=node.ordered.summary()
+                result['final_measured_and_commanded_stop']=bool(node.stop_evidence and node.stop_evidence.get('observed'))
+                result['evidence_writer']=node.finish_evidence()
+                result['strict_scan_timing_status']='FAIL' if (node.strict_scan_latency_first_fault or node.scan_aging_episodes) else 'NO_STRICT_SCAN_FAULT_RECORDED'
+                result['children_quiescent']=children
+                result['goals_sent']=int(session.action_uuid is not None and not reconcile)
+                result['stop_signals']=options.stop_signals
+                result['finished_ns']=time.time_ns()
+                events=getattr(node,'recovery_handoffs',[])
+                acquired={e['epoch'] for e in events if e.get('accepted') and e.get('operation')=='ACQUIRE'}
+                released={e['epoch'] for e in events if e.get('accepted') and e.get('operation')=='RELEASE'}
+                entered=sum(v.get('entered') is not None for v in node.ordered.visits[session.start_index:])
+                result['bt_recovery_accounting']=dict(acquired_epochs=sorted(acquired),released_epochs=sorted(released),entered_indices=entered)
+                # Missing native event evidence cannot support a zero-recovery claim.
+                result['bt_recovery_used']=not (entered>0 and len(acquired)==entered and acquired==released
+                    and result.get('functional_status')=='PASS' and result['evidence_writer'].get('evidence_complete'))
+                if session.action_uuid:
+                    result.setdefault('action_uuid',str(session.action_uuid))
+                atomic_json(output/'native_result.json',json.loads(evidence_json(result)))
+                if session.action_uuid:
+                    store.finish_attempt(result,children,result_path=output/'native_result.json')
+        finally:
+            try:
+                if node is not None:node.destroy_node()
+            finally:
+                if rclpy.ok():rclpy.shutdown()
+                for n,handler in old.items():signal.signal(n,handler)
     return result
 
 
