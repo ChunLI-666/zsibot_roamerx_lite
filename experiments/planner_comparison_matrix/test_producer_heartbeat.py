@@ -126,6 +126,11 @@ class ProducerHeartbeatTests(unittest.TestCase):
         self.assertEqual(diagnostics.removed,4)
         original_default=normalize.visit(without_diagnostics)
         self.assertEqual(normalize.count,1)
+        # The approved recording-only camera split is the sole predicate removal.
+        sources=next(n for n in ast.walk(original_default) if isinstance(n,ast.For)
+                     and ast.unparse(n.target)=='(topic, limit)')
+        self.assertEqual(len(sources.iter.elts),4)
+        sources.iter.elts.append(ast.parse('(args.camera_topic,.5)',mode='eval').body)
         self.assertEqual(hashlib.sha256(ast.dump(original_default).encode()).hexdigest(),EXPECTED_UNCHANGED_AST['source_health'])
         self.assertEqual(hashlib.sha256(ast.dump(find(SOURCE,'native_bt_self_client_valid')).encode()).hexdigest(),EXPECTED_UNCHANGED_AST['native_bt_self_client_valid'])
         self.assertEqual(hashlib.sha256(ast.dump(find(SOURCE,'waypoint_service_ownership')).encode()).hexdigest(),EXPECTED_UNCHANGED_AST['waypoint_service_ownership'])

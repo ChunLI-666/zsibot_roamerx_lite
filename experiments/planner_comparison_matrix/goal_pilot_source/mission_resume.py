@@ -185,6 +185,7 @@ def run_attempt(args, store, output, reconcile=False):
                 result['ordered']=node.ordered.summary()
                 result['final_measured_and_commanded_stop']=bool(node.stop_evidence and node.stop_evidence.get('observed'))
                 result['evidence_writer']=node.finish_evidence()
+                result['camera_recording_quality']=result['evidence_writer'].get('camera_recording_quality')
                 result['strict_scan_timing_status']='FAIL' if (node.strict_scan_latency_first_fault or node.scan_aging_episodes) else 'NO_STRICT_SCAN_FAULT_RECORDED'
                 result['children_quiescent']=children
                 result['goals_sent']=int(session.action_uuid is not None and not reconcile)

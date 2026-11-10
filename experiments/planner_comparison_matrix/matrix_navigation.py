@@ -17,6 +17,20 @@ def write(path,value,compact=False):
     temporary.write_text(json.dumps(value,separators=(',',':'))+'\n' if compact else json.dumps(value,indent=2)+'\n');temporary.replace(path)
 
 
+def camera_recording_observation(latest,topic,now_ns,steady):
+    """Raw recording freshness only; decode/calibration remain mandatory preflight."""
+    if topic not in latest:return dict(status='FAIL',issues=['camera_missing'],original_stamp_ns=None)
+    received,message=latest[topic]
+    stamp_ns=message.header.stamp.sec*10**9+message.header.stamp.nanosec
+    header_age=(now_ns-stamp_ns)/1e9;receive_age=steady-received
+    issues=[]
+    if not -.05<=header_age<=.5:issues.append('camera_header_stale_or_future')
+    if not 0<=receive_age<=.5:issues.append('camera_receive_stale_or_future')
+    return dict(status='FAIL' if issues else 'NO_CAMERA_FAULT_RECORDED',issues=issues,
+        original_stamp_ns=stamp_ns,checked_ros_ns=now_ns,received_steady=received,
+        header_age_sec=header_age,receive_age_sec=receive_age)
+
+
 def make_health_tf_listener(buffer,node,latest_only=False):
     """Read-only health observation; controller and publisher QoS are unchanged."""
     from tf2_ros import TransformListener
@@ -739,7 +753,7 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
     def source_health():
         now=node.get_clock().now().nanoseconds/1e9
         health_tf_lookups.clear()
-        for topic,limit in [(args.odom_topic,.3),(args.scan_topic,getattr(args,'simulation_scan_max_age_sec',.3)),('/lightning/loc_status',.2),('/lightning/pose_valid',.2),(args.camera_topic,.5)]:
+        for topic,limit in [(args.odom_topic,.3),(args.scan_topic,getattr(args,'simulation_scan_max_age_sec',.3)),('/lightning/loc_status',.2),('/lightning/pose_valid',.2)]:
             if topic not in latest:raise RuntimeError('Missing source '+topic)
             received,msg=latest[topic]
             if time.monotonic()-received>limit:raise RuntimeError('Stale receive '+topic)
@@ -1040,6 +1054,8 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
         ready_storage.publish(readiness,compact=True)
         event('navigation_ready');print(str(out/'ready.json'),flush=True)
         heartbeat_deadline=time.monotonic();last_write_finished_ns=time.monotonic_ns()
+        camera_quality=dict(status='NO_CAMERA_FAULT_RECORDED',strict_timing_status='NO_CAMERA_FAULT_RECORDED',
+            fault_checks=0,first_fault=None,boundary='Recording evidence only; mandatory decoded/calibrated preflight retained; not a navigation input')
         previous_write_timing=None;previous_audit_sequence=None;last_timing_flush=time.monotonic()
         while not stopped:
             if not shutdown_started:deadline_guard.check_live()
@@ -1076,6 +1092,11 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
                 readiness['producer_scan_observation']=scan_observation(latest,args.scan_topic,health_started,
                   (node.get_clock().now().nanoseconds,time.monotonic_ns()),readiness.get('reason'))
             issued=node.get_clock().now().nanoseconds
+            camera=camera_recording_observation(latest,args.camera_topic,issued,time.monotonic())
+            readiness['producer_camera_observation']=camera
+            if camera['status']=='FAIL':
+                camera_quality.update(status='FAIL',strict_timing_status='FAIL',fault_checks=camera_quality['fault_checks']+1)
+                if camera_quality['first_fault'] is None:camera_quality['first_fault']=dict(camera)
             expiry=issued+500_000_000
             if args.with_waypoints and readiness['ready']:
                 expiry=min(expiry,readiness['waypoint_ownership']['checked_unix_ns']+500_000_000)
@@ -1090,6 +1111,7 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
             ready_storage.publish(readiness,compact=True)
             finished=phase_mark(timing,'atomic_ready_write',phase)
             timing_record=dict(issued_unix_ns=issued,ready=readiness['ready'],reason=readiness.get('reason'),
+              camera_recording_observation=camera,
               phases=timing,audit=audit_state,audit_sequence=audit_sequence,
               reused_audit=audit_sequence is not None and audit_sequence==previous_audit_sequence,
               heartbeat_gap_ns=finished[0]-last_write_finished_ns,cycle_wall_ns=finished[0]-cycle_started[0],
@@ -1131,6 +1153,7 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
         deadline_guard.recording_closed('all_owned_processes_waited')
         ready_storage.stop_false()
         ready_storage.materialize()
+        if 'camera_quality' in locals():write(out/'camera_recording_quality.json',camera_quality)
         event('owned_processes_closed',returncodes={name:p.returncode for name,p in procs})
         for log in logs:log.close()
         metadata=out/'bag/metadata.yaml'
@@ -1143,6 +1166,8 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
             required=[args.camera_topic,args.camera_info_topic,args.odom_topic,args.scan_topic,'/livox/lidar','/livox/imu','/lightning_bridge/debug','/lightning/debug','/debug/build_info','/tf','/tf_static','/map','/global_costmap/costmap_raw','/local_costmap/costmap_raw','/cmd_vel_nav','/cmd_vel','/cmd_vel_safe','/simulation/command_adapter/policy_cmd']
             required += [snapshot['recorded_topic'] for snapshot in static_snapshots]
             write(out/'final_audit.json',dict(message_count=md['message_count'],topic_counts=topic_counts,required_topics_nonempty={t:topic_counts.get(t,0)>0 for t in required},
+              camera_recording_quality=locals().get('camera_quality'),
+              front_camera_delivery_status='FAIL' if topic_counts.get(args.camera_topic,0)==0 or topic_counts.get(args.camera_info_topic,0)==0 else 'TOPICS_PRESENT_DECODE_REVIEW_REQUIRED',
               static_layer_exactly_once_cdr_verified=snapshot_audit['passed'],mcap_sha256={p.name:sha(p) for p in (out/'bag').glob('*.mcap')},note='Sequential decode and per-case action/results remain required before acceptance.'))
             event('recording_audit_completed')
         if ownership_worker is not None:event('ownership_audit_worker_closed',joined=ownership_worker.join())
