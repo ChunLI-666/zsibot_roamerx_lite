@@ -19,6 +19,8 @@ public:
     const bool sequence = source>last_source_ && steady>=last_steady_ &&
       (!last_source_ || source-last_source_<=dwell_ns) &&
       (!last_steady_ || steady-last_steady_<=dwell_ns);
+    // Read-only observations; never participate in the stop predicate.
+    diagnostic_sequence_=sequence;diagnostic_healthy_=healthy;++diagnostic_samples_;
     last_source_=source; last_steady_=steady;
     if (!armed_ || !sequence || !healthy || source<=zero_source_ || steady<=zero_steady_ ||
       !std::isfinite(vx) || !std::isfinite(vy) || !std::isfinite(wz) ||
@@ -30,7 +32,18 @@ public:
     return armed_ && qualified_ && steady>=last_steady_ && steady-last_steady_<=dwell_ns &&
       last_source_-first_source_>=dwell_ns && last_steady_-first_steady_>=dwell_ns;
   }
+  struct Diagnostic {
+    bool armed,qualified,advancing_and_bounded,healthy;
+    std::int64_t zero_source,zero_steady,first_source,first_steady,last_source,last_steady;
+    std::uint64_t samples;
+  };
+  Diagnostic diagnostic() const noexcept {
+    return {armed_,qualified_,diagnostic_sequence_,diagnostic_healthy_,zero_source_,zero_steady_,
+      first_source_,first_steady_,last_source_,last_steady_,diagnostic_samples_};
+  }
 private:
+  bool diagnostic_sequence_=false,diagnostic_healthy_=false;
+  std::uint64_t diagnostic_samples_=0;
   bool armed_=false, qualified_=false;
   std::int64_t zero_steady_=0,zero_source_=0,first_source_=0,first_steady_=0,last_source_=0,last_steady_=0;
 };
