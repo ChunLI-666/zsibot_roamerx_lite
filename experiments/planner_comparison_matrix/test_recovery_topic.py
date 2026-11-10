@@ -68,7 +68,8 @@ class RecoveryTopicTests(unittest.TestCase):
                 if legacy:config['raw_topic']='/matrix/'+value+'/controller_cmd_vel'
                 (root/'navigate.xml').write_text(recovery.tree(config))
                 params=dict(map_server={'yaml_filename':dict(type=4,string_value=str(map_path))},
-                    bt_navigator={'default_nav_to_pose_bt_xml':dict(type=4,string_value=str(root/'navigate.xml'))},
+                    bt_navigator={'default_nav_to_pose_bt_xml':dict(type=4,string_value=str(root/'navigate.xml')),
+                        'error_code_names':dict(type=9,string_array_value=list(recovery.ERROR_CODE_NAMES))},
                     matrix_zero_handoff={k:dict(type=4,string_value=config[k]) for k in ('run_id','raw_topic')},
                     controller_server={'FollowPath.rpp.desired_linear_vel':dict(type=3,double_value=floor)})
                 (root/'runtime_parameters.json').write_text(json.dumps(params))

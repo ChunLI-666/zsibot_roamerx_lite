@@ -97,13 +97,17 @@ def failure_decision(result, terminal, quiescent, stopped, *, operator_cancel=Fa
     if operator_cancel or result.get('stop_signals') or reason in ('scheduled_cancel','pilot_interrupted'):
         return 'CANCELED','OPERATOR_CANCEL'
     codes={v.get('error_code') for v in result.get('missed_waypoints') or []}
-    if reason.startswith('input_became_invalid:') or codes & {102,202}:
+    # Project uint16 results from matrix_recovery_bt/recovery_errors.hpp. Never
+    # generalize error 0 or an unknown RELEASE into a safe automatic replan.
+    if 60003 in codes:return 'HOLD','RECOVERY_OWNERSHIP_RECONCILIATION_REQUIRED'
+    if 60004 in codes:return 'NEEDS_TASK_DECISION','INVALID_RECOVERY_PLAN_CONTRACT'
+    if reason.startswith('input_became_invalid:') or codes & {102,202,60002}:
         return 'PAUSED_INPUT_HEALTH','FRESH_STABLE_HEALTH_REQUIRED'
     if codes & {203,204,208}:
         return 'NEEDS_TASK_DECISION','NO_FEASIBLE_ORIGINAL_GOAL_PATH'
     if codes & {101,201}:return 'NEEDS_TASK_DECISION','INVALID_RUNTIME_CONFIGURATION'
-    if codes & {205,206}:return 'RECOVERABLE_FAILURE','BOUNDED_OBSTACLE_WAIT'
-    if codes & {104,105,106,107,207}:return 'RECOVERABLE_FAILURE','BOUNDED_ORIGINAL_GOAL_REPLAN'
+    if codes & {205,206,60005}:return 'RECOVERABLE_FAILURE','BOUNDED_OBSTACLE_WAIT'
+    if codes & {104,105,106,107,207,60001}:return 'RECOVERABLE_FAILURE','BOUNDED_ORIGINAL_GOAL_REPLAN'
     if result.get('status')==5:return 'HOLD','UNKNOWN_CANCEL_CAUSE'
     return 'NEEDS_TASK_DECISION','UNCLASSIFIED_TERMINAL_OR_INDEPENDENT_EVIDENCE_FAILURE'
 
