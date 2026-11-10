@@ -23,7 +23,7 @@ EVENTS = 'recording_deadline_events.jsonl'
 CHILDREN = 'recording_deadline_children.json'
 CHILDREN_ARMED = 'recording_deadline_children_armed.json'
 OWNED_NAMES = ('recorder', 'nav_safety_gate', 'map_server', 'planner_server',
-               'controller_server', 'velocity_smoother', 'bt_navigator', 'waypoint_follower', 'lifecycle_manager')
+               'controller_server', 'velocity_smoother', 'bt_navigator', 'waypoint_follower', 'lifecycle_manager', 'matrix_zero_handoff')
 RUN_ID_ENV = 'MATRIX_RECORDING_RUN_ID'
 OUTPUT_ENV = 'MATRIX_RECORDING_OUTPUT'
 ROLE_ENV = 'MATRIX_RECORDING_ROLE'

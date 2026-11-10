@@ -1,0 +1,12 @@
+string run_id
+string operation_id
+uint64 epoch
+# ACQUIRE, RELEASE, CLOSE, INSPECT
+string operation
+---
+bool accepted
+uint64 epoch
+string mode
+uint64 last_output_sequence
+uint64 last_recovery_zero_sequence
+string reason

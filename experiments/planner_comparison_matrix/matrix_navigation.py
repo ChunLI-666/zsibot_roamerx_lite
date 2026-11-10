@@ -7,6 +7,7 @@ import argparse,copy,hashlib,json,math,os,pathlib,shutil,signal,subprocess,sys,t
 import yaml
 from static_layer_snapshot import EXCLUDED_LAYERS,capture as capture_static_layers,audit_recorded as audit_static_layers
 from recording_deadline import arm as arm_deadline,runtime_seconds,process_identity
+import recovery_navigation
 BASE=pathlib.Path(__file__).resolve().parent
 NAV=BASE.parents[1]
 def sha(path):
@@ -263,11 +264,11 @@ def source_snapshot(path,template,with_waypoints=False):
     if not isinstance(files,dict) or not files:raise ValueError('Source snapshot requires source file hashes')
     root=NAV.resolve()
     # The wrapper executes before this process; the other files are consumed here.
-    required=[pathlib.Path(__file__),BASE/'static_layer_snapshot.py',BASE/'recording_deadline.py',BASE/'run_matrix_navigation.sh',
+    required=[pathlib.Path(__file__),BASE/'recovery_navigation.py',BASE/'static_layer_snapshot.py',BASE/'recording_deadline.py',BASE/'run_matrix_navigation.sh',
       template,NAV/'src/navigation/src/robot_navigo/scripts/nav_safety_gate.py']
     if with_waypoints:
         required += [BASE/'goal_pilot_source'/name for name in
-          ['waypoint_batch.py','waypoint_contract.py','pilot_scan_timing.py','message_info_contract.py']]
+          ['waypoint_batch.py','waypoint_contract.py','pilot_scan_timing.py','message_info_contract.py','mission_state.py','mission_resume.py']]
     required_names=set()
     for source in required:
         resolved=source.resolve(strict=True)
@@ -378,16 +379,10 @@ def lifecycle_artifacts(install,receipt_path):
     return dict(install_prefix=str(prefix),receipt_path=str(receipt),receipt_sha256=sha(receipt),
       source_manifest=data['source_manifest'],artifact_sha256=files)
 
-def navigation_tree(variant):
-    """A single bounded controller recovery retains the same external goal."""
-    plain='<Sequence><ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/><FollowPath path="{path}" controller_id="FollowPath" goal_checker_id="Checker" progress_checker_id="Progress"/></Sequence>'
-    if variant=='official':
-        # Reset the error before ComputePath so planner failures cannot reuse a
-        # previous goal's controller error and spuriously enter recovery.
-        execute='<Sequence><SetBlackboard output_key="follow_path_error_code" value="0"/><ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased" error_code_id="{compute_path_error_code}"/><FollowPath path="{path}" controller_id="FollowPath" goal_checker_id="Checker" progress_checker_id="Progress" error_code_id="{follow_path_error_code}"/></Sequence>'
-        recover='<Sequence><WouldAControllerRecoveryHelp error_code="{follow_path_error_code}"/><Delay delay_msec="1000"><AlwaysSuccess/></Delay></Sequence>'
-        plain='<RecoveryNode number_of_retries="1" name="StoppedOriginalGoalReplan">'+execute+recover+'</RecoveryNode>'
-    return '<root BTCPP_format="4" main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree">'+plain+'</BehaviorTree></root>\n'
+def navigation_tree(variant,recovery=None):
+    """Legacy strict entry has no unsafe delay/replan; opt-in uses measured stop."""
+    if recovery is not None:return recovery_navigation.tree(recovery)
+    return '<root BTCPP_format="4" main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree"><Sequence><ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/><FollowPath path="{path}" controller_id="FollowPath" goal_checker_id="Checker" progress_checker_id="Progress"/></Sequence></BehaviorTree></root>\n'
 
 def simulation_scan_latency_profile(max_age=.3):
     if max_age not in (.3,.5):raise ValueError('Matrix scan operational age must be .3 or .5 seconds')
@@ -539,11 +534,13 @@ def prepare(args):
             boundary='Configured artifact/source binding; loaded-library evidence is recorded separately in runtime_identities.json'),sort_keys=True)
         manifest['planner_failure_snapshot']=dict(directory=str(snapshot_dir),
             scope='Exact locked input on failure; base iterations unknown; writes after locks release and outside original search timer')
-    bt=out/'navigate.xml';bt.write_text(navigation_tree(args.variant))
-    manifest['controller_recovery']=dict(enabled=args.variant=='official',maximum_retries=1 if args.variant=='official' else 0,
-      policy='Controller recoverable failure only; stopped zero, builtin Delay1s, fresh full ComputePathToPose then new FollowPath to unchanged original goal; no waypoint success or external goal UUID resend',
-      wait_implementation='BehaviorTree.CPP Delay/AlwaysSuccess; no behavior_server or motion recovery action',
-      plugins=['nav2_recovery_node_bt_node','nav2_would_a_controller_recovery_help_condition_bt_node'] if args.variant=='official' else [])
+    recovery=recovery_navigation.prepare(args,selected_install,footprint,scan_profile['operational_max_age_sec'])
+    manifest['recovery']=recovery
+    if recovery:
+        d['matrix_zero_handoff']={'ros__parameters':dict(use_sim_time=False,run_id=recovery['run_id'],raw_topic=recovery['raw_topic'])}
+        d['bt_navigator']['ros__parameters']['plugin_lib_names']=['matrix_recovery_nodes']
+    bt=out/'navigate.xml';bt.write_text(navigation_tree(args.variant,recovery))
+    manifest['controller_recovery']=dict(enabled=recovery is not None,maximum_retries=1 if recovery else 0,policy='Measured checked zero and fresh continuous Odom stop, current-body original-goal replan, fenced release before FollowPath; no fixed delay')
     d['bt_navigator']['ros__parameters']['default_nav_to_pose_bt_xml']=str(bt)
     manifest['with_waypoints']=args.with_waypoints
     if args.with_waypoints:
@@ -571,6 +568,8 @@ def prepare(args):
           child_cancellation_boundary='Upstream Jazzy 1.3.13 waypoint_follower uses async_cancel_all_goals on its NavigateToPose client when its own batch is canceled. The independent client cancels only its own FollowWaypoints UUID; this isolated experiment requires exclusive NavigateToPose ownership.',
           child_goal_timestamp_boundary='Upstream follower refreshes each requested child goal header to dispatch time. Original route values and native source pose sample stamps remain separately recorded.',
           native_self_client_policy='Jazzy NavigateToPose has a real self-client. Only with-waypoints remaps its sole goal_pose ingress to the fixed recording run UUID private topic, observes it before BT starts, and permits the exact artifact/owned-process-bound self-client only while actual subscription ownership, zero publishers and zero lifetime received messages remain verified. Actual service callers are recorded separately from legacy business-sender compatibility fields.')
+    if recovery:
+        manifest['waypoint_contract']['mission_resume']=dict(schema='matrix.mission.resume_capability.v1',client_sources_sha256={name:sha(BASE/'goal_pilot_source'/name) for name in ['mission_state.py','mission_resume.py']},absolute_goal_index=True,full_original_route=True,bt_retries=recovery['bt_retries'])
     params=out/'params.yaml';params.write_text(yaml.safe_dump(d,sort_keys=False));manifest['params_sha256']=sha(params)
     shutil.copy2(__file__,out/'launcher_snapshot.py');manifest['launcher_sha256']=sha(__file__)
     helper=BASE/'static_layer_snapshot.py';shutil.copy2(helper,out/helper.name)
@@ -671,7 +670,7 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
                 for status in message.status_list if status.status in (0,1,2,3)],
               all_statuses=[dict(uuid=bytes(status.goal_info.goal_id.uuid).hex(),status=int(status.status)) for status in message.status_list])
             with ownership_observation_lock:action_status[action]=observed
-        for action in ['/navigate_to_pose','/follow_waypoints']:
+        for action in ['/navigate_to_pose','/follow_waypoints']+(['/follow_path'] if manifest.get('recovery') else []):
             subscriptions.append(node.create_subscription(GoalStatusArray,action+'/_action/status',
               lambda message,a=action:status_receive(a,message),qos_profile_action_status_default))
         child_feedback={}
@@ -727,6 +726,14 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
               latest_child_feedback=observed_child_feedback,
               status_boundary='Reliable transient-local subscription created before new owned servers. No sample means no accepted transition observed; status is not a periodic health heartbeat. Child UUID is observed, parent association is contextual under exclusive client ownership.')
             phase_mark(timing,'status_observation_snapshot',phase)
+            if manifest.get('recovery'):
+                ownership['recovery_runtime']=recovery_navigation.graph(node,manifest['recovery'])
+                ownership['recovery_runtime']['checked_unix_ns']=ownership['checked_unix_ns']
+                ownership['follow_path_active']=observed_action_status.get('/follow_path',{}).get('active',[])
+                follow_publishers=[dict(name=i.node_name,namespace=i.node_namespace)
+                    for i in node.get_publishers_info_by_topic('/follow_path/_action/status')]
+                ownership['follow_path_status_publishers_match']=follow_publishers==[dict(name='controller_server',namespace='/')]
+                ownership['recovery_runtime']['verified'] &= ownership['follow_path_status_publishers_match']
             ownership['producer_audit_timing']=timing
             return ownership
     def source_health():
@@ -778,6 +785,12 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
         rpc_event('rpc_complete')
         return response
     runtime=out/'runtime_install';shutil.copytree(selected_install,runtime)
+    recovery=manifest.get('recovery')
+    if recovery:
+        for rel,digest in recovery['artifact_sha256'].items():
+            path=pathlib.Path(recovery['install_prefix'])/rel
+            if sha(path)!=digest:raise RuntimeError('Recovery artifact changed before launch: '+rel)
+            target=runtime/rel;target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(path,target)
     receipt=json.loads((out/'source_build_receipt.json').read_text())
     commit=receipt.get('repository_commit','')
     if len(commit)!=40 or any(c not in '0123456789abcdef' for c in commit):raise RuntimeError('Build receipt requires full repository_commit SHA')
@@ -855,8 +868,9 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
         manifest['gate_source_sha256']=sha(gate);write(out/'runtime_manifest.json',manifest)
         common=['--ros-args','--params-file',str(out/'params.yaml')]
         launch('nav_safety_gate',['/usr/bin/python3',str(gate)]+common)
+        if recovery:launch('matrix_zero_handoff',[str(runtime/'lib/matrix_recovery_bt/zero_handoff_gate')]+common)
         servers=[('nav2_map_server','map_server','map_server',[]),('nav2_planner','planner_server','planner_server',[]),
-          ('nav2_controller','controller_server','controller_server',['-r','cmd_vel:=cmd_vel_nav']),
+          ('nav2_controller','controller_server','controller_server',['-r','cmd_vel:='+recovery['raw_topic'] if recovery else 'cmd_vel:=cmd_vel_nav']),
           ('nav2_velocity_smoother','velocity_smoother','velocity_smoother',['-r','cmd_vel:=cmd_vel_nav','-r','cmd_vel_smoothed:=cmd_vel']),
           ('nav2_bt_navigator','bt_navigator','bt_navigator',['-r','goal_pose:='+private_goal_topic] if args.with_waypoints else [])]
         if args.with_waypoints:servers.append(('nav2_waypoint_follower','waypoint_follower','waypoint_follower',[]))
@@ -891,12 +905,16 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
                 if not stopped and rclpy.ok() and time.monotonic()<deadline and state.current_state.id==3:break
             else:raise RuntimeError(name+' did not activate')
         params={}
-        for name in ['map_server','planner_server','controller_server','local_costmap/local_costmap','global_costmap/global_costmap','velocity_smoother','bt_navigator','nav_safety_gate']+(['waypoint_follower'] if args.with_waypoints else []):
+        for name in ['map_server','planner_server','controller_server','local_costmap/local_costmap','global_costmap/global_costmap','velocity_smoother','bt_navigator','nav_safety_gate']+(['matrix_zero_handoff'] if recovery else [])+(['waypoint_follower'] if args.with_waypoints else []):
             lc=node.create_client(ListParameters,'/'+name+'/list_parameters');gc=node.create_client(GetParameters,'/'+name+'/get_parameters')
             if not lc.wait_for_service(timeout_sec=2.):raise RuntimeError('parameter service unavailable '+name)
             names=wait(lc.call_async(ListParameters.Request()),timeout=10.,operation='/'+name+'/list_parameters').result.names;req=GetParameters.Request();req.names=names
             params[name]={n:message_to_ordereddict(v) for n,v in zip(names,wait(gc.call_async(req),timeout=10.,operation='/'+name+'/get_parameters').values)}
         write(out/'runtime_parameters.json',params)
+        if recovery:
+            for key in ['run_id','raw_topic']:
+                value=params['matrix_zero_handoff'].get(key,{})
+                if value.get('type')!=4 or value.get('string_value')!=recovery[key]:raise RuntimeError('Recovery gate typed parameter mismatch: '+key)
         if args.with_waypoints:
             expected=manifest['waypoint_contract']['parameters']
             fields={1:'bool_value',2:'integer_value',3:'double_value',4:'string_value'}
@@ -957,6 +975,7 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
         recording_topics=[args.camera_topic,args.camera_info_topic,args.odom_topic,args.scan_topic,
           '/livox/lidar','/livox/imu','/lightning_bridge/debug','/lightning/debug','/debug/build_info',
           '/tf','/tf_static','/global_costmap/costmap_raw','/local_costmap/costmap_raw']
+        if recovery:recording_topics += [recovery['raw_topic'],'/cmd_vel_nav','/cmd_vel','/cmd_vel_safe','/experiment/recovery/events']
         recording_subscriptions={topic:[info.node_name for info in node.get_subscriptions_info_by_topic(topic)] for topic in recording_topics}
         write(out/'recording_subscriptions.json',recording_subscriptions)
         missing=[topic for topic,names in recording_subscriptions.items() if recorder_name not in names]
@@ -995,6 +1014,11 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
               waypoint_ownership=ownership,mission_deadline=dict(run_id=deadline_guard.manifest['run_id'],
               manifest_sha256=deadline_guard.digest,launcher_boot_id=deadline_guard.manifest['launcher']['boot_id'],
               deadline_boottime_sec=deadline_guard.manifest['deadline_boottime_sec']))
+        if recovery:
+            readiness['recovery_runtime']=ownership.get('recovery_runtime',{})
+            if not readiness['recovery_runtime'].get('verified'):raise RuntimeError('Recovery publisher ownership not established')
+            readiness['mission_identity']=recovery_navigation.runtime_identity(manifest,params,identities,receipt,out,runtime)
+            write(out/'mission_identity.json',readiness['mission_identity'])
         # Graph/process auditing cannot starve callback pumping or the READY heartbeat.
         # Every audit is still complete; its original checked timestamp is authoritative.
         if args.with_waypoints:ownership_worker=OwnershipAuditWorker(waypoint_ownership,ownership)
@@ -1037,6 +1061,9 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
                         ingress_violated=private_goal_messages>0 or first_private_publisher_violation is not None
                     if ingress_violated:raise RuntimeError('Native BT private goal ingress violated')
                     readiness['waypoint_ownership']=observed
+                    if recovery:
+                        readiness['recovery_runtime']=observed.get('recovery_runtime',{})
+                        if not readiness['recovery_runtime'].get('verified'):raise RuntimeError('Recovery publisher ownership changed')
                     if not observed['exclusive_nav_client'] or not observed['status_publishers_match']:
                         raise RuntimeError('Native waypoint action ownership changed; shared NavigateToPose is unsupported')
                 phase=phase_mark(timing,'ownership_snapshot',phase)
@@ -1140,6 +1167,9 @@ def main():
     p.add_argument('--lifecycle-install',help='Optional isolated lifecycle executable/core pair, shared by all variants')
     p.add_argument('--lifecycle-build-receipt',help='Exact lifecycle artifact receipt; required with --lifecycle-install')
     p.add_argument('--max-runtime-sec',type=runtime_seconds,default=600.,help='Fixed deadline from launcher process start, in (0,7200] seconds; default 600')
+    p.add_argument('--with-mission-recovery',action='store_true',help='Use measured-stop BT and durable mission resume capability')
+    p.add_argument('--recovery-install',help='Frozen matrix_recovery_bt install prefix')
+    p.add_argument('--recovery-build-receipt',help='Commit-bound recovery artifact receipt')
     p.add_argument('--with-waypoints',action='store_true',help='Activate the native Jazzy FollowWaypoints server for an independently authorized ordered batch client')
     args=p.parse_args();out,install,manifest=prepare(args)
     if args.run:

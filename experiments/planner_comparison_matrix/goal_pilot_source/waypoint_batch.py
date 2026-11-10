@@ -120,7 +120,8 @@ def path_cdr_endpoint(raw):
 
 
 class WaypointPilot(frozen.Pilot):
-    def __init__(self, args, output, route, source_manifest):
+    def __init__(self, args, output, route, source_manifest, mission=None):
+        self.mission = mission
         self.simulation_scan_max_age_sec=getattr(args,'simulation_scan_max_age_sec',.3)
         self.scan_latency_profile=simulation_scan_latency_profile(self.simulation_scan_max_age_sec)
         self.strict_scan_latency_first_fault=None;self.strict_scan_latency_count=0;self.strict_scan_latency_seen=set()
@@ -128,7 +129,7 @@ class WaypointPilot(frozen.Pilot):
         self.route = route
         self.loaded_sources = {'experiments/planner_comparison_matrix/goal_pilot_source/'+name: digest
                                for name,digest in source_manifest['sources_sha256'].items()}
-        self.ordered = OrderedVisits(route)
+        self.ordered = (mission.ordered(route) if mission is not None else OrderedVisits(route))
         self.pending_feedback = deque()
         self.feedback_overflow = 0
         self.first_plans = {}
@@ -151,6 +152,19 @@ class WaypointPilot(frozen.Pilot):
         # Base opens this handle but all batch events use the asynchronous writer.
         self.events.close()
         self.writer = AsyncEvidenceWriter(output, publish_event=self.publish_serialized_event)
+        self.recovery_handoffs=[]
+        if mission is not None:
+            self.subscriptions_kept.append(self.create_subscription(String,'/experiment/recovery/events',self.recovery_event,100))
+
+    def recovery_event(self,message):
+        try:
+            value=json.loads(message.data)
+            run_id=self.latest_ready.get('recovery_runtime',{}).get('run_id')
+            if value.get('schema')=='matrix.recovery.handoff.v1' and value.get('run_id')==run_id:
+                self.recovery_handoffs.append(value)
+                self.emit('recovery_handoff',handoff=value)
+        except (ValueError,AttributeError):
+            self.emit('invalid_recovery_handoff',raw=message.data)
 
     def sub(self, cls, topic, callback):
         if cls is frozen.NavPath and topic=='/plan':
@@ -250,6 +264,8 @@ class WaypointPilot(frozen.Pilot):
 
                 readiness_stage = 'waypoint_binding'
                 native = waypoint_binding(self.latest_ready, self.native_binding)
+                if getattr(self, 'mission', None) is not None:
+                    self.mission.validate_ready(self.latest_ready)
                 readiness_stage, ownership_checked_now_ns = 'validate_ownership', time.time_ns()
                 metadata_deviation = ownership_metadata_lease_deviation(
                     self.latest_ready, ownership_checked_now_ns, self.ownership_metadata_reported_check_ns)
@@ -471,6 +487,10 @@ class WaypointPilot(frozen.Pilot):
         return report
 
     def native_feedback(self, message):
+        if getattr(self, 'mission', None) is not None and (self.owned_identity is None or
+                bytes(message.goal_id.uuid) != self.owned_identity.value):
+            self.emit('old_action_feedback_ignored')
+            return
         entry = dict(index=int(message.feedback.current_waypoint), unix_ns=time.time_ns(), steady_ns=time.monotonic_ns())
         if len(self.pending_feedback) >= 512:
             self.feedback_overflow += 1
@@ -520,6 +540,8 @@ class WaypointPilot(frozen.Pilot):
         if event:
             kind = event.pop('kind')
             self.emit(kind, parent_action_uuid=self.owned_identity.value.hex(), child_action_uuid=None, **event)
+        if getattr(self, 'mission', None) is not None:
+            self.mission.observe(self.ordered)
         if now-self.last_state_trace_ns >= 100_000_000:
             self.last_state_trace_ns = now
             self.writer.submit('state_trace', dict(unix_ns=time.time_ns(), steady_ns=now,
@@ -620,7 +642,8 @@ class WaypointPilot(frozen.Pilot):
                 self.latest_ready, self.args.simulation_scan_max_age_sec)
         except ValueError as exc:
             return dict(classification='invalid_initial_request_window_goal_not_sent',reason=str(exc))
-        first_distance = math.hypot(self.route[0]['pose'][0]-start_pose['x'], self.route[0]['pose'][1]-start_pose['y'])
+        start_index = self.mission.start_index if getattr(self, 'mission', None) is not None else 0
+        first_distance = math.hypot(self.route[start_index]['pose'][0]-start_pose['x'], self.route[start_index]['pose'][1]-start_pose['y'])
         self.emit('first_leg_window_check', distance_m=first_distance, limit_m=first_limit,
                   source_pose_stamp_ns=start_pose.get('stamp_ns'), final_goal_tolerances_unchanged=True)
         if first_distance >= first_limit:
@@ -631,7 +654,7 @@ class WaypointPilot(frozen.Pilot):
                                     Path('/proc/sys/kernel/random/boot_id').read_text().strip())
         except ValueError as exc:
             return dict(classification='invalid_recording_deadline_budget_goal_not_sent',reason=str(exc))
-        request.number_of_loops, request.goal_index = 0, 0
+        request.number_of_loops, request.goal_index = 0, start_index
         for entry in self.route:
             pose = PoseStamped()
             pose.header.frame_id = 'map'
@@ -641,12 +664,12 @@ class WaypointPilot(frozen.Pilot):
             pose.pose.orientation.z = math.sin(entry['pose'][2]/2.)
             pose.pose.orientation.w = math.cos(entry['pose'][2]/2.)
             request.poses.append(pose)
-        requested_uuid = uuid.uuid4()
+        requested_uuid = self.mission.reserve() if getattr(self, 'mission', None) is not None else uuid.uuid4()
         self.owned_identity = OwnedGoalIdentity(requested_uuid.bytes)
         self.goal_uuid = UUID(uuid=list(requested_uuid.bytes))
         self.goal_sent_steady, self.goal_sent_ns = time.monotonic(), time.time_ns()
         self.emit('goal_send', action_uuid=str(requested_uuid), action_server=ACTION,
-                  number_of_loops=0, goal_index=0, requested_route_map=self.route, start_snapshot=snapshot,
+                  number_of_loops=0, goal_index=start_index, requested_route_map=self.route, start_snapshot=snapshot,
                   readiness_manifest=self.latest_ready, readiness_manifest_sha256=self.latest_ready_sha,
                   preregistered_budget=budget,
                   pose_header_stamps_ns=[frozen.stamp_ns(pose.header.stamp) for pose in request.poses])
@@ -656,6 +679,8 @@ class WaypointPilot(frozen.Pilot):
         self.action_goal_handle = sent.result()
         self.owned_identity.verify(self.action_goal_handle.goal_id.uuid)
         self.emit('goal_response', accepted=bool(self.action_goal_handle.accepted), action_uuid=str(requested_uuid))
+        if getattr(self, 'mission', None) is not None:
+            self.mission.acknowledge(bool(self.action_goal_handle.accepted))
         if not self.action_goal_handle.accepted:
             return dict(classification='goal_rejected')
         terminal = self.action_goal_handle.get_result_async()

@@ -485,9 +485,44 @@ class AsyncEvidenceWriter:
                                            and self.persisted == self.submitted and not self.thread.is_alive()))
 
 
+class AdvancingStop:
+    """Post-zero raw-Odom dwell; rereading one cache entry earns no time."""
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.zero_stamp = self.first_stamp = self.first_steady = None
+        self.last_stamp = self.last_steady = self.last_receive = None
+
+    def observe(self, snapshot, steady_ns, healthy):
+        odom = snapshot.get('last', {}).get('odom', {})
+        stamp, receive = odom.get('stamp_ns'), odom.get('received_unix_ns')
+        stopped = healthy and strict_stopped(snapshot)[0]
+        if not stopped or type(stamp) is not int or stamp <= 0:
+            self.reset(); return False
+        if self.zero_stamp is None:
+            self.zero_stamp = self.last_stamp = stamp
+            self.last_steady, self.last_receive = steady_ns, receive
+            return False
+        if stamp == self.last_stamp and receive == self.last_receive:
+            return (self.first_stamp is not None and steady_ns-self.last_steady <= 300_000_000
+                    and self.last_stamp-self.first_stamp >= 300_000_000
+                    and self.last_steady-self.first_steady >= 300_000_000)
+        sequence = (stamp > self.last_stamp and stamp-self.last_stamp <= 300_000_000
+                    and 0 <= steady_ns-self.last_steady <= 300_000_000)
+        self.last_stamp, self.last_steady, self.last_receive = stamp, steady_ns, receive
+        if not sequence or stamp <= self.zero_stamp:
+            self.first_stamp = self.first_steady = None
+            return False
+        if self.first_stamp is None:
+            self.first_stamp, self.first_steady = stamp, steady_ns
+        return stamp-self.first_stamp >= 300_000_000 and steady_ns-self.first_steady >= 300_000_000
+
+
 class OrderedVisits:
     """Independent original-map checks. Feedback selects a leg; it proves no visit."""
-    def __init__(self, route, xy_tolerance=.15, yaw_tolerance=.08, dwell_seconds=.3):
+    def __init__(self, route, xy_tolerance=.15, yaw_tolerance=.08, dwell_seconds=.3,
+                 start_index=0, accepted_visits=None, advancing_stop=False):
         self.route = route
         self.xy_tolerance, self.yaw_tolerance = xy_tolerance, yaw_tolerance
         self.dwell_ns = int(dwell_seconds*1e9)
@@ -501,11 +536,22 @@ class OrderedVisits:
         self.violation = None
         self.dwell_start = None
         self.dwell_start_stamp = None
+        self.start_index = start_index
+        self.advancing_stop = AdvancingStop() if advancing_stop else None
+        if type(start_index) is not int or not 0 <= start_index < len(route):
+            raise ValueError('Invalid absolute start index')
+        if len(accepted_visits or []) != start_index:
+            raise ValueError('Resume requires every preceding accepted visit')
+        for index, previous in enumerate(accepted_visits or []):
+            if (previous.get('index') != index or previous.get('id') != route[index]['id']
+                    or previous.get('original_goal_map') != route[index]['pose'] or not previous.get('passed')):
+                raise ValueError('Accepted prefix identity differs from route')
+            self.visits[index] = previous
 
     def feedback(self, index, steady_ns, unix_ns):
         if type(index) is not int or not 0 <= index < len(self.route):
             self.violation = 'native_feedback_index_out_of_range'
-        elif self.active is None and index != 0:
+        elif self.active is None and index != self.start_index:
             self.violation = 'native_feedback_skipped_first_waypoint'
         elif self.active is not None and index != self.active:
             if index != self.active+1 or self.visits[self.active]['passed'] is None:
@@ -516,6 +562,8 @@ class OrderedVisits:
             return None
         self.active = index
         self.dwell_start = self.dwell_start_stamp = None
+        if self.advancing_stop is not None:
+            self.advancing_stop.reset()
         visit = self.visits[index]
         visit['entered'] = dict(steady_ns=steady_ns, unix_ns=unix_ns, basis='native current_waypoint feedback; child dispatch time unavailable')
         visit['phase'] = 'approach'
@@ -572,15 +620,21 @@ class OrderedVisits:
         visit['phase'] = 'stopped_within_tolerance' if within and stopped else 'within_tolerance' if within else 'approach'
         if not (healthy and within and stopped):
             self.dwell_start = self.dwell_start_stamp = None
+            if self.advancing_stop is not None:
+                self.advancing_stop.reset()
             return None
+        advanced = self.advancing_stop.observe(snapshot, steady_ns, healthy) if self.advancing_stop is not None else True
         if self.dwell_start is None:
             self.dwell_start, self.dwell_start_stamp = steady_ns, pose.get('stamp_ns')
-        if steady_ns-self.dwell_start < self.dwell_ns or pose.get('stamp_ns') == self.dwell_start_stamp:
+        if not advanced or steady_ns-self.dwell_start < self.dwell_ns or pose.get('stamp_ns') == self.dwell_start_stamp:
             return None
         visit['passed'] = dict(steady_ns=steady_ns, unix_ns=unix_ns, dwell_start_steady_ns=self.dwell_start,
                                continuous_stopped_s=(steady_ns-self.dwell_start)/1e9,
                                xy_error_m=math.hypot(pose['x']-goal[0], pose['y']-goal[1]),
                                yaw_error_rad=abs(angular_difference(pose['yaw'], goal[2])), snapshot=snapshot)
+        if self.advancing_stop is not None:
+            visit['passed']['advancing_odom_dwell'] = dict(first_stamp_ns=self.advancing_stop.first_stamp,
+                last_stamp_ns=self.advancing_stop.last_stamp, zero_baseline_stamp_ns=self.advancing_stop.zero_stamp)
         return dict(kind='waypoint_independently_visited', index=self.active, id=visit['id'], passed=visit['passed'])
 
     def summary(self):
