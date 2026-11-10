@@ -211,6 +211,13 @@ class ReconcileCliTests(unittest.TestCase):
         self.assertFalse(json.loads(original.read_text())['owned_goal_shutdown']['stop']['observed'])
         self.assertEqual(before['budgets']['mission_dispatches_reserved'],3)
         self.assertEqual(before['progress']['accepted_prefix_count'],5)
+        # Relocate only the isolated test-state reference to the sealed identical
+        # bytes. Production must HOLD if its recorded historical path is missing.
+        old=before['attempt']['native_result'];self.assertEqual(old['sha256'],digest(original.read_bytes()))
+        relocated=dict(path=str(original),sha256=old['sha256'])
+        before['attempt']['native_result']=relocated
+        before['attempt']['native_result_history']=[relocated]
+        before['attempts'][-1]=copy.deepcopy(before['attempt'])
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);store=MissionStore(root/'exact.db')
             store.db.execute('INSERT INTO mission VALUES (1,?,?)',(before['revision'],encoded(before)))

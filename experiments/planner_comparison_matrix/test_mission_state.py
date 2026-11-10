@@ -81,6 +81,10 @@ class MissionTests(unittest.TestCase):
             final_measured_and_commanded_stop=True,missed_waypoints=[dict(index=0,error_code=208)])
         self.finish(result,True)
         self.assertEqual(self.store.state()['lifecycle'],'NEEDS_TASK_DECISION')
+        with self.assertRaisesRegex(Hold,'Conflicting'):
+            self.finish(dict(result,status=5),True)
+        a=self.store.reserve(str(uuid.uuid4()),self.root)
+        result['action_uuid']=a['parent_action_uuid']
         result['cancel_reason']='input_became_invalid:scan_old';result['missed_waypoints']=[];result['status']=5
         self.finish(result,True)
         self.assertEqual(self.store.state()['lifecycle'],'PAUSED_INPUT_HEALTH')
