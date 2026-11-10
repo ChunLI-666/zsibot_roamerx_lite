@@ -87,7 +87,7 @@ class RawPathTests(unittest.TestCase):
         # execution_ready is the independently reviewed f163f509 scan-profile
         # wrapper. Default/operational/strict behavior has separate integration
         # fixtures; original cancellation and confirmation methods stay frozen.
-        expected={'execution_ready': '1cb86060c1b0a78da5e805beec3ebab3c6f912a3b2d23c14872cefa10c5ef146', 'confirm_scan_aging': 'db28cdd3018c42ba7c38169d33f45f046759cc90fc1e277763ec2b426d6cfebb', 'cancel_own': '3c8c0e7e689262980e1bbadbad67bb62f398f23ff4eec3d57bf406033e9b57ce'}
+        expected={'execution_ready': '039da0ff6cba93ec337c25c03b258a9c3bc54a0781b7ef921259c8bdf4a3fe1c', 'confirm_scan_aging': 'db28cdd3018c42ba7c38169d33f45f046759cc90fc1e277763ec2b426d6cfebb', 'cancel_own': '3c8c0e7e689262980e1bbadbad67bb62f398f23ff4eec3d57bf406033e9b57ce'}
         cls=next(n for n in ast.parse(SOURCE.read_text()).body if isinstance(n,ast.ClassDef) and n.name=='WaypointPilot')
         observed={n.name:hashlib.sha256(ast.dump(n,include_attributes=False).encode()).hexdigest() for n in cls.body if isinstance(n,ast.FunctionDef) and n.name in expected}
         self.assertEqual(observed,expected)

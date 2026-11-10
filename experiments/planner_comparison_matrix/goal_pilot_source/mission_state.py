@@ -1,0 +1,365 @@
+"""Transactional mission authority. No ROS imports and no motion side effects."""
+from contextlib import contextmanager
+import copy
+import fcntl
+import hashlib
+import json
+import math
+import os
+from pathlib import Path
+import sqlite3
+import time
+import uuid
+
+from waypoint_contract import validate_route, strict_stopped, angular_difference
+
+
+class Hold(RuntimeError):
+    pass
+
+
+def encoded(value):
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False)
+
+
+def digest(value):
+    return hashlib.sha256(value if isinstance(value, bytes) else encoded(value).encode()).hexdigest()
+
+
+def atomic_json(path, value):
+    path = Path(path)
+    temporary = path.with_name(path.name+'.'+str(uuid.uuid4())+'.tmp')
+    with temporary.open('x') as stream:
+        stream.write(encoded(value)+'\n'); stream.flush(); os.fsync(stream.fileno())
+    os.replace(temporary, path)
+    descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def boot_clock():
+    return Path('/proc/sys/kernel/random/boot_id').read_text().strip(), time.clock_gettime(time.CLOCK_BOOTTIME)
+
+
+IDENTITY_KEYS = ('map_contract_sha256', 'footprint_sha256', 'acceptance_policy_sha256')
+
+
+def validate_identity(identity):
+    for key in (*IDENTITY_KEYS, 'effective_config_sha256'):
+        value = identity.get(key)
+        if not isinstance(value, str) or len(value) != 64 or any(c not in '0123456789abcdef' for c in value):
+            raise ValueError('Missing SHA256 identity: '+key)
+    if identity.get('variant') not in ('official', 'segmented'):
+        raise ValueError('Mission requires official or segmented identity')
+    value = identity.get('source_sha', '')
+    if len(value) != 40 or any(c not in '0123456789abcdef' for c in value):
+        raise ValueError('Full source commit required')
+
+
+def validate_visit(route, index, visit, legacy=False):
+    if visit.get('index') != index or visit.get('id') != route[index]['id'] or visit.get('original_goal_map') != route[index]['pose']:
+        raise Hold('Visit identity does not match exact original index')
+    passed = visit.get('passed') or {}
+    snapshot = passed.get('snapshot', {})
+    pose = snapshot.get('last', {}).get('pose', {})
+    goal = route[index]['pose']
+    if (pose.get('frame_id') != 'map' or not all(math.isfinite(pose.get(k, math.nan)) for k in ('x','y','yaw'))
+            or pose.get('receive_age_s', math.inf) > .3 or not -.05 <= pose.get('header_age_s', math.inf) <= .3
+            or math.hypot(pose['x']-goal[0], pose['y']-goal[1]) > .15
+            or abs(angular_difference(pose['yaw'], goal[2])) > .08
+            or passed.get('continuous_stopped_s', 0) < .3 or not strict_stopped(snapshot)[0]):
+        raise Hold('Original geometry/fresh measured stopped visit not proven')
+    if not legacy and not passed.get('advancing_odom_dwell'):
+        raise Hold('New visit lacks post-zero advancing original Odom dwell')
+
+
+def failure_decision(result, terminal, quiescent, stopped):
+    """Executed by finish_attempt and consumed by the real CLI retry loop."""
+    if not terminal:return 'HOLD','UNKNOWN_DISPATCH'
+    if not quiescent or not stopped:return 'HOLD','CHILD_OR_STOP_UNPROVEN'
+    reason=result.get('cancel_reason') or ''
+    if result.get('stop_signals') or reason in ('scheduled_cancel','pilot_interrupted'):
+        return 'CANCELED','OPERATOR_CANCEL'
+    codes={v.get('error_code') for v in result.get('missed_waypoints') or []}
+    if reason.startswith('input_became_invalid:') or codes & {102,202}:
+        return 'PAUSED_INPUT_HEALTH','FRESH_STABLE_HEALTH_REQUIRED'
+    if codes & {203,204,208}:
+        return 'NEEDS_TASK_DECISION','NO_FEASIBLE_ORIGINAL_GOAL_PATH'
+    if codes & {101,201}:return 'NEEDS_TASK_DECISION','INVALID_RUNTIME_CONFIGURATION'
+    if codes & {205,206}:return 'RECOVERABLE_FAILURE','BOUNDED_OBSTACLE_WAIT'
+    if codes & {104,105,106,107,207}:return 'RECOVERABLE_FAILURE','BOUNDED_ORIGINAL_GOAL_REPLAN'
+    return 'NEEDS_TASK_DECISION','UNCLASSIFIED_TERMINAL_OR_INDEPENDENT_EVIDENCE_FAILURE'
+
+
+class MissionStore:
+    """One mission per local SQLite DB, with DB and shared robot/domain locks."""
+    def __init__(self, path, resource=None):
+        self.path = Path(path).resolve()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.locks = []
+        try:
+            # Caller supplies a stable resource lock shared across A/B missions.
+            for lock in ([Path(resource)] if resource else [])+[self.path.with_suffix('.lock')]:
+                lock.parent.mkdir(parents=True, exist_ok=True)
+                stream = lock.open('a+')
+                self.locks.append(stream)
+                fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self.db = sqlite3.connect(self.path, isolation_level=None, timeout=0)
+            self.db.execute('PRAGMA synchronous=FULL')
+            self.db.execute('PRAGMA journal_mode=DELETE')
+            self.db.executescript('''
+                CREATE TABLE IF NOT EXISTS mission (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, state TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY, revision INTEGER NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS operations (request_id TEXT PRIMARY KEY, arguments_sha256 TEXT NOT NULL, result TEXT);
+            ''')
+        except BaseException:
+            self.close(); raise
+
+    def close(self):
+        if hasattr(self, 'db'):
+            self.db.close(); del self.db
+        for stream in self.locks:
+            stream.close()
+        self.locks = []
+
+    @staticmethod
+    def inspect(path):
+        db = sqlite3.connect(Path(path).resolve().as_uri()+'?mode=ro', uri=True)
+        try:
+            row = db.execute('SELECT state FROM mission WHERE id=1').fetchone()
+            if row is None:
+                raise Hold('Mission has not been created')
+            return json.loads(row[0])
+        finally:
+            db.close()
+
+    def state(self):
+        row = self.db.execute('SELECT state FROM mission WHERE id=1').fetchone()
+        if row is None:
+            raise Hold('Mission has not been created')
+        return json.loads(row[0])
+
+    def create(self, route_raw, identity, policy, mission_id=None):
+        validate_identity(identity)
+        document = json.loads(route_raw); route = validate_route(document)
+        if policy.get('mission_budget_sec') != document['mission_budget_sec']:
+            raise ValueError('Policy must preserve the exact route mission budget')
+        if any(type(policy.get(k)) is not int for k in ('max_parent_dispatches','max_attempts_per_index','bt_retries')) or policy.get('max_parent_dispatches') not in range(1, 11) or policy.get('max_attempts_per_index') not in range(1, 7):
+            raise ValueError('Finite limits required (parent dispatches<=10, child attempts per index<=6)')
+        if policy.get('bt_retries') not in (0, 1):
+            raise ValueError('Only zero or one native BT retry is supported')
+        ident = dict(identity, route_raw_sha256=digest(route_raw), route_semantic_sha256=digest(route))
+        boot, now = boot_clock()
+        state = dict(schema='matrix.mission.state.v1', mission_id=str(uuid.UUID(mission_id)) if mission_id else str(uuid.uuid4()),
+            revision=0, identity_epoch_id=str(uuid.uuid4()), identity=ident, variant=identity['variant'],
+            lifecycle='NEW', hold_reason=None, route=route, route_size=len(route), policy=policy,
+            progress=dict(accepted_prefix_count=0,next_index=0,active_index=None,last_failed_index=None,accepted_receipts=[]),
+            current_target=route[0], attempt=None, attempts=[], candidates={},
+            budgets=dict(mission_dispatches_reserved=0,per_index_reserved=[0]*len(route),
+                per_index_parent_dispatches=[0]*len(route),reservation_unit='child_attempt_including_native_BT_retries',
+                deadline_boot_id=None,deadline_boottime_sec=None,remaining_sec=policy['mission_budget_sec']),
+            result_flags=dict(operational_complete=False,recovery_used=False,single_run_complete=False,
+                strict_timing_status='NOT_EVALUATED',simulation_acceptance=False,physical_acceptance=False),
+            stop=dict(state='UNPROVEN'), evidence={}, updated=dict(unix_ns=time.time_ns(),boot_id=boot,boottime_sec=now))
+        self.db.execute('INSERT INTO mission VALUES (1,0,?)', (encoded(state),))
+        return state
+
+    @contextmanager
+    def transaction(self, kind, expected=None):
+        self.db.execute('BEGIN IMMEDIATE')
+        try:
+            state = self.state()
+            if expected is not None and expected != state['revision']:
+                raise Hold('STALE_REVISION')
+            yield state
+            state['revision'] += 1
+            boot, now = boot_clock()
+            state['updated'] = dict(unix_ns=time.time_ns(),boot_id=boot,boottime_sec=now)
+            self.db.execute('UPDATE mission SET revision=?,state=? WHERE id=1', (state['revision'],encoded(state)))
+            self.db.execute('INSERT INTO events(revision,kind,payload) VALUES (?,?,?)',
+                (state['revision'],kind,encoded(dict(attempt_id=(state.get('attempt') or {}).get('attempt_id'),
+                                                  progress=state['progress']['accepted_prefix_count'],time_ns=time.time_ns()))))
+            self.db.execute('COMMIT')
+        except BaseException:
+            self.db.execute('ROLLBACK'); raise
+
+    def operation(self, request_id, arguments):
+        request_id = str(uuid.UUID(request_id)); sha = digest(arguments)
+        row = self.db.execute('SELECT arguments_sha256,result FROM operations WHERE request_id=?',(request_id,)).fetchone()
+        if row:
+            if row[0] != sha:
+                raise Hold('Operation id reused with different arguments')
+            return json.loads(row[1]) if row[1] else dict(operation_outcome='HELD',reason='operation interrupted; reconcile, never redispatch')
+        self.db.execute('INSERT INTO operations VALUES (?,?,NULL)',(request_id,sha))
+        return None
+
+    def finish_operation(self, request_id, result):
+        self.db.execute('UPDATE operations SET result=? WHERE request_id=?',(encoded(result),request_id))
+
+    def check_identity(self, identity):
+        validate_identity(identity); state = self.state()
+        for key in (*IDENTITY_KEYS, 'variant', 'source_sha', 'effective_config_sha256'):
+            if identity.get(key) != state['identity'].get(key):
+                raise Hold('IDENTITY_MISMATCH:'+key)
+
+    def remaining(self):
+        s=self.state();boot,now=boot_clock()
+        if s['budgets']['deadline_boottime_sec'] is None:
+            return s['budgets']['remaining_sec']
+        if boot != s['budgets']['deadline_boot_id']:
+            raise Hold('CLOCK_UNTRUSTED: mission boot changed')
+        return max(0.,s['budgets']['deadline_boottime_sec']-now)
+
+    def reserve(self, request_id, output):
+        with self.transaction('SEND_INTENT') as s:
+            old=s.get('attempt')
+            if old and not old.get('terminal_confirmed'):
+                raise Hold('UNKNOWN_DISPATCH: reconcile exact previous UUID first')
+            if old and (not old.get('children_quiescent') or not old.get('stopped')):
+                raise Hold('Prior attempt lacks child quiescence or measured stop')
+            index=s['progress']['next_index']
+            if index is None:
+                raise Hold('Mission is already complete')
+            budget=s['budgets']; policy=s['policy']; boot, now=boot_clock()
+            if budget['deadline_boottime_sec'] is None:
+                budget['deadline_boot_id']=boot;budget['deadline_boottime_sec']=now+budget['remaining_sec']
+            if boot!=budget['deadline_boot_id'] or now>=budget['deadline_boottime_sec']:
+                raise Hold('FAILED_BUDGET: deadline exhausted or boot changed')
+            child_slots=1+policy['bt_retries']
+            if budget['mission_dispatches_reserved']>=policy['max_parent_dispatches'] or any(
+                    count+child_slots>policy['max_attempts_per_index'] for count in budget['per_index_reserved'][index:]):
+                raise Hold('FAILED_BUDGET: dispatch allowance exhausted')
+            budget['mission_dispatches_reserved']+=1
+            for i in range(index,len(s['route'])):
+                budget['per_index_reserved'][i]+=child_slots
+                budget['per_index_parent_dispatches'][i]+=1
+            attempt=dict(attempt_id=str(uuid.uuid4()),parent_action_uuid=str(uuid.uuid4()),request_id=request_id,
+                start_index=index,dispatch_state='INTENT_COMMITTED',native_status=None,native_error_code=None,
+                missed_waypoints=None,terminal_confirmed=False,children_quiescent=False,stopped=False,
+                output=str(Path(output).resolve()),created_ns=time.time_ns(),highest_feedback_index=None)
+            attempt['child_slots_reserved']=child_slots
+            s['attempt']=attempt;s['attempts'].append(copy.deepcopy(attempt))
+            s['lifecycle']='DISPATCH_INTENT';s['hold_reason']=None;s['candidates']={}
+            if len(s['attempts'])>1: s['result_flags']['recovery_used']=True
+        return self.state()['attempt']
+
+    def acknowledge(self, action_uuid, accepted):
+        with self.transaction('ACK') as s:
+            if s['attempt']['parent_action_uuid']!=str(uuid.UUID(action_uuid)):
+                raise Hold('Old action acknowledgement')
+            a=s['attempt'];a['dispatch_state']='ACCEPTED' if accepted else 'REJECTED'
+            if not accepted:
+                a.update(terminal_confirmed=True,children_quiescent=True,stopped=True)
+            s['lifecycle']='RUNNING' if accepted else 'RECOVERABLE_FAILURE'
+
+    def observe(self, action_uuid, ordered):
+        s=self.state(); a=s.get('attempt') or {}
+        if a.get('parent_action_uuid')!=str(uuid.UUID(action_uuid)):
+            return False
+        active=ordered.active
+        if active is None:return False
+        changed=a.get('highest_feedback_index')!=active or any(
+            v.get('passed') is not None and str(v['index']) not in s['candidates']
+            for v in ordered.visits[s['progress']['accepted_prefix_count']:])
+        if not changed:return False
+        with self.transaction('VISIT_OBSERVATION') as s:
+            a=s['attempt'];a['highest_feedback_index']=active;s['progress']['active_index']=active
+            for v in ordered.visits[s['progress']['accepted_prefix_count']:]:
+                if v.get('passed') is not None:
+                    validate_visit(s['route'],v['index'],v)
+                    s['candidates'][str(v['index'])]=copy.deepcopy(v)
+            self._promote(s,active,'next_native_feedback_under_exclusive_stop_on_failure')
+        return True
+
+    @staticmethod
+    def _promote(s, until, basis, legacy=False):
+        progress=s['progress']
+        while progress['accepted_prefix_count']<until:
+            index=progress['accepted_prefix_count']; v=s['candidates'].get(str(index))
+            if v is None:break
+            validate_visit(s['route'],index,v,legacy)
+            receipt=dict(index=index,id=s['route'][index]['id'],original_goal_map=s['route'][index]['pose'],
+                source_attempt_id=s['attempt']['attempt_id'],source_action_uuid=s['attempt']['parent_action_uuid'],
+                native_completion_basis=basis,visit=copy.deepcopy(v),legacy_stop_proof=legacy)
+            receipt['sha256']=digest(receipt)
+            progress['accepted_receipts'].append(receipt);progress['accepted_prefix_count']+=1
+        index=progress['accepted_prefix_count'];progress['next_index']=index if index<len(s['route']) else None
+        s['current_target']=s['route'][index] if index<len(s['route']) else None
+
+    def finish_attempt(self, result, children_quiescent):
+        with self.transaction('ATTEMPT_TERMINAL') as s:
+            a=s['attempt']
+            if result.get('action_uuid')!=a['parent_action_uuid']:
+                raise Hold('Terminal result does not match owned Action UUID')
+            status=result.get('status');missed=result.get('missed_waypoints')
+            a.update(native_status=status,native_error_code=result.get('error_code'),missed_waypoints=missed,
+                terminal_confirmed=status in (4,5,6) or a['dispatch_state']=='REJECTED',children_quiescent=bool(children_quiescent),
+                stopped=result.get('final_measured_and_commanded_stop',result.get('settled_measured_and_commanded_stop')) is True)
+            a['dispatch_state']='TERMINAL_CONFIRMED' if a['terminal_confirmed'] else 'ACCEPTANCE_UNKNOWN'
+            successful=status==4 and result.get('error_code')==0 and missed==[]
+            if successful and result.get('functional_status')=='PASS' and result.get('evidence_writer',{}).get('evidence_complete') is True:
+                self._promote(s,len(s['route']),'successful_native_parent_and_independent_visits')
+            failed=min((v['index'] for v in missed),default=s['progress']['next_index']) if isinstance(missed,list) else s['progress']['next_index']
+            if missed and (type(failed) is not int or not a['start_index']<=failed<len(s['route'])):
+                raise Hold('Invalid absolute failed waypoint index')
+            if not successful:s['progress']['last_failed_index']=failed
+            # Only a terminal failed native batch proves its later suffix was not entered.
+            if status==6 and not a.get('budget_reconciled') and isinstance(missed,list) and len(missed)==1 and isinstance(failed,int):
+                for i in range(failed+1,len(s['route'])):
+                    s['budgets']['per_index_reserved'][i]-=a['child_slots_reserved']
+                    s['budgets']['per_index_parent_dispatches'][i]-=1
+                a['budget_reconciled']=True
+            complete=successful and s['progress']['next_index'] is None and a['stopped'] and a['children_quiescent']
+            s['result_flags']['recovery_used'] |= bool(result.get('bt_recovery_used',True))
+            s['result_flags']['operational_complete']=complete
+            s['result_flags']['single_run_complete']=complete and not s['result_flags']['recovery_used'] and not result.get('bt_recovery_used',True)
+            if result.get('strict_scan_timing_status')=='FAIL':s['result_flags']['strict_timing_status']='FAIL'
+            if complete:
+                s['lifecycle']='COMPLETED_WITH_RECOVERY' if s['result_flags']['recovery_used'] else 'COMPLETED_SINGLE_RUN'
+                s['hold_reason']=None
+            else:
+                s['lifecycle'],s['hold_reason']=failure_decision(result,a['terminal_confirmed'],a['children_quiescent'],a['stopped'])
+            s['attempts'][-1]=copy.deepcopy(a)
+
+    def import_closed(self, result, result_sha, historical_bt_retries=1):
+        if result.get('status') not in (4,5,6) or not result.get('final_measured_and_commanded_stop'):
+            raise Hold('Historical attempt is not terminal and stopped')
+        with self.transaction('IMPORT_CLOSED') as s:
+            if s['attempts'] or result.get('route_sha256')!=s['identity']['route_raw_sha256']:
+                raise Hold('Import requires empty mission and identical original route')
+            visits=result.get('ordered',{}).get('visits',[])
+            if len(visits)!=len(s['route']):raise Hold('Historical route size differs')
+            missed=result.get('missed_waypoints')
+            if not isinstance(missed,list):raise Hold('Historical missed list missing')
+            end=min((v['index'] for v in missed),default=len(visits))
+            if not isinstance(end,int) or not 0<=end<=len(visits):raise Hold('Invalid historical failed index')
+            for i in range(end):validate_visit(s['route'],i,visits[i],True)
+            a=dict(attempt_id=result.get('attempt_uuid',str(uuid.uuid4())),parent_action_uuid=str(uuid.UUID(result['action_uuid'])),
+                dispatch_state='TERMINAL_CONFIRMED',terminal_confirmed=True,children_quiescent=True,stopped=True,
+                historical_result_sha256=result_sha,start_index=0,native_status=result['status'],missed_waypoints=missed)
+            if type(historical_bt_retries) is not int or historical_bt_retries not in (0,1):raise Hold('Historical BT retry count required')
+            a['child_slots_reserved']=1+historical_bt_retries
+            s['attempt']=a;s['attempts']=[copy.deepcopy(a)]
+            s['candidates']={str(i):visits[i] for i in range(end)}
+            self._promote(s,end,'sealed_historical_native_result_and_stopped_visits',True)
+            s['progress']['last_failed_index']=end if end<len(visits) else None
+            elapsed=max(0.,(result.get('finished_ns',0)-result.get('created_ns',0))/1e9)
+            if not 0<elapsed<s['policy']['mission_budget_sec']:raise Hold('Historical consumed time unavailable or budget exhausted')
+            s['budgets']['remaining_sec']-=elapsed
+            s['budgets']['historical_debited_sec']=elapsed
+            s['budgets']['mission_dispatches_reserved']=1
+            s['budgets']['per_index_reserved']=[(1+historical_bt_retries)*int(i<=end) for i in range(len(visits))]
+            s['budgets']['per_index_parent_dispatches']=[int(i<=end) for i in range(len(visits))]
+            s['result_flags'].update(recovery_used=True,strict_timing_status=result.get('strict_scan_timing_status','NOT_EVALUATED'))
+            s['lifecycle']='RECOVERABLE_FAILURE'
+
+    def export(self, output):
+        path=Path(output);path.mkdir(parents=True,exist_ok=True)
+        state=self.state();atomic_json(path/'state.json',state)
+        result=dict(schema='matrix.mission.result.v1',mission_id=state['mission_id'],revision=state['revision'],
+            lifecycle=state['lifecycle'],identity=state['identity'],progress=state['progress'],
+            result_flags=state['result_flags'],attempts=state['attempts'],budgets=state['budgets'])
+        atomic_json(path/'result.json',result)
+        return state
