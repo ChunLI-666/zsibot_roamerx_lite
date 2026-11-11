@@ -1024,4 +1024,56 @@ TEST_F(P5ShortPhase, ValidAndInvalidSameGoalPlansCannotRenewTheOriginalSettlingP
     std::this_thread::sleep_for(2ms);}
   ASSERT_TRUE(expired);EXPECT_FALSE(p5Check());RecordProperty("phase_elapsed_ms",static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-first).count()));
 }
+
+class P7InnerAimStableTerminal : public P5StableTerminal {
+protected:
+  void configureExtra() override {
+    P5StableTerminal::configureExtra();
+    node_->declare_parameter("FollowPath.terminal_original_region_pivot",true);
+    node_->declare_parameter("FollowPath.terminal_rotation_aim_yaw_tolerance",.03);
+    node_->declare_parameter("FollowPath.rpp.rotate_to_heading_angular_vel",.3);
+    node_->declare_parameter("FollowPath.rpp.max_angular_accel",6.);
+  }
+  bool originalReached() {
+    return checker_->isGoalReached(current_pose_.pose,pose(0.,0.).pose,geometry_msgs::msg::Twist{});
+  }
+};
+TEST_F(P7InnerAimStableTerminal, RecordedOuterResidualRequiresInnerAimAndANewFullStableWindow) {
+  // Same public plugin/callback path and installed DSO as P5. This is a finite
+  // protocol fixture, not a claim that a plant follows this supplied pose tail.
+  controller_->reset();auto original=plan(-.02);
+  for(auto & point:original.poses)point.pose.orientation=pose(0.,0.).pose.orientation;
+  controller_->setPlan(original);checker_->reset();heading_=.077;
+  deliver(p5Message());const auto correction=p5Tick();
+  ASSERT_DOUBLE_EQ(correction.twist.linear.x,0.);
+  ASSERT_LT(correction.twist.angular.z,0.);ASSERT_LE(std::abs(correction.twist.angular.z),.3);
+  ASSERT_FALSE(originalReached());
+  RecordProperty("outer_residual_rad",.077);RecordProperty("outer_correction_wz",correction.twist.angular.z);
+  heading_=.02;deliver(p5Message());const auto first_zero=p5Tick();
+  ASSERT_DOUBLE_EQ(first_zero.twist.linear.x,0.);ASSERT_DOUBLE_EQ(first_zero.twist.angular.z,0.);
+  ASSERT_FALSE(originalReached());const auto zero_time=std::chrono::steady_clock::now();
+  auto next_tick=zero_time,next_sample=zero_time;bool ready=false;
+  const auto end=zero_time+1400ms;
+  while(std::chrono::steady_clock::now()<end){
+    deliver(p5Message());const auto now=std::chrono::steady_clock::now();
+    if(now>=next_tick){const auto value=p5Tick();
+      ASSERT_DOUBLE_EQ(value.twist.linear.x,0.);ASSERT_DOUBLE_EQ(value.twist.angular.z,0.);
+      ready=originalReached();if(now-zero_time<1s)ASSERT_FALSE(ready);
+      if(ready)break;next_tick=now+50ms;
+    }
+    next_sample+=2ms;std::this_thread::sleep_until(next_sample);
+  }
+  ASSERT_TRUE(ready);ASSERT_GE(std::chrono::steady_clock::now()-zero_time,1s);
+  ASSERT_DOUBLE_EQ(node_->get_parameter("goal_checker.yaw_goal_tolerance").as_double(),.08);
+  ASSERT_DOUBLE_EQ(node_->get_parameter("FollowPath.terminal_settle_timeout_sec").as_double(),10.);
+  std::ifstream maps("/proc/self/maps");std::string line,adapter,rpp;
+  while(std::getline(maps,line)){
+    if(line.find("libofficial_lattice_rpp_adapter.so")!=std::string::npos)adapter=line;
+    if(line.find("libnav2_regulated_pure_pursuit_controller.so")!=std::string::npos)rpp=line;
+  }
+  ASSERT_FALSE(adapter.empty());ASSERT_FALSE(rpp.empty());
+  RecordProperty("actual_adapter_mapping",adapter);RecordProperty("actual_rpp_mapping",rpp);
+  RecordProperty("registered_dds_callbacks",static_cast<int>(callbacks_));
+  RecordProperty("post_zero_ready_ms",static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-zero_time).count()));
+}
 }  // namespace
