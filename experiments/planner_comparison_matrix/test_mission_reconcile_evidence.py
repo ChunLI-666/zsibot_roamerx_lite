@@ -30,7 +30,7 @@ def cli_fixture():
     receipt=Path(sys.argv[2]);sample=json.loads(receipt.read_text())
     sys.argv=[str(SOURCE/'mission_resume.py'),*sys.argv[3:]]
     trace_path=receipt.with_suffix('.trace.json')
-    trace=dict(goals_sent=0,cancelled_uuids=[],queried_uuids=[],destroyed=False,shutdown=False)
+    trace=dict(goals_sent=0,cancelled_uuids=[],queried_uuids=[],destroyed=False,shutdown=False,health_phases=[])
     rclpy=ModuleType('rclpy');rclpy.init=lambda **kwargs:None
     rclpy.ok=lambda:not trace['shutdown'];rclpy.spin_once=lambda *args,**kwargs:None
     rclpy.shutdown=lambda:trace.update(shutdown=True)
@@ -65,7 +65,8 @@ def cli_fixture():
                 return SimpleNamespace(done=lambda:True,result=lambda:response)
             return SimpleNamespace(wait_for_service=lambda **kwargs:True,call_async=call)
         def spin_until(self,predicate,timeout):return predicate()
-        def execution_ready(self):
+        def execution_ready(self,**kwargs):
+            trace['health_phases'].append(kwargs.get('phase','active'))
             self.latest_ready=dict(waypoint_ownership=dict(navigate_to_pose_active=[],follow_waypoints_active=[],
                 follow_path_active=[],follow_path_status_publishers_match=True,exclusive_nav_client=True,checked_unix_ns=time.time_ns()))
         def finalize_own_goal(self):return copy.deepcopy(sample['owned_goal_shutdown'])
@@ -152,6 +153,7 @@ class ReconcileCliTests(unittest.TestCase):
         self.assertEqual(trace['cancelled_uuids'],[before['attempt']['parent_action_uuid']])
         self.assertEqual(trace['queried_uuids'],trace['cancelled_uuids'])
         self.assertTrue(trace['destroyed']);self.assertTrue(trace['shutdown'])
+        self.assertIn('settle',trace['health_phases'])
         state=MissionStore.inspect(db)
         if tamper:
             self.assertEqual(state,before);self.assertIn('evidence differs',process.stdout);return
@@ -200,6 +202,16 @@ class ReconcileCliTests(unittest.TestCase):
                 original=Path(before['attempt']['native_result']['path']);old_raw=original.read_bytes()
                 self.run_cli(root,before,sample,operation)
                 self.assertEqual(original.read_bytes(),old_raw)
+
+    def test_expired_motion_clock_still_reconciles_original_uuid_and_proves_stop(self):
+        from mission_state import boot_clock
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);before,sample=self.synthetic_state(root);boot,now=boot_clock()
+            before['budgets'].update(deadline_boot_id=boot,deadline_boottime_sec=now-1,remaining_sec=0.)
+            state=self.run_cli(root,before,sample)
+            self.assertEqual(state['budgets']['remaining_sec'],0.)
+            self.assertTrue(state['attempt']['stopped']);self.assertEqual(state['stop']['state'],'PASSED')
+            self.assertEqual(state['attempt']['parent_action_uuid'],before['attempt']['parent_action_uuid'])
 
     def test_terminal_quiescent_without_measured_stop_keeps_operation_held(self):
         for operation in ['reconcile','cancel']:

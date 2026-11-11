@@ -41,6 +41,7 @@ class DecisionAgeTests(unittest.TestCase):
         # Bind the production functions themselves, without editing/extracting AST.
         n.current_summary=MethodType(batch.frozen.Pilot.current_summary,n)
         n.input_ready=MethodType(batch.frozen.Pilot.input_ready,n)
+        n.decision_ready=MethodType(batch.WaypointPilot.decision_ready,n)
         n.stop_decision_ready=MethodType(batch.WaypointPilot.stop_decision_ready,n)
         return n
 
@@ -64,6 +65,20 @@ class DecisionAgeTests(unittest.TestCase):
         ok,issues,snapshot=self.decision(n,.2)
         self.assertFalse(ok);self.assertIn('odom:invalid_header_age',issues)
         self.assertAlmostEqual(snapshot['last']['odom']['header_age_s'],.4)
+
+    def test_common_gate_enforces_stopped_only_when_requested_and_has_no_io(self):
+        n=self.node();n.last['odom']['vx']=.1
+        n.get_clock=lambda:SimpleNamespace(now=lambda:SimpleNamespace(nanoseconds=self.wall))
+        with patch('time.monotonic',return_value=self.steady),patch('time.monotonic_ns',return_value=int(self.steady*1e9)), \
+                patch('time.time_ns',return_value=self.wall), \
+                patch.object(Path,'read_text',side_effect=AssertionError('decision-time file read')), \
+                patch.object(Path,'read_bytes',side_effect=AssertionError('decision-time file read')), \
+                patch.object(batch.rclpy,'spin_once',side_effect=AssertionError('decision-time pump')):
+            self.assertTrue(n.decision_ready()[0])
+            self.assertFalse(n.decision_ready(require_stopped=True)[0])
+            n.mission=SimpleNamespace(store=SimpleNamespace(remaining=lambda:0.))
+            valid,issues,_=n.decision_ready()
+            self.assertFalse(valid);self.assertTrue(any('FAILED_BUDGET' in issue for issue in issues))
 
     def test_every_participating_local_source_and_receive_age_is_rechecked(self):
         for key in ['pose','odom','scan']:

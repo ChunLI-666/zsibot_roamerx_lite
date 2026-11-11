@@ -20,6 +20,8 @@ from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalRespons
 from rclpy.callback_groups import ReentrantCallbackGroup,MutuallyExclusiveCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import QoSProfile,ReliabilityPolicy,DurabilityPolicy
+from action_msgs.msg import GoalStatusArray
 from geometry_msgs.msg import PoseStamped, TransformStamped, Twist
 from lifecycle_msgs.srv import ChangeState
 from nav_msgs.msg import Odometry
@@ -47,6 +49,8 @@ def main():
     parser.add_argument('--prefix',type=Path,required=True)
     parser.add_argument('--waypoint-prefix',type=Path,required=True)
     parser.add_argument('--output',type=Path,required=True)
+    parser.add_argument('--cases',nargs='+',choices=['a17','one_drift','invalid_path','stale_health','blocked_validate','unknown_release'],
+        default=['a17','one_drift','invalid_path','stale_health','blocked_validate','unknown_release'])
     args=parser.parse_args()
     assert os.environ.get('ROS_DOMAIN_ID')=='190'
     assert os.environ.get('ROS_AUTOMATIC_DISCOVERY_RANGE')=='LOCALHOST'
@@ -68,6 +72,7 @@ def main():
     rclpy.init();node=rclpy.create_node('controller_server');group=ReentrantCallbackGroup()
     executor=MultiThreadedExecutor(num_threads=4);executor.add_node(node)
     state=dict(mode='a17',plans=0,follows=0,shift=0.,normal=True)
+    child_status=[];gate_process=None;gate_suspended=False
     lock=threading.Lock();tf=TransformBroadcaster(node)
     odom=node.create_publisher(Odometry,'/odom/current_pose',qos_profile_sensor_data)
     scan=node.create_publisher(LaserScan,'/laser_scan',qos_profile_sensor_data)
@@ -75,6 +80,11 @@ def main():
     valid=node.create_publisher(Bool,'/lightning/pose_valid',10)
     safe=node.create_publisher(Twist,'/cmd_vel_safe',10)
     raw=node.create_publisher(Twist,'/matrix/native_typed/raw',10)
+    def statuses(message):
+        with lock:child_status.append(dict(steady_ns=time.monotonic_ns(),statuses=[
+            dict(uuid=bytes(row.goal_info.goal_id.uuid).hex(),status=int(row.status)) for row in message.status_list]))
+    child_subscription=node.create_subscription(GoalStatusArray,'/navigate_to_pose/_action/status',statuses,
+        QoSProfile(depth=20,reliability=ReliabilityPolicy.RELIABLE,durability=DurabilityPolicy.TRANSIENT_LOCAL),callback_group=group)
     ticks=0
     def inputs():
         nonlocal ticks
@@ -93,10 +103,12 @@ def main():
     def costmap(request,response):
         m=response.map;m.header.frame_id='odom';m.header.stamp=node.get_clock().now().to_msg()
         m.metadata.size_x=m.metadata.size_y=150;m.metadata.resolution=.02
-        m.metadata.origin.position.x=m.metadata.origin.position.y=-1.5;m.metadata.origin.orientation.w=1.;m.data=[0]*22500
+        with lock:blocked=state['mode']=='blocked_validate' and state['plans']>0
+        m.metadata.origin.position.x=m.metadata.origin.position.y=-1.5;m.metadata.origin.orientation.w=1.;m.data=[254 if blocked else 0]*22500
         return response
     map_service=node.create_service(GetCostmap,'/local_costmap/get_costmap',costmap,callback_group=group)
     def plan(handle):
+        nonlocal gate_suspended
         with lock:
             state['plans']+=1;number=state['plans'];mode=state['mode'];start=state['shift']
         result=ComputePathToPose.Result();result.path.header.frame_id='map';result.path.header.stamp=node.get_clock().now().to_msg()
@@ -105,6 +117,12 @@ def main():
         if (mode=='a17' and number==2) or (mode=='one_drift' and number==1):
             with lock:state['shift']+=.06
             time.sleep(.15)
+        if mode=='blocked_validate':time.sleep(.2)  # current RPC sees the real blocked map before Validate
+        if mode=='unknown_release':
+            # HOLD/ACQUIRE already succeeded. Only this owned gate stops here;
+            # native Validate sends a real RELEASE whose answer remains unknown.
+            assert gate_process is not None
+            os.killpg(gate_process.pid,signal.SIGSTOP);gate_suspended=True
         handle.succeed();return result
     def follow(handle):
         with lock:state['follows']+=1;mode=state['mode'];number=state['follows']
@@ -134,9 +152,9 @@ def main():
             assert wait(service.call_async(request),15).success,name
     cases=[]
     try:
-        launch('gate',[str(prefix/'lib/matrix_recovery_bt/zero_handoff_gate'),'--ros-args',
+        gate_process=launch('gate',[str(prefix/'lib/matrix_recovery_bt/zero_handoff_gate'),'--ros-args',
             '-p','run_id:=native_typed_recovery','-p','raw_topic:=/matrix/native_typed/raw'])
-        launch('navigator',['/opt/ros/jazzy/lib/nav2_bt_navigator/bt_navigator','--ros-args','--params-file',str(param_file)])
+        navigator=launch('navigator',['/opt/ros/jazzy/lib/nav2_bt_navigator/bt_navigator','--ros-args','--params-file',str(param_file)])
         activate('bt_navigator')
         launch('waypoint',[str(waypoint/'lib/matrix_waypoint_follower/waypoint_follower'),'--ros-args',
             '-p','wait_at_waypoint.enabled:=false','-p','bond_heartbeat_period:=0.0'])
@@ -158,13 +176,20 @@ def main():
             ('a17',60001,'RECOVERABLE_FAILURE',2,1),
             ('one_drift',0,'SUCCESS',2,1),
             ('invalid_path',60004,'NEEDS_TASK_DECISION',1,0),
-            ('stale_health',60002,'PAUSED_INPUT_HEALTH',0,0)]:
+            ('stale_health',60002,'PAUSED_INPUT_HEALTH',0,0),
+            ('blocked_validate',60005,'RECOVERABLE_FAILURE',1,0),
+            ('unknown_release',60003,'HOLD',1,0)]:
+            if mode not in args.cases:continue
+            with lock:status_start=len(child_status)
+            case_started=time.monotonic_ns()
             with lock:state.update(mode=mode,plans=0,follows=0,normal=mode!='stale_health')
             goal=FollowWaypoints.Goal();goal.goal_index=1;goal.number_of_loops=0
             for x in [0.,.5]:
                 p=PoseStamped();p.header.frame_id='map';p.pose.position.x=x;p.pose.orientation.w=1.;goal.poses.append(p)
             accepted=wait(client.send_goal_async(goal));assert accepted.accepted
             result=wait(accepted.get_result_async(),45.)
+            if gate_suspended:
+                os.killpg(gate_process.pid,signal.SIGCONT);gate_suspended=False
             missed=[dict(index=m.index,error_code=m.error_code) for m in result.result.missed_waypoints]
             if mode=='one_drift':
                 assert result.status==4 and not missed
@@ -175,14 +200,37 @@ def main():
             assert classification==expected_class,(mode,classification)
             with lock:observed=dict(state)
             assert observed['plans']==expected_plans and observed['follows']==expected_follows,observed
+            end=time.monotonic()+3.
+            while time.monotonic()<end:
+                with lock:messages=child_status[status_start:]
+                if messages and all(row['status']>=4 for row in messages[-1]['statuses']):break
+                time.sleep(.01)
+            assert messages and messages[-1]['statuses'],(mode,'missing native NavigateToPose UUID/status')
+            assert all(row['status']>=4 for row in messages[-1]['statuses']),(mode,messages[-1])
+            if mode=='blocked_validate':
+                assert time.monotonic_ns()-case_started>=29_000_000_000
+                assert failure_decision(dict(status=result.status,missed_waypoints=missed),True,True,True)[1]=='BOUNDED_OBSTACLE_WAIT'
+            if mode=='unknown_release':
+                assert not observed['follows'] and expected_class=='HOLD'
             cases.append(dict(mode=mode,parent_uuid=bytes(accepted.goal_id.uuid).hex(),native_status=result.status,
-                missed_waypoints=missed,classification=classification,plans=observed['plans'],follows=observed['follows']))
+                missed_waypoints=missed,classification=classification,plans=observed['plans'],follows=observed['follows'],
+                child_status_events=messages,wall_ns=time.monotonic_ns()-case_started))
             (out/'cases.json').write_text(json.dumps(cases,indent=2)+'\n')
         text=(out/'navigator.log').read_text()
-        assert 'prior_controller=106' in text and 'plan_start_invalidated' in text
+        if 'a17' in args.cases:assert 'prior_controller=106' in text and 'plan_start_invalidated' in text
+        if 'blocked_validate' in args.cases:assert 'WAIT_PLAN_START_CERTIFICATE' in text and '60005' in text
+        if 'unknown_release' in args.cases:assert 'WAIT_RELEASE_RESPONSE' in text and '60003' in text
+        mapping=(Path('/proc')/str(navigator.pid)/'maps').read_text();(out/'navigator.maps').write_text(mapping)
+        assert str(prefix/'lib/libmatrix_recovery_nodes.so') in mapping
+        (out/'loaded_artifacts.json').write_text(json.dumps(dict(recovery_plugin_sha256=hashlib.sha256(
+            (prefix/'lib/libmatrix_recovery_nodes.so').read_bytes()).hexdigest(),waypoint_core_sha256=hashlib.sha256(
+            (waypoint/'lib/libmatrix_waypoint_follower_core.so').read_bytes()).hexdigest(),
+            boundary=__doc__,simulation_acceptance=False,physical_acceptance=False),indent=2)+'\n')
         assert failure_decision(dict(status=6,missed_waypoints=[dict(index=1,error_code=0)]),True,True,True)[0]=='NEEDS_TASK_DECISION'
         print(json.dumps(dict(cases=len(cases),result='PASS_NATIVE_BT_PARENT_CLASSIFIER',physical_acceptance=False)))
     finally:
+        if gate_suspended and gate_process is not None and gate_process.poll() is None:
+            os.killpg(gate_process.pid,signal.SIGCONT)
         for p in reversed(processes):
             if p.poll() is None:os.killpg(p.pid,signal.SIGINT)
         for p in reversed(processes):

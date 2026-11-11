@@ -13,13 +13,14 @@ enum class Reject : std::size_t {
   FollowActive,OdomMissing,OdomFrame,OdomStamp,OdomReceive,Localization,PoseValid,
   LocalizationReceive,ValidReceive,ScanMissing,ScanStamp,ScanReceive,SafeCommand,
   MapMissing,MapReceive,MapStamp,MapMetadata,MapOrientation,BodyCollision,
-  PathMissing,PathFrame,BodyDrift,PathStart,PathSweep,Exception,StopDwell,Count
+  PathMissing,PathFrame,BodyDrift,PathStart,PathSweep,Exception,StopDwell,MapChanged,PhaseChanged,BodyChanged,Count
 };
 inline constexpr std::array<const char *,static_cast<std::size_t>(Reject::Count)> reject_names={
   "follow_active","odom_missing","odom_frame","odom_stamp","odom_receive","localization",
   "pose_valid","localization_receive","valid_receive","scan_missing","scan_stamp","scan_receive",
   "safe_command","map_missing","map_receive","map_stamp","map_metadata","map_orientation",
-  "body_collision","path_missing","path_frame","body_drift","path_start","path_sweep","exception","stop_dwell"};
+  "body_collision","path_missing","path_frame","body_drift","path_start","path_sweep","exception","stop_dwell",
+  "map_changed_during_certificate","phase_changed_during_certificate","body_changed_during_certificate"};
 struct WaitCounters {
   std::array<std::uint64_t,static_cast<std::size_t>(Reject::Count)> rejected{};
   const char * last="none";

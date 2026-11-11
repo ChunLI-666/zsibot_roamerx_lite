@@ -51,11 +51,12 @@ def tree(recovery):
         run_id=recovery['run_id'],footprint=json.dumps(recovery['footprint']),padding=recovery['padding'],
         odom_topic=recovery['odom_topic'],scan_topic=recovery['scan_topic'],scan_max_age=recovery['scan_max_age'],
         timeout=recovery['stop_timeout_sec'],health_stable=recovery['health_stable_sec']).items())
-    execute=('<Sequence><BeginStoppedReplanAttempt controller_error_code="{follow_path_error_code}" '
+    execute=('<Sequence><StoppedReplanScope><Sequence><BeginStoppedReplanAttempt controller_error_code="{follow_path_error_code}" '
         'planner_error_code="{compute_path_error_code}" recovery_error_code="{recovery_error_code}"/>'
         '<WaitForStoppedAndHealthy '+attrs+' error_code_id="{recovery_error_code}"/>'
         '<ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased" use_start="false" error_code_id="{compute_path_error_code}"/>'
         '<ValidateStoppedPlanStart '+attrs+' path="{path}" error_code_id="{recovery_error_code}"/>'
+        '</Sequence></StoppedReplanScope>'
         '<FollowPath path="{path}" controller_id="FollowPath" goal_checker_id="Checker" progress_checker_id="Progress" error_code_id="{follow_path_error_code}"/>'
         '</Sequence>')
     recover=('<Fallback><WouldAControllerRecoveryHelp error_code="{follow_path_error_code}"/>'

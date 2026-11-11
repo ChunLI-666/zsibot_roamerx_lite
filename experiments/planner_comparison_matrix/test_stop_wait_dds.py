@@ -18,6 +18,7 @@ import threading
 import time
 from types import SimpleNamespace
 import uuid
+from unittest.mock import patch
 
 
 def main():
@@ -25,7 +26,7 @@ def main():
     parser.add_argument('--client-dir',type=Path,required=True)
     parser.add_argument('--evidence-root',type=Path,required=True)
     parser.add_argument('--output',type=Path,required=True)
-    parser.add_argument('--case',choices=['terminal','cancel','moving','pulse','cached','stale','deadline','overrun','slow_health','ready_expiry','strict_consumer_age','strict_producer_age'],required=True)
+    parser.add_argument('--case',choices=['terminal','cancel','moving','pulse','cached','stale','deadline','overrun','slow_health','ready_expiry','strict_consumer_age','strict_producer_age','budget_exhausted'],required=True)
     parser.add_argument('--baseline',action='store_true')
     args=parser.parse_args()
     assert os.environ.get('ROS_DOMAIN_ID')=='190'
@@ -62,7 +63,7 @@ def main():
     # Only the isolated fixture DB receives a new local clock. No historical DB
     # or evidence path is opened for writing; acceptance/progress remain intact.
     original_budgets=copy.deepcopy(state['budgets'])
-    state['budgets'].update(deadline_boot_id=boot,deadline_boottime_sec=now+120)
+    state['budgets'].update(deadline_boot_id=boot,deadline_boottime_sec=now-1 if args.case=='budget_exhausted' else now+120)
     database=out/'fixture.db';seed=MissionStore(database)
     seed.db.execute('INSERT INTO mission VALUES (1,?,?)',(state['revision'],encoded(state)));seed.close()
     worker=StorageWorker(database,out/'resource.lock')
@@ -88,7 +89,7 @@ def main():
     (out/'fixture_manifest.json').write_text(json.dumps(audit,indent=2)+'\n')
     measurements=[]
     for _ in range(100):
-        start=time.perf_counter_ns();session.validate_ready(ready);measurements.append(time.perf_counter_ns()-start)
+        start=time.perf_counter_ns();session.validate_ready(ready,require_budget=args.case!='budget_exhausted');measurements.append(time.perf_counter_ns()-start)
     before=worker.state()
     options=SimpleNamespace(execute=True,ready=ready_path,variant=state['variant'],case_id='dds_stop_'+args.case,
         scan_aging_confirm_sec=0.,simulation_scan_max_age_sec=scan_cap,odom_topic='/odom/current_pose',scan_topic='/laser_scan',
@@ -157,21 +158,38 @@ def main():
                 stopped.wait(.002)
         except BaseException as error:errors.append(repr(error));stopped.set()
     thread=threading.Thread(target=publish);thread.start()
-    result={};full_health_strict_before_delay=[]
+    result={};full_health_strict_before_delay=[];validation_work=[]
     try:
         warm=time.monotonic()+2.
         while time.monotonic()<warm:rclpy.spin_once(node,timeout_sec=.002)
-        valid,issues,_=node.execution_ready();assert valid,issues
+        valid,issues,_=node.execution_ready(phase='settle' if args.case=='budget_exhausted' else 'active');assert valid,issues
+        if args.case=='budget_exhausted':
+            motion_valid,motion_issues,_=node.execution_ready(require_stopped=True)
+            assert not motion_valid and any('FAILED_BUDGET' in issue for issue in motion_issues),motion_issues
         if args.case in ('slow_health','ready_expiry') or strict_case:
-            original_execution_ready=node.execution_ready
-            def delayed_execution_ready(*call_args,**call_kwargs):
-                result=original_execution_ready(*call_args,**call_kwargs)
-                if strict_case:
-                    full_health_strict_before_delay.append(dict(strict_valid=node.scan_timing_latest_check['valid'],
-                        scan_header_age_s=result[2]['last']['scan']['header_age_s']))
-                time.sleep(.2 if args.case=='slow_health' or strict_case else .15)
-                return result
-            node.execution_ready=delayed_execution_ready
+            import mission_resume
+            original_validate_ready=session.validate_ready;original_digest=mission_resume.digest
+            def delayed_validate_ready(ready,**validation_kwargs):
+                delayed=False
+                def integrity_digest(value):
+                    nonlocal delayed
+                    if not delayed:
+                        delayed=True
+                        scan=node.current_summary()['last']['scan']
+                        if strict_case:
+                            full_health_strict_before_delay.append(dict(
+                                strict_valid=max(scan['header_age_s'],scan['receive_age_s'])<=.3,
+                                scan_header_age_s=scan['header_age_s']))
+                        start=time.monotonic_ns()
+                        time.sleep(.2 if args.case=='slow_health' or strict_case else .15)
+                        validation_work.append(dict(stage='Session.validate_ready:source_integrity_digest',
+                            started_steady_ns=start,finished_steady_ns=time.monotonic_ns()))
+                    return original_digest(value)
+                # Work occurs inside the actual complete validator. There is
+                # no artificial delay after execution_ready returns.
+                with patch.object(mission_resume,'digest',side_effect=integrity_digest):
+                    return original_validate_ready(ready,**validation_kwargs)
+            session.validate_ready=delayed_validate_ready
         node.owned_identity=OwnedGoalIdentity(uuid.uuid4().bytes)
         node.goal_sent_ns=time.time_ns();node.goal_sent_steady=time.monotonic()
         node.action_result=SimpleNamespace(status=5 if args.case=='cancel' else 4)
@@ -198,7 +216,8 @@ def main():
             strict_scan_latency_first_fault=node.strict_scan_latency_first_fault,
             strict_scan_latency_count=node.strict_scan_latency_count,
             strict_latest_check_valid=node.scan_timing_latest_check['valid'],
-            full_health_strict_before_delay=full_health_strict_before_delay)
+            full_health_strict_before_delay=full_health_strict_before_delay,
+            validation_work=validation_work)
         (out/'RESULT.json').write_text(json.dumps(result,indent=2)+'\n')
         if not args.baseline:
             assert observed==(args.case not in ('cached','stale','deadline','overrun','slow_health','ready_expiry')),result
