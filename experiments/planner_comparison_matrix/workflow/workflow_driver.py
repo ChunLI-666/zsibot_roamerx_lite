@@ -522,6 +522,8 @@ def dry_run(run_dir):
 
 def execute(run_dir, approval_path, follow, *, close_only=False):
     run_dir, plan, state = read_run(run_dir)
+    if not close_only and plan.get('input_binding',{}).get('source') and os.environ.get('ROS_DOMAIN_ID')!='185':
+        raise ValueError('Private domain185 required for the driver parent before starting any stage')
     lock = (run_dir / "workflow.lock").open("a+")
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
