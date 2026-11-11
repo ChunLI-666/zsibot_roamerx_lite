@@ -261,6 +261,19 @@ class WaypointPilot(frozen.Pilot):
             raw_quaternion=orientation, raw_pose_values_finite=all(math.isfinite(value) for value in
                                                                [*position.values(), *orientation.values()])))
 
+    def current_payload_issues(self,snapshot):
+        issues=[]
+        if snapshot['last'].get('pose',{}).get('raw_pose_values_finite') is not True:
+            issues.append('pose:raw_position_or_quaternion_nonfinite_or_missing')
+        if not finite_velocity(snapshot['last'].get('/cmd_vel_safe',{})):
+            issues.append('/cmd_vel_safe:nonfinite_or_missing_velocity')
+        if ((self.args.scan_aging_confirm_sec>0. or self.simulation_scan_max_age_sec>.3)
+                and snapshot['last'].get('scan',{}).get('confirmation_payload_valid') is not True):
+            issues.append('scan:confirmation_payload_nonfinite_or_invalid_or_missing')
+        if self.simulation_scan_sequence_fault is not None:
+            issues.append('scan:source_stamp_not_strictly_increasing')
+        return issues
+
     def execution_ready(self, require_stopped=False, *, phase='active'):
         self.check_interruption()
         entered_unix_ns, entered_steady_ns = time.time_ns(), time.monotonic_ns()
@@ -283,19 +296,11 @@ class WaypointPilot(frozen.Pilot):
                     self.emit('camera_recording_quality_fault',**report['first_fault'],
                         recording_quality_status='FAIL',navigation_cancelled_by_camera=False)
             issues=[issue for issue in issues if issue not in camera_issues]
-        if snapshot['last'].get('pose', {}).get('raw_pose_values_finite') is not True:
-            issues.append('pose:raw_position_or_quaternion_nonfinite_or_missing')
-        if not finite_velocity(snapshot['last'].get('/cmd_vel_safe', {})):
-            issues.append('/cmd_vel_safe:nonfinite_or_missing_velocity')
-        if ((self.args.scan_aging_confirm_sec > 0. or self.simulation_scan_max_age_sec>.3)
-                and snapshot['last'].get('scan', {}).get('confirmation_payload_valid') is not True):
-            issues.append('scan:confirmation_payload_nonfinite_or_invalid_or_missing')
+        issues.extend(self.current_payload_issues(snapshot))
         if require_stopped:
             stopped, stop_issues = strict_stopped(snapshot)
             if not stopped:
                 issues.extend(stop_issues)
-        if self.simulation_scan_sequence_fault is not None:
-            issues.append('scan:source_stamp_not_strictly_increasing')
         self.current_ready_read_failure=None
         validated_ready=None
         if self.args.execute:
@@ -489,6 +494,17 @@ class WaypointPilot(frozen.Pilot):
             callback_observation=getattr(self,'stop_wait_observation',None))
         return self.stop_evidence
 
+    def current_final_goal_observation(self):
+        valid,issues,_=self.execution_ready(phase='settle')
+        valid,issues,snapshot=self.decision_ready(issues if not valid else (),require_stopped=True,phase='settle')
+        observation=(self.stop_evidence or {}).get('callback_observation') or {}
+        return dict(schema='matrix.mission.current_final_goal.v1',action_uuid=str(uuid.UUID(bytes=self.owned_identity.value)),
+            identity_epoch_id=getattr(getattr(self,'mission',None),'identity_epoch_id',None),
+            original_index=len(self.route)-1,original_goal_map=self.route[-1]['pose'],
+            checked_unix_ns=time.time_ns(),healthy=valid,issues=list(issues),snapshot=snapshot,
+            stop_callback_invalidations=self._stop_callback_resets,
+            stop_continuity_current=observation.get('callback_invalidations')==self._stop_callback_resets)
+
     def pump_stop_inputs(self, deadline_ns):
         """Drain original subscriptions after terminal/cancel as well as before.
 
@@ -521,6 +537,7 @@ class WaypointPilot(frozen.Pilot):
         """
         entered_unix_ns,entered_steady_ns=time.time_ns(),time.monotonic_ns()
         _,issues,snapshot=self.input_ready(require_camera=self.goal_sent_ns is None,require_stopped=require_stopped)
+        issues.extend(self.current_payload_issues(snapshot))
         issues=list(dict.fromkeys(list(prior_issues)+issues));bounds=None;ready=None
         if require_stopped:
             stopped,stop_issues=strict_stopped(snapshot)
@@ -931,7 +948,7 @@ class WaypointPilot(frozen.Pilot):
                           goals_canceling=[bytes(goal.goal_id.uuid).hex() for goal in response.goals_canceling])
             if elapsed >= self.args.timeout+10.:
                 break
-        valid, issues, snapshot = self.execution_ready()
+        valid, issues, snapshot = self.execution_ready(phase='settle')
         if not valid:
             self.invalidate_artifact(issues)
         self.observe_ordered(valid, snapshot)
@@ -949,18 +966,32 @@ class WaypointPilot(frozen.Pilot):
         self.emit('action_result', action_uuid=str(requested_uuid), terminal_snapshot=snapshot, **fields)
         settled, final_snapshot = self.wait_settled(self.args.settle_seconds)
         settled = self.record_stop(settled, final_snapshot, 'normal_terminal_result')['observed']
-        valid, issues, snapshot = self.execution_ready()
+        valid, issues, snapshot = self.execution_ready(phase='settle')
         if not valid:
             self.invalidate_artifact(issues)
         self.observe_ordered(valid, snapshot)
         ordered = self.ordered.summary()
-        final_error = frozen.error(final_snapshot['last'].get('pose'), self.route[-1]['pose'])
+        # Storage checkpoints may pump subscriptions. Re-age once more after
+        # them, and bind final geometry to the current decision's original pose.
+        valid,issues,snapshot=self.decision_ready(issues if not valid else (),require_stopped=True,phase='settle')
+        final_error = frozen.error(snapshot['last'].get('pose'), self.route[-1]['pose'])
         final_within = (final_error is not None and final_error['xy_m'] <= .15 and final_error['yaw_rad'] <= .08
                         and final_error['pose'].get('receive_age_s', math.inf) <= .3
                         and -.05 <= final_error['pose'].get('header_age_s', math.inf) <= .3)
-        passed = (valid and not self.cancel_requested and self.cancel_reason is None
-                  and fields['status'] == 4 and fields['error_code'] == 0 and fields['missed_waypoints'] == []
-                  and ordered['all_visited'] and ordered['violation'] is None and settled and final_within)
+        stop_observation=(self.stop_evidence or {}).get('callback_observation') or {}
+        predicates=dict(execution_healthy=valid,not_cancelled=not self.cancel_requested and self.cancel_reason is None,
+            native_success=fields['status']==4 and fields['error_code']==0 and fields['missed_waypoints']==[],
+            ordered_complete=ordered['all_visited'] and ordered['violation'] is None,measured_stop=settled,
+            stop_continuity_current=stop_observation.get('callback_invalidations')==self._stop_callback_resets,
+            final_pose_fresh=final_error is not None and final_error['pose'].get('receive_age_s',math.inf)<=.3
+                and -.05<=final_error['pose'].get('header_age_s',math.inf)<=.3,
+            final_xy_within=final_error is not None and final_error['xy_m']<=.15,
+            final_yaw_within=final_error is not None and final_error['yaw_rad']<=.08)
+        passed=all(predicates.values())
+        validation=dict(schema='matrix.mission.final_goal_validation.v1',action_uuid=str(requested_uuid),
+            identity_epoch_id=getattr(getattr(self,'mission',None),'identity_epoch_id',None),
+            original_index=len(self.route)-1,original_goal_map=self.route[-1]['pose'],
+            checked_unix_ns=time.time_ns(),predicates=predicates,stop_callback_invalidations=self._stop_callback_resets)
         plans = {}
         for index, item in self.first_plans.items():
             entered = self.ordered.visits[index]['entered']
@@ -976,7 +1007,8 @@ class WaypointPilot(frozen.Pilot):
                     strict_scan_timing_status='FAIL' if (self.strict_scan_latency_first_fault or self.scan_aging_episodes) else 'NO_STRICT_SCAN_FAULT_RECORDED',
                     action_uuid=str(requested_uuid), cancel_reason=self.cancel_reason, ordered=ordered, first_plans=plans,
                     settled_measured_and_commanded_stop=settled, settled_original_goal_error=final_error,
-                    settled_within_original_tolerance=final_within, final_snapshot=final_snapshot,
+                    settled_within_original_tolerance=final_within, final_snapshot=snapshot,
+                    settled_snapshot=final_snapshot,final_goal_validation=validation,
                     artifact_invalid_reasons=self.artifact_invalid_reasons, native_feedback_queue_overflow=self.feedback_overflow,
                     runtime_binding=self.latest_ready, **fields)
 

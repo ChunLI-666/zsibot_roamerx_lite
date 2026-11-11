@@ -69,6 +69,7 @@ class Session:
         self.store, self.request_id, self.output = store, request_id, output
         state = store.state()
         self.start_index = state['progress']['next_index']
+        self.identity_epoch_id = state['identity_epoch_id']
         self.action_uuid = None
         self.send_invoked=False
         self.pending_visits=deque();self.last_visit_key=None;self.storage_failure=None
@@ -220,6 +221,10 @@ def run_attempt(args, store, output, reconcile=False):
                 if hasattr(store,'pump'):store.pump=None
                 result['ordered']=node.ordered.summary()
                 result['final_measured_and_commanded_stop']=bool(node.stop_evidence and node.stop_evidence.get('observed'))
+                if result.get('status')==4 and result.get('error_code')==0 and result.get('missed_waypoints')==[]:
+                    try:result['current_final_goal_observation']=node.current_final_goal_observation()
+                    except Exception as error:
+                        result['current_final_goal_observation']=dict(healthy=False,error_type=type(error).__name__,error_message=str(error))
                 store.flush_state_read_timing('attempt_finalization')
                 store.timing_sink=None  # Evidence writer closes below; terminal DB work follows it.
                 result['mission_persistence_timing_drops']=store.timing_drops

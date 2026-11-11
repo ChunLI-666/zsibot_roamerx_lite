@@ -175,6 +175,91 @@ def failure_decision(result, terminal, quiescent, stopped, *, operator_cancel=Fa
     return 'NEEDS_TASK_DECISION','UNCLASSIFIED_TERMINAL_OR_INDEPENDENT_EVIDENCE_FAILURE'
 
 
+def valid_stop_continuity(stop,counter):
+    if (type(counter) is not int or counter<0 or stop.get('observed') is not True
+            or stop.get('strict_stop_issues')!=[] or not strict_stopped(stop.get('snapshot') or {})[0]):return False
+    observation=stop.get('callback_observation') or {}
+    if (observation.get('schema')!='matrix.stop_callback_observation.v1' or observation.get('settled') is not True
+            or type(observation.get('callback_invalidations')) is not int
+            or observation['callback_invalidations']!=counter):return False
+    dwell=observation.get('advancing_odom_dwell') or {}
+    fields=('zero_stamp','first_stamp','last_stamp','first_steady','last_steady')
+    if any(type(dwell.get(k)) is not int or dwell[k]<=0 for k in fields):return False
+    times=[observation.get(k) for k in ('started_steady_ns','finished_steady_ns','deadline_steady_ns')]
+    if any(type(v) is not int or v<=0 for v in times):return False
+    return (dwell['zero_stamp']<dwell['first_stamp']<=dwell['last_stamp']
+        and dwell['last_stamp']-dwell['first_stamp']>=300_000_000
+        and times[0]<=dwell['first_steady']<=dwell['last_steady']<=times[1]<=times[2]
+        and dwell['last_steady']-dwell['first_steady']>=300_000_000
+        and dwell['last_stamp']<=(stop.get('snapshot') or {}).get('last',{}).get('odom',{}).get('stamp_ns',0))
+
+
+def final_yaw_residual(state,attempt,original,current):
+    """Recognize one narrow task-level failure without rewriting native status."""
+    try:
+        if (state.get('cancel_intent') or attempt.get('operator_cancel_evidence')
+                or not all(attempt.get(k) for k in ('terminal_confirmed','children_quiescent','stopped'))
+                or original.get('functional_status')!='FAIL' or terminal_fields(original)['status']!=4
+                or original.get('error_code')!=0 or original.get('missed_waypoints')!=[]
+                or original.get('cancel_reason') or original.get('stop_signals')
+                or original.get('settled_measured_and_commanded_stop') is not True
+                or original.get('settled_within_original_tolerance') is not False
+                or original.get('evidence_writer',{}).get('evidence_complete') is not True
+                or current.get('evidence_writer',{}).get('evidence_complete') is not True):return None
+        index=len(state['route'])-1;goal=state['route'][index]['pose']
+        if state['progress']['next_index']!=index:return None
+        proof=original['final_goal_validation'];observation=current['current_final_goal_observation']
+        if (proof.get('schema')!='matrix.mission.final_goal_validation.v1'
+                or observation.get('schema')!='matrix.mission.current_final_goal.v1'):return None
+        for item in (proof,observation):
+            if (item.get('action_uuid')!=attempt['parent_action_uuid']
+                    or item.get('identity_epoch_id')!=state['identity_epoch_id']
+                    or item.get('original_index')!=index or item.get('original_goal_map')!=goal):return None
+        keys={'execution_healthy','not_cancelled','native_success','ordered_complete','measured_stop',
+            'stop_continuity_current','final_pose_fresh','final_xy_within','final_yaw_within'}
+        predicates=proof['predicates']
+        if (set(predicates)!=keys or predicates['final_yaw_within'] is not False
+                or any(predicates[k] is not True for k in keys-{'final_yaw_within'})):return None
+        original_stop=original.get('owned_goal_shutdown',{}).get('stop') or {}
+        if (not valid_stop_continuity(original_stop,proof.get('stop_callback_invalidations'))
+                or not strict_stopped(original['final_snapshot'])[0]):return None
+        ordered=original['ordered']
+        if ordered.get('all_visited') is not True or ordered.get('violation') is not None:return None
+        candidate=state['candidates'][str(index)];native_visit=ordered['visits'][index]
+        witnesses=[]
+        for visit in (candidate,native_visit):
+            validate_visit(state['route'],index,visit)
+            entered=visit['entered']
+            if (not isinstance(entered,dict) or not entered
+                    or any(type(entered.get(k)) is not int or entered[k]<=0 for k in ('steady_ns','unix_ns'))):return None
+            witnesses.append({key:visit[key] for key in ('index','id','original_goal_map','entered','passed')})
+        # Trajectory statistics continue after a historical pass. Only its
+        # immutable identity, feedback entry and complete stop proof authorize it.
+        if digest(witnesses[0])!=digest(witnesses[1]):return None
+        stop=current.get('owned_goal_shutdown',{}).get('stop') or {}
+        if (not valid_stop_continuity(stop,observation.get('stop_callback_invalidations'))
+                or observation.get('healthy') is not True or observation.get('issues')!=[]
+                or observation.get('stop_continuity_current') is not True
+                or not strict_stopped(observation['snapshot'])[0]):return None
+        errors=[]
+        for snapshot in (original['final_snapshot'],observation['snapshot']):
+            pose=snapshot['last']['pose']
+            if (pose.get('frame_id')!='map' or not all(type(pose.get(k)) in (int,float) and math.isfinite(pose[k]) for k in ('x','y','yaw'))
+                    or pose.get('raw_pose_values_finite') is not True
+                    or not all(type(pose.get(group,{}).get(k)) in (int,float) and math.isfinite(pose[group][k])
+                        for group,fields in (('raw_position',('x','y','z')),('raw_quaternion',('x','y','z','w'))) for k in fields)
+                    or not 0<=pose.get('receive_age_s',math.inf)<=.3
+                    or not -.05<=pose.get('header_age_s',math.inf)<=.3):return None
+            xy=math.hypot(pose['x']-goal[0],pose['y']-goal[1]);yaw=abs(angular_difference(pose['yaw'],goal[2]))
+            if not (xy<=.15 and .08<yaw<=2*.08):return None
+            errors.append(dict(xy_m=xy,yaw_rad=yaw,pose=copy.deepcopy(pose)))
+        return dict(reason='FINAL_GOAL_RESIDUAL_ERROR',axis='yaw',original_index=index,original_goal_map=goal,
+            xy_limit_m=.15,yaw_limit_rad=.08,correction_envelope_yaw_rad=2*.08,
+            original_error=errors[0],current_error=errors[1])
+    except (KeyError,TypeError,ValueError,IndexError,AttributeError,Hold):
+        return None
+
+
 def terminal_fields(result):
     value={key:result.get(key) for key in ('status','error_code','missed_waypoints')}
     value['error_msg']=result.get('error_msg') or ''
@@ -348,6 +433,7 @@ class MissionStore:
             lifecycle='NEW', hold_reason=None, route=route, route_size=len(route), policy=policy,
             progress=dict(accepted_prefix_count=0,next_index=0,active_index=None,last_failed_index=None,accepted_receipts=[]),
             current_target=route[0], attempt=None, attempts=[], candidates={},retry_control=new_retry_control(),cancel_intent=None,
+            final_goal_correction=None,
             budgets=dict(mission_dispatches_reserved=0,per_index_reserved=[0]*len(route),
                 per_index_parent_dispatches=[0]*len(route),reservation_unit='child_attempt_including_native_BT_retries',
                 deadline_boot_id=None,deadline_boottime_sec=None,remaining_sec=policy['mission_budget_sec']),
@@ -446,6 +532,15 @@ class MissionStore:
             child_slots=1+policy['bt_retries']
             if dispatch_budget_exhaustion(s):
                 raise Hold('FAILED_BUDGET: dispatch allowance exhausted')
+            correction=s.get('final_goal_correction')
+            if correction:
+                if correction.get('consumed_attempt_id') is not None:
+                    raise Hold('FINAL_GOAL_CORRECTION_ALREADY_RESERVED')
+                if (correction['source_attempt_id']!=(old or {}).get('attempt_id')
+                        or correction['source_action_uuid']!=(old or {}).get('parent_action_uuid')
+                        or correction['identity_epoch_id']!=s['identity_epoch_id'] or correction['index']!=index
+                        or correction['original_goal_map']!=s['route'][index]['pose']):
+                    raise Hold('Final goal correction binding differs')
             if reviewed:
                 control['reviews'][-1]['consumed_by_request_id']=request_id
                 control['review_permit']=None;control['paused']=False
@@ -461,6 +556,9 @@ class MissionStore:
             attempt['intent_owner_token']=self.process_token
             attempt['identity_epoch_id']=s['identity_epoch_id']
             attempt['source_provenance']=dict(kind='live_execution',source_sha=s['identity']['source_sha'])
+            if correction:
+                correction.update(consumed_attempt_id=attempt['attempt_id'],consumed_action_uuid=attempt['parent_action_uuid'])
+                attempt['final_goal_correction_for']=correction['source_attempt_id']
             s['attempt']=attempt;s['attempts'].append(copy.deepcopy(attempt))
             s['lifecycle']='DISPATCH_INTENT';s['hold_reason']=None;s['candidates']={}
             s['stop']=dict(state='UNPROVEN');s['progress']['active_index']=index
@@ -472,6 +570,8 @@ class MissionStore:
         if not isinstance(reason,str) or not reason.strip():raise Hold('Explicit retry review reason required')
         with self.transaction('REPEATED_FAILURE_REVIEW') as s:
             if s.get('cancel_intent'):raise Hold('Mission cancellation requested; retry review forbidden')
+            if (s.get('final_goal_correction') or {}).get('consumed_attempt_id') is not None:
+                raise Hold('Final goal correction allowance cannot be renewed')
             control=s.get('retry_control') or {};attempt=s.get('attempt') or {}
             if (s['lifecycle']!='NEEDS_TASK_DECISION' or s['hold_reason']!='REPEATED_FAILURE_REVIEW_REQUIRED'
                     or not control.get('paused') or not all(attempt.get(key) for key in
@@ -515,6 +615,8 @@ class MissionStore:
             a.update(dispatch_state='NOT_SENT_AFTER_INTENT',native_status=None,terminal_confirmed=False,
                 not_sent_evidence=dict(path=str(path),sha256=digest(raw)))
             s['lifecycle']='HOLD';s['hold_reason']='NOT_SENT_AFTER_INTENT_NO_AUTOMATIC_REDISPATCH'
+            if a.get('final_goal_correction_for'):
+                s['final_goal_correction']['outcome']='NOT_SENT_AFTER_RESERVATION'
             if result.get('strict_scan_timing_status')=='FAIL':s['result_flags']['strict_timing_status']='FAIL'
             if (result.get('camera_recording_quality') or {}).get('status')=='FAIL':
                 s['result_flags']['camera_recording_quality_status']='FAIL';s['result_flags']['strict_timing_status']='FAIL'
@@ -634,9 +736,33 @@ class MissionStore:
             if complete:
                 s['lifecycle']='COMPLETED_WITH_RECOVERY' if s['result_flags']['recovery_used'] else 'COMPLETED_SINGLE_RUN'
                 s['hold_reason']=None
+                if a.get('final_goal_correction_for'):
+                    s['final_goal_correction']['outcome']='COMPLETE'
             else:
                 s['lifecycle'],s['hold_reason']=failure_decision(cause,a['terminal_confirmed'],a['children_quiescent'],a['stopped'],
                     operator_cancel=bool(a.get('operator_cancel_evidence')))
+                correction=s.get('final_goal_correction')
+                if a.get('final_goal_correction_for'):
+                    if all(a.get(k) for k in ('terminal_confirmed','children_quiescent','stopped')) and s['lifecycle'] not in ('CANCELED','HOLD'):
+                        s['lifecycle']='NEEDS_TASK_DECISION';s['hold_reason']='FINAL_GOAL_CORRECTION_FAILED'
+                        correction['outcome']='FAILED'
+                    elif s['lifecycle']=='HOLD':correction['outcome']='HELD'
+                else:
+                    residual=final_yaw_residual(s,a,cause,result)
+                    if residual is not None:
+                        a['failure']=dict(index=residual['original_index'],id=s['current_target']['id'],
+                            original_goal_map=residual['original_goal_map'],actual_error=residual['current_error'],
+                            basis='independent_final_goal_validation',native_status=4)
+                    if residual is not None and not correction:
+                        s['final_goal_correction']=dict(schema='matrix.mission.final_goal_correction.v1',
+                            source_attempt_id=a['attempt_id'],source_action_uuid=a['parent_action_uuid'],
+                            identity_epoch_id=s['identity_epoch_id'],index=s['progress']['next_index'],
+                            original_goal_map=copy.deepcopy(s['current_target']['pose']),source_evidence=copy.deepcopy(a['terminal_authority']['evidence']),
+                            qualification_evidence=copy.deepcopy(evidence),consumed_attempt_id=None,consumed_action_uuid=None,
+                            qualification=residual,outcome='AVAILABLE')
+                        s['lifecycle']='RECOVERABLE_FAILURE';s['hold_reason']='FINAL_GOAL_RESIDUAL_ERROR'
+                    elif residual is not None and correction.get('source_attempt_id')==a['attempt_id'] and correction.get('consumed_attempt_id') is None:
+                        s['lifecycle']='RECOVERABLE_FAILURE';s['hold_reason']='FINAL_GOAL_RESIDUAL_ERROR'
                 if s.get('cancel_intent'):
                     proven=all(a.get(key) for key in ('terminal_confirmed','children_quiescent','stopped'))
                     s['lifecycle']='CANCELED' if proven else 'HOLD'
