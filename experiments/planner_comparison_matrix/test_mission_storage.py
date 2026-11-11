@@ -469,4 +469,155 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(p.returncode,10,p.stdout+p.stderr);self.assertIn('no automatic cross-operation',p.stdout)
             self.assertEqual(MissionStore.inspect(root/'mission.db'),state)
 
+class RetryControlTests(unittest.TestCase):
+    """Durable original-attempt authority, independent of the CLI's loop."""
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name)
+        self.worker=StorageWorker(self.root/'mission.db',self.root/'owner.lock')
+        raw,identity,policy,self.example=fixture()
+        policy.update(max_parent_dispatches=10,max_parent_dispatches_per_index=3)
+        self.worker.create(raw,identity,policy);self.observations=[]
+
+    def tearDown(self):
+        self.worker.close();self.temp.cleanup()
+
+    def reserve(self,request=None):
+        request=request or str(uuid.uuid4())
+        attempt=self.worker.reserve(request,self.root/('attempt_'+request))
+        self.worker.acknowledge(attempt['parent_action_uuid'],True)
+        return attempt
+
+    def finish(self,attempt,code=60002,index=0,**fields):
+        result=dict(action_uuid=attempt['parent_action_uuid'],status=6,error_code=0,
+            missed_waypoints=[dict(index=index,error_code=code)],children_quiescent=True,
+            final_measured_and_commanded_stop=True,created_ns=attempt['created_ns'],finished_ns=time.time_ns(),
+            owned_goal_shutdown={'stop':{'observed':True,'strict_stop_issues':[]}})
+        result.update(fields);path=self.root/('observation_'+str(uuid.uuid4())+'.json')
+        atomic_json(path,result);self.observations.append((path,path.read_bytes()))
+        self.worker.finish_attempt(result,result['children_quiescent'],result_path=path)
+        return result
+
+    def paused_twice(self):
+        first=self.reserve();self.finish(first)
+        self.assertEqual(self.worker.state()['lifecycle'],'PAUSED_INPUT_HEALTH')
+        second=self.reserve();result=self.finish(second)
+        state=self.worker.state();control=state['retry_control']
+        self.assertEqual(control['schema'],'matrix.mission.retry_control.v1')
+        self.assertEqual(control['consecutive_failures'],2);self.assertTrue(control['paused'])
+        self.assertEqual(control['last_counted_attempt_id'],second['attempt_id'])
+        self.assertEqual(state['lifecycle'],'NEEDS_TASK_DECISION')
+        self.assertEqual(state['hold_reason'],'REPEATED_FAILURE_REVIEW_REQUIRED')
+        return second,result
+
+    def assert_budget_not_refunded(self,after,before):
+        self.assertEqual({k:v for k,v in after.items() if k!='remaining_sec'},
+            {k:v for k,v in before.items() if k!='remaining_sec'})
+        self.assertLessEqual(after['remaining_sec'],before['remaining_sec'])
+
+    def test_same_failure_stops_third_intent_across_reopen_and_new_request(self):
+        self.paused_twice();before=self.worker.state()
+        for reopen in (False,True):
+            if reopen:
+                self.worker.close();self.worker=StorageWorker(self.root/'mission.db',self.root/'owner.lock')
+            with self.assertRaisesRegex(Hold,'REPEATED_FAILURE_REVIEW_REQUIRED'):
+                self.worker.reserve(str(uuid.uuid4()),self.root/'forbidden')
+            self.assertEqual(self.worker.state(),before)
+        self.assertEqual(before['budgets']['mission_dispatches_reserved'],2)
+        self.assertEqual(before['budgets']['per_index_parent_dispatches'][0],2)
+        self.assertEqual(before['budgets']['per_index_reserved'][0],4)
+        self.assertEqual(before['progress']['accepted_prefix_count'],0)
+
+    def test_review_permit_is_request_bound_consumed_once_and_never_refunds_budget(self):
+        self.paused_twice();before=self.worker.state();request=str(uuid.uuid4())
+        with self.assertRaises(Hold):self.worker.review_retry(request,'  ')
+        self.worker.review_retry(request,'PM reviewed the frozen original failure; one diagnostic retry')
+        granted=self.worker.state();self.assertTrue(granted['retry_control']['review_permit'])
+        self.assert_budget_not_refunded(granted['budgets'],before['budgets'])
+        with self.assertRaises(Hold):self.worker.reserve(str(uuid.uuid4()),self.root/'wrong_request')
+        third=self.reserve(request);self.assertNotEqual(third['parent_action_uuid'],before['attempt']['parent_action_uuid'])
+        self.assertNotEqual(self.worker.state()['retry_control']['review_permit'],granted['retry_control']['review_permit'])
+        self.finish(third);after=self.worker.state()
+        self.assertEqual(after['retry_control']['consecutive_failures'],3);self.assertTrue(after['retry_control']['paused'])
+        self.assertEqual(after['budgets']['per_index_parent_dispatches'][0],3)
+        self.assertEqual(after['budgets']['per_index_reserved'][0],6)
+        fourth=str(uuid.uuid4())
+        with self.assertRaisesRegex(Hold,'FAILED_BUDGET'):
+            self.worker.review_retry(fourth,'A review cannot create dispatch allowance')
+            self.worker.reserve(fourth,self.root/'over_budget')
+        self.assert_budget_not_refunded(self.worker.state()['budgets'],after['budgets'])
+        self.assertEqual(self.worker.state()['attempt']['parent_action_uuid'],third['parent_action_uuid'])
+
+    def test_same_attempt_reconciliation_is_idempotent_and_keeps_original_evidence(self):
+        attempt,result=self.paused_twice();before=self.worker.state()
+        for _ in range(2):
+            self.finish(attempt,**{k:v for k,v in result.items() if k not in ('action_uuid',)})
+        after=self.worker.state()
+        self.assertEqual(after['retry_control'],before['retry_control'])
+        self.assert_budget_not_refunded(after['budgets'],before['budgets'])
+        for path,raw in self.observations:self.assertEqual(path.read_bytes(),raw)
+        self.assertGreaterEqual(len(after['attempt']['native_result_history']),3)
+
+    def test_different_code_or_real_accepted_index_progress_changes_fingerprint(self):
+        first=self.reserve();self.finish(first);old=copy.deepcopy(self.worker.state()['retry_control'])
+        second=self.reserve();self.finish(second,code=60001)
+        changed=self.worker.state()['retry_control'];self.assertNotEqual(changed['fingerprint'],old['fingerprint'])
+        self.assertEqual(changed['consecutive_failures'],1);self.assertFalse(changed['paused'])
+        third=self.reserve();state=self.worker.state()
+        visits=copy.deepcopy(self.example['ordered']['visits'])
+        for visit in visits[1:]:visit['passed']=None
+        self.worker.observe(third['parent_action_uuid'],SimpleNamespace(active=1,visits=visits))
+        self.assertEqual(self.worker.state()['progress']['accepted_prefix_count'],1)
+        self.finish(third,code=60001,index=1)
+        progressed=self.worker.state()['retry_control']
+        self.assertNotEqual(progressed['fingerprint'],changed['fingerprint'])
+        self.assertEqual(progressed['consecutive_failures'],1);self.assertFalse(progressed['paused'])
+
+    def test_review_cannot_override_unknown_canceled_or_other_task_decision(self):
+        for kind in ('unknown','canceled','task_decision'):
+            if kind!='unknown':
+                self.worker.close();self.worker=StorageWorker(self.root/(kind+'.db'),self.root/'owner.lock')
+                raw,identity,policy,_=fixture();self.worker.create(raw,identity,policy)
+            attempt=self.reserve()
+            if kind=='canceled':self.finish(attempt,status=5,missed_waypoints=[],stop_signals=[signal.SIGINT])
+            elif kind=='task_decision':self.finish(attempt,code=208)
+            before=self.worker.state()
+            with self.subTest(kind=kind),self.assertRaises(Hold):
+                self.worker.review_retry(str(uuid.uuid4()),'Cannot turn this state into reviewed repeated failure')
+            with self.subTest(kind=kind),self.assertRaises(Hold):
+                self.worker.reserve(str(uuid.uuid4()),self.root/'forbidden')
+            self.assertEqual(self.worker.state(),before)
+
+    def test_explicit_task_cancel_after_terminal_revokes_review_and_never_changes_native_status(self):
+        attempt,result=self.paused_twice();review=str(uuid.uuid4())
+        self.worker.review_retry(review,'A permit exists but has not been consumed')
+        before=self.worker.state();cancel=str(uuid.uuid4())
+        self.worker.request_cancel(cancel,'PM ends the task after reviewing its repeated native failure')
+        state=self.worker.state();self.assertEqual(state['lifecycle'],'CANCELED')
+        self.assertIsNone(state['retry_control']['review_permit'])
+        self.assertEqual(state['attempt']['native_status'],6)
+        self.assertEqual(state['attempt']['parent_action_uuid'],attempt['parent_action_uuid'])
+        self.assertEqual(state['attempt']['native_result'],before['attempt']['native_result'])
+        self.assert_budget_not_refunded(state['budgets'],before['budgets'])
+        self.finish(attempt,**{k:v for k,v in result.items() if k!='action_uuid'})
+        self.worker.request_cancel(cancel,'PM ends the task after reviewing its repeated native failure')
+        after=self.worker.state();self.assertEqual(after['lifecycle'],'CANCELED')
+        self.assertEqual(after['attempt']['native_status'],6)
+        self.assertEqual(after['cancel_intent'],state['cancel_intent'])
+        with self.assertRaisesRegex(Hold,'cancell'):
+            self.worker.reserve(review,self.root/'canceled_permit_cannot_send')
+        with self.assertRaisesRegex(Hold,'cancell'):
+            self.worker.review_retry(str(uuid.uuid4()),'Cannot review an explicitly canceled task back into motion')
+        for path,raw in self.observations:self.assertEqual(path.read_bytes(),raw)
+
+    def test_task_cancel_with_unknown_parent_holds_until_original_terminal_and_stop_proof(self):
+        attempt=self.reserve();before=self.worker.state()
+        self.worker.request_cancel(str(uuid.uuid4()),'Cancel this original UUID; its outcome is not known yet')
+        self.assertEqual(self.worker.state()['lifecycle'],'HOLD')
+        with self.assertRaises(Hold):self.worker.reserve(str(uuid.uuid4()),self.root/'unknown_cancel')
+        self.finish(attempt,code=60002)
+        state=self.worker.state();self.assertEqual(state['lifecycle'],'CANCELED')
+        self.assertEqual(state['attempt']['native_status'],6)
+        self.assertEqual(state['attempt']['parent_action_uuid'],before['attempt']['parent_action_uuid'])
+        self.assertEqual(state['budgets']['mission_dispatches_reserved'],1)
+
 if __name__=='__main__':unittest.main()

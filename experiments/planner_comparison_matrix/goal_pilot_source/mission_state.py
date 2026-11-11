@@ -84,6 +84,32 @@ def mission_guard_state(state):
         progress=dict(next_index=state['progress']['next_index']))
 
 
+def new_retry_control():
+    return dict(schema='matrix.mission.retry_control.v1',fingerprint=None,fingerprint_sha256=None,
+        consecutive_failures=0,paused=False,last_counted_attempt_id=None,review_permit=None,reviews=[])
+
+
+def record_retry_failure(state,attempt,cause):
+    control=state.setdefault('retry_control',new_retry_control())
+    if state['lifecycle'].startswith('COMPLETED'):
+        control.update(consecutive_failures=0,paused=False,review_permit=None)
+        return
+    if state['lifecycle'] not in ('RECOVERABLE_FAILURE','PAUSED_INPUT_HEALTH'):return
+    if not all(attempt.get(key) for key in ('terminal_confirmed','children_quiescent','stopped')):return
+    if not attempt.get('retry_failure_counted'):
+        fingerprint=dict(index=state['progress']['next_index'],identity_epoch_id=state['identity_epoch_id'],
+            source_sha=state['identity']['source_sha'],effective_config_sha256=state['identity']['effective_config_sha256'],
+            reason=state['hold_reason'],native_error_code=cause.get('error_code'),
+            missed_codes=sorted({item['error_code'] for item in cause.get('missed_waypoints') or []}))
+        signature=digest(fingerprint)
+        count=control['consecutive_failures']+1 if signature==control.get('fingerprint_sha256') else 1
+        control.update(fingerprint=fingerprint,fingerprint_sha256=signature,consecutive_failures=count,
+            paused=count>=2,last_counted_attempt_id=attempt['attempt_id'],review_permit=None)
+        attempt.update(retry_failure_counted=True,retry_failure_fingerprint_sha256=signature)
+    if control['paused']:
+        state['lifecycle']='NEEDS_TASK_DECISION';state['hold_reason']='REPEATED_FAILURE_REVIEW_REQUIRED'
+
+
 def dispatch_budget_exhaustion(state):
     """Prospective reservation policy shared by the store and its workflow."""
     policy,budget=state['policy'],state['budgets'];index=state['progress']['next_index']
@@ -321,7 +347,7 @@ class MissionStore:
             revision=0, identity_epoch_id=str(uuid.uuid4()), identity=ident, variant=identity['variant'],
             lifecycle='NEW', hold_reason=None, route=route, route_size=len(route), policy=policy,
             progress=dict(accepted_prefix_count=0,next_index=0,active_index=None,last_failed_index=None,accepted_receipts=[]),
-            current_target=route[0], attempt=None, attempts=[], candidates={},
+            current_target=route[0], attempt=None, attempts=[], candidates={},retry_control=new_retry_control(),cancel_intent=None,
             budgets=dict(mission_dispatches_reserved=0,per_index_reserved=[0]*len(route),
                 per_index_parent_dispatches=[0]*len(route),reservation_unit='child_attempt_including_native_BT_retries',
                 deadline_boot_id=None,deadline_boottime_sec=None,remaining_sec=policy['mission_budget_sec']),
@@ -394,11 +420,21 @@ class MissionStore:
 
     def reserve(self, request_id, output):
         with self.transaction('SEND_INTENT') as s:
+            if s.get('cancel_intent'):raise Hold('Mission cancellation requested; dispatch forbidden')
             old=s.get('attempt')
             if old and not old.get('terminal_confirmed'):
                 raise Hold('UNKNOWN_DISPATCH: reconcile exact previous UUID first')
             if old and (not old.get('children_quiescent') or not old.get('stopped')):
                 raise Hold('Prior attempt lacks child quiescence or measured stop')
+            control=s.setdefault('retry_control',new_retry_control());permit=control.get('review_permit')
+            reviewed=(control['paused'] and s['lifecycle']=='NEEDS_TASK_DECISION'
+                and s['hold_reason']=='REPEATED_FAILURE_REVIEW_REQUIRED' and isinstance(permit,dict)
+                and permit.get('request_id')==request_id
+                and permit.get('fingerprint_sha256')==control.get('fingerprint_sha256')
+                and permit.get('after_attempt_id')==(old or {}).get('attempt_id'))
+            if control['paused'] and not reviewed:raise Hold('REPEATED_FAILURE_REVIEW_REQUIRED')
+            if s['lifecycle'] not in ('NEW','RECOVERABLE_FAILURE','PAUSED_INPUT_HEALTH') and not reviewed:
+                raise Hold('Lifecycle does not permit dispatch: '+s['lifecycle'])
             index=s['progress']['next_index']
             if index is None:
                 raise Hold('Mission is already complete')
@@ -410,6 +446,9 @@ class MissionStore:
             child_slots=1+policy['bt_retries']
             if dispatch_budget_exhaustion(s):
                 raise Hold('FAILED_BUDGET: dispatch allowance exhausted')
+            if reviewed:
+                control['reviews'][-1]['consumed_by_request_id']=request_id
+                control['review_permit']=None;control['paused']=False
             budget['mission_dispatches_reserved']+=1
             for i in range(index,len(s['route'])):
                 budget['per_index_reserved'][i]+=child_slots
@@ -427,6 +466,43 @@ class MissionStore:
             s['stop']=dict(state='UNPROVEN');s['progress']['active_index']=index
             if len(s['attempts'])>1: s['result_flags']['recovery_used']=True
         return self.state()['attempt']
+
+    def review_retry(self,request_id,reason):
+        request_id=str(uuid.UUID(request_id))
+        if not isinstance(reason,str) or not reason.strip():raise Hold('Explicit retry review reason required')
+        with self.transaction('REPEATED_FAILURE_REVIEW') as s:
+            if s.get('cancel_intent'):raise Hold('Mission cancellation requested; retry review forbidden')
+            control=s.get('retry_control') or {};attempt=s.get('attempt') or {}
+            if (s['lifecycle']!='NEEDS_TASK_DECISION' or s['hold_reason']!='REPEATED_FAILURE_REVIEW_REQUIRED'
+                    or not control.get('paused') or not all(attempt.get(key) for key in
+                        ('terminal_confirmed','children_quiescent','stopped'))):
+                raise Hold('Only a proven stopped repeated-failure pause can be reviewed')
+            existing=control.get('review_permit')
+            if existing and existing.get('request_id')==request_id:
+                if (existing.get('reason')!=reason.strip() or existing.get('fingerprint_sha256')!=control['fingerprint_sha256']
+                        or existing.get('after_attempt_id')!=attempt['attempt_id']):raise Hold('Retry review request conflicts')
+                return
+            if any(item.get('request_id')==request_id for item in control.get('reviews',[])):
+                raise Hold('Retry review request was already consumed')
+            if remaining_state(s)<=0 or dispatch_budget_exhaustion(s):raise Hold('FAILED_BUDGET')
+            permit=dict(request_id=request_id,reason=reason.strip(),fingerprint_sha256=control['fingerprint_sha256'],
+                after_attempt_id=attempt['attempt_id'],reviewed_revision=s['revision'])
+            control['review_permit']=permit;control.setdefault('reviews',[]).append(copy.deepcopy(permit))
+
+    def request_cancel(self,request_id,reason):
+        request_id=str(uuid.UUID(request_id))
+        with self.transaction('TASK_CANCEL_REQUESTED') as s:
+            if not s.get('cancel_intent'):
+                s['cancel_intent']=dict(request_id=request_id,reason=reason or 'operator cancel',
+                    requested_revision=s['revision'],requested_unix_ns=time.time_ns())
+            s.setdefault('retry_control',new_retry_control())['review_permit']=None
+            # Business cancellation never rewrites the immutable native cause.
+            if not s['result_flags'].get('operational_complete'):
+                attempt=s.get('attempt') or {}
+                stopped=not attempt or all(attempt.get(key) for key in
+                    ('terminal_confirmed','children_quiescent','stopped'))
+                s['lifecycle']='CANCELED' if stopped else 'HOLD'
+                s['hold_reason']='OPERATOR_CANCEL' if stopped else 'TASK_CANCEL_AWAITING_TERMINAL_AND_STOP'
 
     def record_not_sent(self,action_uuid,*,result_path,send_invoked):
         with self.transaction('NOT_SENT_AFTER_INTENT') as s:
@@ -561,6 +637,11 @@ class MissionStore:
             else:
                 s['lifecycle'],s['hold_reason']=failure_decision(cause,a['terminal_confirmed'],a['children_quiescent'],a['stopped'],
                     operator_cancel=bool(a.get('operator_cancel_evidence')))
+                if s.get('cancel_intent'):
+                    proven=all(a.get(key) for key in ('terminal_confirmed','children_quiescent','stopped'))
+                    s['lifecycle']='CANCELED' if proven else 'HOLD'
+                    s['hold_reason']='OPERATOR_CANCEL' if proven else 'TASK_CANCEL_AWAITING_TERMINAL_AND_STOP'
+            record_retry_failure(s,a,cause)
             s['attempts'][-1]=copy.deepcopy(a)
 
     def import_closed(self, result, result_sha, historical_bt_retries=1):

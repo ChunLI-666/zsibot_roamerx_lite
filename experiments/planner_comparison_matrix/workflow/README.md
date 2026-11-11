@@ -42,3 +42,9 @@ Closure stage 只使用本 run 的原 actor/录包身份，显式 `exact_owned_c
 同一失败指纹连续两次应停止该路径并回报最小证据；第三次无新证据则封存，不能反复重跑全图或重建任务绕过失败预算。测试运行、采样标定、录制、前视相机、手机 MP4 和实际 QoS/socket/drop 的证据均由执行代理提供。
 
 当前固定工作流支持同一 source、同一版本的原任务中断恢复。source lease 到期后关闭并准备新评测使用独立 run，不把旧通过点或预算迁移过去。历史 `mission_continuation` 有专用 A15/F016 约束，本入口没有宣称通用跨 source 的同任务 continuation 能力。
+
+MissionStore 在 terminal/reserve 事务中持久化连续失败：同一未通过 index/身份/稳定原因及原生 code 两次，原任务进入 `REPEATED_FAILURE_REVIEW_REQUIRED`，自动恢复不产生第三个父 UUID。原目标、prefix、失败记录、3/6/10 预算和绝对期限保留。PM 根据新证据决定同版本继续时，用既有 `resume --reason '具体复盘原因及证据'` 申请绑定该请求与失败的一次许可；不能越过取消、未知所有权或其他任务决策，也不重置计数/预算。再次相同失败立即暂停。
+
+`client_response` 是最新已校验的状态投影，旧值在 `client_response_history` 保留。reconcile 的合法新观测无论安全与否都会更新；新 UNKNOWN/stop-unproven 不允许退回旧 PASSED。工作流 HELD/PENDING/SUCCEEDED 独立决定动作编排；CANCELED 仍禁止自动恢复，但其合法停止证据可用于关闭。新 invocation 或冲突状态引用以 `client_projection_invalid` 使旧停止投影失效。
+
+`build_matrix_plan.py` 固定生成 `analyze_closed_recording` 和 `prepare_video_inputs`，直接使用本目录的 `analyze_run.py`、`prepare_video_inputs.py` 及 `mission_evidence.py`，并将入口和 helper 纳入 stage pins。旧 binding 的 `analysis_and_video_input_stages` 字段会明确报错，新 binding 应删除该字段。两个工具沿用先前已使用的离线分析/视频输入接口，分析仍是采样静态地图检查，不是连续碰撞或实机验收。视频展示的 `passed` 只取 MissionStore 已接受 receipt；未接受的原生 passed 带 attempt/UUID/原结果 hash 存入单独 observations，不计为已通过点，也不改写原生结果或 status。

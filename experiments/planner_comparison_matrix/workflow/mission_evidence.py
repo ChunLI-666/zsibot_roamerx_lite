@@ -10,29 +10,29 @@ def sha(path):
 
 def latest(workflow,stage_id='mission_execute'):
     row=next(x for x in workflow['stages'] if x['id']==stage_id)
-    responses=[]
-    if row.get('client_response'):responses.append(('operation',row['client_response'],None))
-    for item in row.get('reconciliations',[]):
-        if item.get('response'):responses.append(('reconcile',item['response'],item))
-    found=[];mission_id=None
-    for kind,response,record in responses:
-        refs=response.get('references') or {};ref=refs.get('state') or {}
-        if not ref.get('path') or not ref.get('sha256'):continue
-        if sha(ref['path'])!=ref['sha256']:raise ValueError('client state hash mismatch')
-        state=json.loads(Path(ref['path']).read_text())
-        if state.get('schema')!='matrix.mission.state.v1':raise ValueError('invalid client state schema')
-        if mission_id is None:mission_id=state['mission_id']
-        if state['mission_id']!=mission_id:raise ValueError('client mission identity changed')
-        op=refs.get('operation')
-        if op:
-            if sha(op['path'])!=op['sha256']:raise ValueError('client operation hash mismatch')
-            data=json.loads(Path(op['path']).read_text())
-            if data.get('state_sha256')!=ref['sha256'] or data.get('mission_id')!=mission_id or data.get('revision')!=state['revision']:
-                raise ValueError('client operation does not bind selected state')
-            if record and (data.get('operation')!='reconcile' or data.get('request_id')!=record['request_id'] or
-                           data.get('parent_action_uuid')!=record['original_action_uuid']):
+    # The driver publishes the sole current projection after binding its
+    # identity and revision. History is evidence, never a fallback authority.
+    if row.get('client_projection_invalid'):
+        raise ValueError('latest client observation is pending or invalid')
+    response=row.get('client_response')
+    if not isinstance(response,dict):raise ValueError('no hash-bound client state')
+    kind=row.get('client_response_source','operation')
+    refs=response.get('references') or {};ref=refs.get('state') or {}
+    if not ref.get('path') or not ref.get('sha256'):raise ValueError('missing client state reference')
+    if sha(ref['path'])!=ref['sha256']:raise ValueError('client state hash mismatch')
+    state=json.loads(Path(ref['path']).read_text())
+    if state.get('schema')!='matrix.mission.state.v1':raise ValueError('invalid client state schema')
+    op=refs.get('operation')
+    if op:
+        if sha(op['path'])!=op['sha256']:raise ValueError('client operation hash mismatch')
+        data=json.loads(Path(op['path']).read_text())
+        if (data.get('state_sha256')!=ref['sha256'] or data.get('mission_id')!=state.get('mission_id')
+                or data.get('revision')!=state.get('revision')):
+            raise ValueError('client operation does not bind selected state')
+        if kind=='reconcile':
+            records=[item for item in row.get('reconciliations',[]) if item.get('response')==response]
+            if (len(records)!=1 or data.get('operation')!='reconcile'
+                    or data.get('request_id')!=records[0]['request_id']
+                    or data.get('parent_action_uuid')!=records[0]['original_action_uuid']):
                 raise ValueError('reconciliation identity mismatch')
-        found.append((state['revision'],kind,response,ref,state))
-    if not found:raise ValueError('no hash-bound client state')
-    _,kind,response,ref,state=max(found,key=lambda x:x[0])
     return row,response,ref,state,kind

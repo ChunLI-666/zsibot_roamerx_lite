@@ -7,6 +7,7 @@ missions. The workflow owns stages and evidence, never waypoint decisions.
 """
 
 import argparse
+import copy
 import fcntl
 import hashlib
 import json
@@ -405,6 +406,43 @@ def client_output(plan, stage, invocation_dir, code):
     return {"outcome": value["operation_outcome"], "references": refs, "reason": value["reason"], "operation_sha256": sha(raw)}
 
 
+def publish_client_projection(row,response,source,expected_uuid=None):
+    """Publish the newest legal observation, independently of motion permission."""
+    def state_of(value):
+        ref=value.get('references',{}).get('state',{})
+        if not ref.get('path') or file_sha(ref['path'])!=ref.get('sha256'):
+            raise ValueError('Client projection state reference is missing or changed')
+        state=json.loads(Path(ref['path']).read_text())
+        mission_ledger.require_fields(state,'matrix.mission.state.v1',mission_ledger.STATE_FIELDS)
+        mission_ledger.canonical_uuid(state['mission_id']);mission_ledger.revision(state['revision'])
+        return ref,state
+    if response.get('outcome')=='INSPECTED':
+        row['client_inspection']=response;return None
+    try:
+        ref,state=state_of(response)
+        if expected_uuid is not None and mission_ledger.canonical_uuid(
+                (state.get('attempt') or {}).get('parent_action_uuid'))!=expected_uuid:
+            raise ValueError('Client projection action UUID differs')
+        previous=row.get('client_response')
+        if previous:
+            old_ref,old=state_of(previous)
+            if state['mission_id']!=old['mission_id'] or state['identity']!=old['identity']:
+                raise ValueError('Client projection mission/identity changed')
+            same_content=json.dumps(state,sort_keys=True,separators=(',',':'),allow_nan=False)==json.dumps(
+                old,sort_keys=True,separators=(',',':'),allow_nan=False)
+            if state['revision']<old['revision'] or (state['revision']==old['revision'] and not same_content):
+                raise ValueError('Client projection revision regressed or conflicts')
+            if previous!=response:
+                row.setdefault('client_response_history',[]).append(dict(
+                    source=row.get('client_response_source','operation'),response=copy.deepcopy(previous)))
+        row.update(client_response=response,client_response_source=source)
+        row.pop('client_projection_invalid',None)
+        return state
+    except (OSError,ValueError,KeyError,TypeError) as error:
+        row['client_projection_invalid']=dict(reason=str(error),source=source,response=response)
+        raise
+
+
 def budget_failure_for_closure(run_dir, stage, invocation_dir, spec, code):
     """Inspect the authoritative client after a minimal FAILED_BUDGET error.
 
@@ -544,6 +582,8 @@ def execute(run_dir, approval_path, follow, *, close_only=False):
                     spec_file = invocation / "invocation.json"
                     write_once(spec_file, spec_raw)
                     row.update(state="INTENT", intent_unix_ns=time.time_ns(), argv=spec["argv"], argv_sha256=sha(json.dumps(spec["argv"], ensure_ascii=False, separators=(",", ":")).encode()), inspect=inspect)
+                    if stage['kind']=='client' and effective['client']['operation']!='inspect':
+                        row['client_projection_invalid']=dict(reason='new_client_invocation_pending',request_id=row['request_id'])
                     row["invocations"].append({"directory": str(invocation), "spec_sha256": sha(spec_raw), "request_id": row["request_id"], "operation": effective.get("client", {}).get("operation")})
                     atomic_json(run_dir / "workflow_state.json", state)
                     with (invocation / "worker.log").open("xb") as log:
@@ -589,6 +629,7 @@ def execute(run_dir, approval_path, follow, *, close_only=False):
                 elif result.get("state") == "SPAWNED" and stage["kind"] == "spawn":
                     row.update(state="SUCCEEDED", actor_identity=result["actor_identity"], evidence=result["ready"])
                 elif result.get("state") == "EXITED":
+                    projection_published = False
                     try:
                         code = result["returncode"]
                         if stage["kind"] == "client":
@@ -599,7 +640,8 @@ def execute(run_dir, approval_path, follow, *, close_only=False):
                             response = budget_failure_for_closure(run_dir, bound_stage, invocation, persisted_spec, code)
                             if response is None:
                                 response = client_output(plan, bound_stage, invocation, code)
-                            row["client_response"] = response
+                            publish_client_projection(row,response,'operation')
+                            projection_published = True
                             if response["outcome"] not in stage["client"]["accepted_outcomes"]:
                                 # A terminal task failure is still a failure, but
                                 # it must be possible to seal its recording. Do
@@ -623,6 +665,8 @@ def execute(run_dir, approval_path, follow, *, close_only=False):
                         if "closure" in stage.get("roles", []):
                             row["closed"] = True
                     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+                        if stage['kind']=='client' and not projection_published:
+                            row['client_projection_invalid']=dict(reason=str(exc),source='operation')
                         row.update(state="HELD", reason="output validation failed: " + str(exc))
                 else:
                     row.update(state="HELD", reason=result.get("reason", "worker failed or action uncertain"))
@@ -709,6 +753,7 @@ def reconcile(run_dir, stage_id, approval_path, follow):
             write_once(directory / "invocation.json", raw)
             pending = {"state": "INTENT", "directory": str(directory), "spec_sha256": sha(raw), "request_id": request_id, "original_action_uuid": old_uuid, "stage": recovery_stage, "inspect": inspect, "intent_unix_ns": time.time_ns()}
             recoveries.append(pending)
+            row['client_projection_invalid'] = dict(reason='new_reconciliation_pending', request_id=request_id)
             atomic_json(run_dir / "workflow_state.json", state)
             with (directory / "worker.log").open("xb") as log:
                 subprocess.Popen([sys.executable, "-B", str(HERE / "workflow_worker.py"), "worker", str(directory / "invocation.json"), sha(raw)], stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
@@ -723,12 +768,12 @@ def reconcile(run_dir, stage_id, approval_path, follow):
                     bound = dict(pending["stage"], request_id=pending["request_id"])
                     response = client_output(plan, bound, directory, result["returncode"])
                     pending["response"] = response
+                    observed=publish_client_projection(row,response,'reconcile',pending['original_action_uuid'])
                     if response["outcome"] not in ("CANCELED", "COMPLETED"):
                         raise ValueError("client reconciliation outcome is " + str(response["outcome"]))
                     state_path = response["references"].get("state", {}).get("path")
                     if not state_path:
                         raise ValueError("client reconciliation lacks a state receipt")
-                    observed = json.loads(Path(state_path).read_text())
                     attempt = observed.get("attempt")
                     if not isinstance(attempt, dict) or mission_ledger.canonical_uuid(attempt.get("parent_action_uuid")) != pending["original_action_uuid"]:
                         raise ValueError("client reconciled a different or unknown action UUID")
@@ -739,7 +784,7 @@ def reconcile(run_dir, stage_id, approval_path, follow):
                     pending["worker_result_sha256"] = file_sha(result_file)
                     flags = observed.get("result_flags")
                     if isinstance(flags, dict) and flags.get("operational_complete") is True:
-                        row.update(state="SUCCEEDED", client_response=response, completion_source="client_reconciliation_state")
+                        row.update(state="SUCCEEDED", completion_source="client_reconciliation_state")
                     elif observed.get("lifecycle") in ("RECOVERABLE_FAILURE", "PAUSED_INPUT_HEALTH"):
                         # The client's next resume derives its own next index and
                         # budget. This is a new CLI request, not a new Action UUID.
@@ -754,6 +799,8 @@ def reconcile(run_dir, stage_id, approval_path, follow):
                     print(json.dumps({"state": "RECONCILED", "stage": stage_id, "next_workflow_state": row["state"], "client_action_uuid": pending["original_action_uuid"]}))
                     return 0
                 except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+                    if 'response' not in pending:
+                        row['client_projection_invalid']=dict(reason=str(exc),source='reconcile')
                     pending.update(state="HELD", reason=str(exc), worker_result_sha256=file_sha(result_file))
                     atomic_json(run_dir / "workflow_state.json", state)
                     print(json.dumps({"state": "HELD", "stage": stage_id, "reason": str(exc)})); return 10
@@ -780,7 +827,7 @@ def auto_reconcile_allowed(stage, row):
         return False
     if stage["client"]["operation"] not in ("start", "resume"):
         return False
-    response = row.get("client_response")
+    response = None if row.get('client_projection_invalid') else row.get("client_response")
     if response is not None:
         outcome, reason = response.get("outcome"), str(response.get("reason") or "")
     else:
@@ -813,6 +860,7 @@ def retry_recoverable_when_ready(run_dir, approval_path, stage_id):
     run_dir, plan, state = read_run(run_dir)
     approval_check(plan, approval_path)
     stage, row = next((s, r) for s, r in zip(plan["stages"], state["stages"]) if s["id"] == stage_id)
+    if row.get('client_projection_invalid'):return False
     if stage["kind"] != "client" or stage["client"].get("auto_resume_when_ready") is not True or row["state"] != "HELD":
         return False
     response = row.get("client_response") or {}
@@ -859,7 +907,8 @@ def retry_recoverable_when_ready(run_dir, approval_path, stage_id):
         _, current_plan, current = read_run(run_dir)
         current_stage, current_row = next((s, r) for s, r in zip(current_plan["stages"], current["stages"]) if s["id"] == stage_id)
         current_ref = (current_row.get("client_response") or {}).get("references", {}).get("state", {})
-        if current_row["state"] != "HELD" or current_ref.get("sha256") != ref["sha256"]:
+        if (current_row.get('client_projection_invalid') or current_row["state"] != "HELD"
+                or current_ref.get("sha256") != ref["sha256"]):
             return False
         current_row.update(state="PENDING", request_id=str(uuid.uuid4()), next_operation="resume", prior_held_reason=current_row.get("reason"),
                            retry_ready_observation=proof)
@@ -876,6 +925,8 @@ def close_exhausted_recoverable(run_dir, approval_path, stage_id):
     run_dir, plan, state = read_run(run_dir)
     approval_check(plan, approval_path)
     stage, row = next((s, r) for s, r in zip(plan['stages'], state['stages']) if s['id'] == stage_id)
+    if row.get('client_projection_invalid'):
+        return False
     response = row.get('client_response') or {}
     ref = response.get('references', {}).get('state', {})
     if (stage['kind'] != 'client' or stage['client'].get('auto_resume_when_ready') is not True
@@ -916,7 +967,8 @@ def close_exhausted_recoverable(run_dir, approval_path, stage_id):
         _, _, current = read_run(run_dir)
         current_row = next(x for x in current['stages'] if x['id'] == stage_id)
         current_ref = (current_row.get('client_response') or {}).get('references', {}).get('state', {})
-        if current_row['state'] != 'HELD' or current_ref.get('sha256') != ref['sha256']:
+        if (current_row.get('client_projection_invalid') or current_row['state'] != 'HELD'
+                or current_ref.get('sha256') != ref['sha256']):
             return False
         current_row.update(state='SUCCEEDED', mission_terminal_outcome='FAILED_BUDGET',
             budget_exhaustion_observation=dict(exhausted, state_sha256=ref['sha256'],
@@ -934,6 +986,7 @@ def close_expired_recoverable(run_dir, approval_path, stage_id):
     """Permit evidence closure when a stopped client-owned deadline expires."""
     run_dir, plan, state = read_run(run_dir);approval_check(plan, approval_path)
     stage,row=next((s,r) for s,r in zip(plan['stages'],state['stages']) if s['id']==stage_id)
+    if row.get('client_projection_invalid'):return False
     response=row.get('client_response') or {};ref=response.get('references',{}).get('state',{})
     if (stage['kind']!='client' or row['state']!='HELD' or response.get('outcome')!='HELD'
             or not ref.get('path') or file_sha(ref['path'])!=ref.get('sha256')):return False
@@ -949,7 +1002,8 @@ def close_expired_recoverable(run_dir, approval_path, stage_id):
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         _,_,current=read_run(run_dir);current_row=next(x for x in current['stages'] if x['id']==stage_id)
         current_ref=(current_row.get('client_response') or {}).get('references',{}).get('state',{})
-        if current_row['state']!='HELD' or current_ref.get('sha256')!=ref['sha256']:return False
+        if (current_row.get('client_projection_invalid') or current_row['state']!='HELD'
+                or current_ref.get('sha256')!=ref['sha256']):return False
         current_row.update(state='SUCCEEDED',mission_terminal_outcome='FAILED_BUDGET',
             budget_expiry_observation=dict(deadline_boottime_sec=deadline,observed_boottime_sec=now,boot_id=boot,state_sha256=ref['sha256']),
             stage_success_means='client deadline elapsed; closure only, mission not accepted')

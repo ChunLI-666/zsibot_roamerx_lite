@@ -10,7 +10,7 @@ from mission_state import (MissionStore, Hold, remaining_state, check_identity_s
 
 
 class StorageWorker:
-    METHODS=frozenset(('create','operation','finish_operation','reserve','acknowledge','observe',
+    METHODS=frozenset(('create','operation','finish_operation','reserve','review_retry','request_cancel','acknowledge','observe',
         'finish_attempt','record_not_sent','export','import_closed','flush_state_read_timing'))
 
     def __init__(self,path,resource=None,*,factory=MissionStore):
