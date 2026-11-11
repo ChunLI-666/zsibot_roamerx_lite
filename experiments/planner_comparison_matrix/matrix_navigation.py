@@ -510,7 +510,9 @@ def prepare(args):
                 terminal_global_extent=20.,initial_goal_region_shortcut=True,
                 initial_goal_region_max_xy_error=args.xy_tolerance,terminal_track_xy_drift_limit=.05,
                 terminal_rotation_entry_xy_tolerance=entry_xy,terminal_original_region_pivot=True,
-                terminal_rotation_aim_yaw_tolerance=terminal_aim)
+                terminal_rotation_aim_yaw_tolerance=terminal_aim,
+                terminal_yaw_stability_window_sec=1.,terminal_yaw_stability_max_span_rad=.005,
+                terminal_settle_timeout_sec=10.)
             controller['FollowPath']['terminal_stop_before_rotation']=True
             controller['FollowPath']['terminal_early_braking_min_linear_velocity']=.30
             controller['FollowPath']['rpp'].update(lookahead_dist=.75,min_lookahead_dist=.75,max_lookahead_dist=.75,use_velocity_scaled_lookahead_dist=False,rotate_to_heading_angular_vel=.3)
@@ -529,6 +531,13 @@ def prepare(args):
                 stopping_envelope_validated=False,
                 evidence='Source17 d8296dd: prior three short intervals are not a tail bound; the final observed zero interval extends about40.64s. Inner aim is an opt-in experiment and has not resolved the tail source.',
                 boundary='No general or physical stopping envelope. No .03+.040807 acceptance-margin claim. Original final yaw and advancing-stop gates remain unchanged.')
+            manifest['terminal_yaw_stability']=dict(enabled=True,window_sec=1.,maximum_span_rad=.005,
+                sample_capacity=1024,phase_timeout_sec=10.,original_progress_allowance_sec=10.,
+                original_goal_and_stop_tolerances_unchanged=True,xy_stability_not_calibrated=True,
+                observation='Original Odom pose yaw, full source and receipt interval strictly after the latest continuous checked-zero hold; callback revokes Ready immediately.',
+                phase='First terminal hold zero starts one fixed phase; correction and same-goal plan do not renew it. Existing progress or task deadline may end sooner.',
+                evidence='Source17 observed 1s yaw spans at10/20/30s were .003632/.000635/.000210rad; subsequent recorded motion remained. No future tail prediction.',
+                boundary='Explicit simulation candidate for current finite-window stability; original final independent acceptance and one bounded mission correction still apply.')
             manifest['terminal_track_execution_envelope']=dict(enabled=True,pivot_displacement_limit_m=.05,baseline_original_region_preserved=True,
                 original_goal_outer_m=args.xy_tolerance+.05,original_mandatory_track_only=True,admission_scope='fresh_unstarted_goal_shortcut_after_measured_stop',initial_shortcut_max_xy_error_m=args.xy_tolerance,
                 final_goal_tolerances_unchanged=True,continuous_collision_tube_certified=False,

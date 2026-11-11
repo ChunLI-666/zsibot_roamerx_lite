@@ -927,4 +927,101 @@ TEST_F(P2InnerAim, CrossingAimRetainsBrakingDebtUntilAValidStoppedNewPlan) {
     std::this_thread::sleep_for(50ms);}
   ASSERT_TRUE(rotated);EXPECT_FALSE(reached(.11));
 }
+
+
+class P5StableTerminal : public P1DeliveredStop {
+protected:
+  bool stoppedEntry() const override {return true;}
+  virtual double phaseSeconds() const {return 10.;}
+  void configureExtra() override {
+    node_->declare_parameter("FollowPath.terminal_yaw_stability_window_sec",1.);
+    node_->declare_parameter("FollowPath.terminal_yaw_stability_max_span_rad",.005);
+    node_->declare_parameter("FollowPath.terminal_settle_timeout_sec",phaseSeconds());
+  }
+  double heading_=M_PI;
+  nav_msgs::msg::Odometry p5Message(double angular=0.) {
+    current_pose_=pose(.02,heading_);current_pose_.header.frame_id=globalFrame();current_pose_.header.stamp=node_->now();
+    geometry_msgs::msg::TransformStamped t;t.header=current_pose_.header;t.child_frame_id="base_link";
+    t.transform.translation.x=.02;t.transform.rotation=current_pose_.pose.orientation;
+    EXPECT_TRUE(map_->getTfBuffer()->setTransform(t,"p5_original_pose_fixture",false));
+    nav_msgs::msg::Odometry o;o.header=current_pose_.header;o.child_frame_id="base_link";o.pose.pose=current_pose_.pose;o.twist.twist.angular.z=angular;
+    return o;
+  }
+  geometry_msgs::msg::TwistStamped p5Tick() {return controller_->computeVelocityCommands(current_pose_,geometry_msgs::msg::Twist{},checker_.get());}
+  bool p5Check() {return checker_->isGoalReached(current_pose_.pose,pose(0.).pose,geometry_msgs::msg::Twist{});}
+  bool p5Run(std::chrono::milliseconds duration,bool forbid_ready=false,double slope=0.,double angular=0.,bool control=true) {
+    const auto start=std::chrono::steady_clock::now(),end=start+duration;auto next_tick=start,next_sample=start;
+    const auto initial=heading_;bool ready=false;
+    while(std::chrono::steady_clock::now()<end){
+      heading_=initial+slope*std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count();
+      deliver(p5Message(angular));const auto now=std::chrono::steady_clock::now();
+      if(control&&now>=next_tick){const auto cmd=p5Tick();EXPECT_DOUBLE_EQ(cmd.twist.linear.x,0.);EXPECT_DOUBLE_EQ(cmd.twist.angular.z,0.);
+        ready=p5Check();if(forbid_ready)EXPECT_FALSE(ready);next_tick=now+50ms;}
+      next_sample+=2ms;std::this_thread::sleep_until(next_sample);
+    }
+    return ready;
+  }
+};
+TEST_F(P5StableTerminal, LowTwistSlowOriginalPoseDriftCannotReachReady) {
+  ASSERT_FALSE(p5Run(1400ms,true,.014,.014));EXPECT_FALSE(p5Check());
+  RecordProperty("original_pose_yaw_rate_fixture",std::to_string(.014));RecordProperty("original_twist_wz",std::to_string(.014));
+}
+TEST_F(P5StableTerminal, ZeroPublishedTwistDoesNotHideSlowOriginalPoseDrift) {
+  ASSERT_FALSE(p5Run(1400ms,true,.014,0.));EXPECT_FALSE(p5Check());
+  RecordProperty("original_pose_yaw_rate_fixture",std::to_string(.014));RecordProperty("original_twist_wz",std::to_string(0.));
+}
+TEST_F(P5StableTerminal, HealthyFullPostZeroWindowCompletesAndBadPoseOrFrameRevokesIt) {
+  // A full pre-zero history cannot substitute for the selected zero's window.
+  p5Run(1100ms,false,0.,0.,false);EXPECT_FALSE(p5Check());
+  const auto first_zero=std::chrono::steady_clock::now();p5Run(950ms,true);ASSERT_TRUE(p5Run(450ms));
+  EXPECT_GE(std::chrono::steady_clock::now()-first_zero,1s);
+  for(int fault=0;fault<2;++fault){auto bad=last_delivered_;bad.header.stamp=node_->now();
+    if(fault==0)bad.pose.pose.position.z=std::numeric_limits<double>::quiet_NaN();else bad.child_frame_id="changed_original_body_frame";
+    deliver(bad);EXPECT_FALSE(p5Check());deliver(p5Message());EXPECT_FALSE(p5Check());
+    p5Run(950ms,true);ASSERT_TRUE(p5Run(450ms));}
+  RecordProperty("registered_dds_callbacks",static_cast<int>(callbacks_));
+}
+class P5StableConsume : public P5StableTerminal {
+protected:std::string globalFrame() const override {return "p5_stable_consume_"+std::string(111,'x');}
+};
+TEST_F(P5StableConsume, NewPoseBeyondCertificateSpanDefeatsAnAlreadySnapshottedGoalCheckerToken) {
+  ASSERT_TRUE(p5Run(1400ms));ASSERT_TRUE(p5Check());const auto input=current_pose_;const auto goal=pose(0.);
+  const auto bytes=globalFrame().size()+1;p1_allocation_fixture::Barrier barrier(bytes);
+  auto checked=std::async(std::launch::async,[&]{p1_allocation_fixture::TargetThread target;
+    return checker_->isGoalReached(input.pose,goal.pose,geometry_msgs::msg::Twist{});});
+  const bool injected=barrier.wait();const auto before=callbacks_;
+  if(injected){auto changed=last_delivered_;changed.header.stamp=node_->now();
+    changed.pose.pose.orientation.z=std::sin((M_PI+.006)/2.);changed.pose.pose.orientation.w=std::cos((M_PI+.006)/2.);deliver(changed);}
+  barrier.release();const bool value=checked.get();ASSERT_TRUE(injected);ASSERT_FALSE(p1_allocation_fixture::timed_out);
+  ASSERT_EQ(callbacks_-before,1u);EXPECT_FALSE(value);EXPECT_FALSE(p5Check());
+  heading_=M_PI+.006;p5Run(950ms,true);ASSERT_TRUE(p5Run(450ms));
+  RecordProperty("pose_span_crossing_delivered_callbacks",1);RecordProperty("real_frame_pause_bytes",static_cast<int>(bytes));
+}
+TEST_F(P5StableTerminal, ASelectedNonzeroCorrectionRequiresANewFullWindow) {
+  p5Run(650ms,true);heading_=M_PI+.09;deliver(p5Message());
+  // CorrectYaw selects one checked zero while installing the correction cursor.
+  const auto prepared=p5Tick();ASSERT_DOUBLE_EQ(prepared.twist.linear.x,0.);ASSERT_DOUBLE_EQ(prepared.twist.angular.z,0.);
+  EXPECT_FALSE(p5Check());const auto next_tick=std::chrono::steady_clock::now()+50ms;
+  while(std::chrono::steady_clock::now()<next_tick){deliver(p5Message());std::this_thread::sleep_for(2ms);}
+  const auto correction=p5Tick();ASSERT_NE(correction.twist.angular.z,0.);EXPECT_DOUBLE_EQ(correction.twist.linear.x,0.);EXPECT_FALSE(p5Check());
+  heading_=M_PI+.02;const auto restarted=std::chrono::steady_clock::now();p5Run(950ms,true);ASSERT_TRUE(p5Run(450ms));
+  EXPECT_GE(std::chrono::steady_clock::now()-restarted,1s);
+}
+class P5ShortPhase : public P5StableTerminal {
+protected:double phaseSeconds() const override {return 1.6;}
+};
+TEST_F(P5ShortPhase, ValidAndInvalidSameGoalPlansCannotRenewTheOriginalSettlingPhase) {
+  const auto first=std::chrono::steady_clock::now();p5Run(500ms,true);
+  ASSERT_NO_THROW(controller_->setPlan(plan(.02)));checker_->reset();
+  nav_msgs::msg::Path invalid;EXPECT_ANY_THROW(controller_->setPlan(invalid));
+  ASSERT_NO_THROW(controller_->setPlan(plan(.02)));checker_->reset();
+  const auto end=first+1900ms;auto next_tick=std::chrono::steady_clock::now();bool expired=false;
+  while(std::chrono::steady_clock::now()<end&&!expired){deliver(p5Message());
+    if(std::chrono::steady_clock::now()>=next_tick){
+      try{const auto cmd=p5Tick();EXPECT_DOUBLE_EQ(cmd.twist.linear.x,0.);EXPECT_DOUBLE_EQ(cmd.twist.angular.z,0.);EXPECT_FALSE(p5Check());}
+      catch(const nav2_core::NoValidControl & error){EXPECT_NE(std::string(error.what()).find("fixed phase deadline"),std::string::npos)<<error.what();expired=true;}
+      next_tick=std::chrono::steady_clock::now()+50ms;}
+    std::this_thread::sleep_for(2ms);}
+  ASSERT_TRUE(expired);EXPECT_FALSE(p5Check());RecordProperty("phase_elapsed_ms",static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-first).count()));
+}
 }  // namespace

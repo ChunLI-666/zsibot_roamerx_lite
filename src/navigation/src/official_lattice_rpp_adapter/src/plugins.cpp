@@ -23,6 +23,7 @@
 #include "official_lattice_rpp_adapter/terminal_goal_binding.hpp"
 #include "official_lattice_rpp_adapter/initial_goal_rotation.hpp"
 #include "official_lattice_rpp_adapter/terminal_stop_hold.hpp"
+#include "official_lattice_rpp_adapter/terminal_yaw_stability.hpp"
 #include "official_lattice_rpp_adapter/terminal_track_drift.hpp"
 #include "official_lattice_rpp_adapter/command_limits.hpp"
 #include "official_lattice_rpp_adapter/planner_failure_snapshot.hpp"
@@ -250,6 +251,18 @@ public:
       terminal_rotation_aim_yaw_<=.08,"invalid terminal zero-command aim tolerance");
     require(terminal_rotation_aim_yaw_==0.||(terminal_binding_&&terminal_stop_before_rotation_),
       "terminal inner aim requires stopped original-goal binding");
+    const auto stability_window=parameter(node,name+".terminal_yaw_stability_window_sec",0.);
+    const auto stability_span=parameter(node,name+".terminal_yaw_stability_max_span_rad",0.);
+    const auto settle_timeout=parameter(node,name+".terminal_settle_timeout_sec",10.);
+    require(std::isfinite(stability_window)&&stability_window>=0.&&stability_window<=2.,
+      "invalid terminal yaw stability duration");
+    require(std::isfinite(settle_timeout)&&settle_timeout>0.&&settle_timeout<=10.,
+      "terminal settling timeout must not exceed the existing ten-second progress allowance");
+    require(settle_timeout>stability_window,"terminal settling phase must contain the stability window");
+    require(stability_window==0.||(terminal_binding_&&terminal_stop_before_rotation_),
+      "terminal yaw stability requires stopped original-goal binding");
+    yaw_stability_.configure(static_cast<std::int64_t>(stability_window*1.e9),stability_span);
+    terminal_stop_.configureStability(yaw_stability_.enabled(),static_cast<std::int64_t>(settle_timeout*1.e9));
     terminal_early_braking_min_linear_velocity_=parameter(node,
       name+".terminal_early_braking_min_linear_velocity",goal_region::kTerminalTransStoppedVelocity);
     require(std::isfinite(terminal_early_braking_min_linear_velocity_)&&
@@ -295,12 +308,14 @@ public:
     guard_=freeze(node,name);
   }
   void cleanup() override {completion_->clearPlan();terminal_drift_.clear();terminal_drift_active_=false;
+    terminal_stop_.reset();clearYawCertificate();
     initial_original_region_pivot_=aim_reverse_replan_pending_=false;
     terminal_reentry_permission_.reset();
     terminal_braking_=terminal_rotation_started_=false;
     rpp_.cleanup();handler_.reset();segment_pub_.reset();guard_.reset();odom_sub_.reset();completion_.reset();}
   void activate() override {rpp_.activate();segment_pub_->on_activate();}
   void deactivate() override {completion_->invalidate();terminal_stop_.reset();terminal_drift_.invalidate();terminal_drift_active_=false;
+    clearYawCertificate();
     initial_original_region_pivot_=aim_reverse_replan_pending_=false;
     terminal_reentry_permission_.reset();
     terminal_braking_=terminal_rotation_started_=false;
@@ -328,7 +343,7 @@ public:
     const auto plan_generation=completion_->bindPlan();has_plan_=false;
     terminal_braking_=terminal_rotation_started_=false;
     terminal_armed_=terminal_cancelled_=terminal_drift_active_=false;binding_.reset();
-    terminal_stop_.reset();terminal_correction_active_=false;terminal_correction_headings_.reset({});
+    terminal_stop_.resetHold();clearYawCertificate();terminal_correction_active_=false;terminal_correction_headings_.reset({});
     initial_goal_rotation_pending_=initial_goal_region_shortcut_;
     initial_original_region_pivot_=false;
     require(!path.poses.empty()&&!path.header.frame_id.empty(),"empty path/frame");
@@ -383,15 +398,21 @@ public:
       aim_reverse_replan_pending_=false;
     }
     terminal_reentry_permission_.reset();has_plan_=true;
-    if (binding_) {completion_->installBinding(binding_);}
+    if (binding_) {
+      const auto & goal=binding_->original_goal.pose;
+      terminal_stop_.installGoal(path_frame_,goal.position.x,goal.position.y,yaw(goal));
+      completion_->installBinding(binding_);
+    }
   }
   void reset() override {completion_->clearPlan();terminal_drift_.invalidate();rpp_.reset();has_plan_=false;binding_.reset();
+    clearYawCertificate();
     initial_original_region_pivot_=aim_reverse_replan_pending_=false;
     terminal_reentry_permission_.reset();
     terminal_braking_=terminal_rotation_started_=false;
     terminal_armed_=false;terminal_drift_active_=false;initial_goal_rotation_pending_=false;terminal_stop_.reset();
     terminal_correction_active_=false;terminal_correction_headings_.reset({});}
   bool cancel() override {completion_->invalidate();terminal_drift_.invalidate();terminal_cancelled_=true;terminal_drift_active_=false;initial_goal_rotation_pending_=false;
+    clearYawCertificate();
     initial_original_region_pivot_=aim_reverse_replan_pending_=false;
     terminal_reentry_permission_.reset();
     terminal_braking_=terminal_rotation_started_=false;
@@ -429,6 +450,9 @@ public:
       checkTransformFresh(map_->getGlobalFrameID(),path_frame_,allow_static_path_transform_);
     }
     const auto measured_sample=measuredOdometry();
+    {
+      std::lock_guard<std::mutex> odom_lock(odom_mutex_);checkSettlingDeadlineLocked();
+    }
     const auto & measured=measured_sample.message;
     if (terminal_odom_continuity_!=measured_sample.continuity) {
       terminal_stop_.invalidateStopContinuity();
@@ -455,7 +479,28 @@ public:
       if (!sweep::commandSweepFree(*map,fp,actual.pose.position.x,actual.pose.position.y,
         yaw(actual.pose),0.,0.,horizon_)) {throw nav2_core::NoValidControl("Filled terminal stop sweep blocked");}
       geometry_msgs::msg::TwistStamped zero;zero.header=actual.header;
-      finishMeasuredCycle(generation,ready&&!terminal_cancelled_,measured_sample);
+      const auto previous_zero=terminal_stop_.zeroSteady();
+      terminal_stop_.selectedZero(measured_odom_stamp,std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+      const bool ready_proven=finishMeasuredCycle(generation,ready&&!terminal_cancelled_,measured_sample);
+      if (terminal_stop_.stabilityEnabled()) {
+        if (auto node=node_.lock()) {
+          if (terminal_stop_.zeroSteady()!=previous_zero) {
+            RCLCPP_INFO(node->get_logger(),"terminal_stability_zero_anchor_v1 generation=%llu body_stamp_ns=%lld odom_stamp_ns=%lld selected_steady_ns=%lld phase_deadline_ns=%lld",
+              static_cast<unsigned long long>(binding_->generation),static_cast<long long>(rclcpp::Time(actual.header.stamp).nanoseconds()),
+              static_cast<long long>(terminal_stop_.zeroStamp()),static_cast<long long>(terminal_stop_.zeroSteady()),
+              static_cast<long long>(terminal_stop_.phaseDeadline()));
+          }
+          if (ready_proven) {
+            const auto & proof=committed_yaw_proof_;
+            RCLCPP_INFO(node->get_logger(),"terminal_yaw_stability_ready_v1 generation=%llu first_stamp_ns=%lld last_stamp_ns=%lld first_steady_ns=%lld last_steady_ns=%lld yaw_span_rad=%.12f phase_deadline_ns=%lld",
+              static_cast<unsigned long long>(binding_->generation),static_cast<long long>(proof.first_stamp),
+              static_cast<long long>(proof.last_stamp),static_cast<long long>(proof.first_steady),
+              static_cast<long long>(proof.last_steady),proof.maximum-proof.minimum,
+              static_cast<long long>(terminal_stop_.phaseDeadline()));
+          }
+        }
+      }
       last_returned_command_=zero;last_returned_command_valid_=true;return zero;
     };
     const auto zero_command=[&](bool ready) {return zero_at(pose,ready);};
@@ -665,10 +710,12 @@ public:
         stop_path.pose.position.y-binding_->original_goal.pose.position.y)<=tolerance.position.x;
       const bool in_original_yaw=std::abs(goal_remaining)<=yaw_tolerance;
       const bool was_holding=terminal_stop_.holding();
+      const bool yaw_stable=yaw_stability_.qualifies(measured_sample.yaw_proof,
+        terminal_stop_.zeroStamp(),terminal_stop_.zeroSteady());
       const auto action=terminal_stop_.observe(binding_->generation,mandatory_complete,stop_in_original,
         in_original_yaw,measured_stopped,measured_odom_stamp,
         std::chrono::duration_cast<std::chrono::nanoseconds>(
-          std::chrono::steady_clock::now().time_since_epoch()).count(),std::abs(goal_remaining)<=aim_yaw);
+          std::chrono::steady_clock::now().time_since_epoch()).count(),std::abs(goal_remaining)<=aim_yaw,yaw_stable);
       if (action==goal_region::TerminalStopHold::Action::Outside) {
         throw nav2_core::NoValidControl("Actual body left original goal region during terminal stop");
       }
@@ -830,9 +877,11 @@ public:
       const auto & entry_sample=terminal_entry_observation?*terminal_entry_observation:measured_sample;
       {
         std::lock_guard<std::mutex> odom_lock(odom_mutex_);
+        checkSettlingDeadlineLocked();
         if (currentStoppedSampleLocked(entry_sample)&&reentryPermissionCurrentLocked()) {
           terminal_reentry_permission_.reset();
           if (checked_terminal_entry) {terminal_rotation_started_=true;}
+          terminal_stop_.nonzeroSelected();yaw_stability_.clearCertificate();
           completion_->finishCycle(generation,false,entry_sample.valid_until,
             entry_sample.source_valid_until_ns,entry_sample.source_valid_from_ns);
           last_returned_command_=cmd;last_returned_command_valid_=true;return cmd;
@@ -842,6 +891,7 @@ public:
       revokeReentryPermission();return begin_braking(command_pose);
     }
     // Bound terminal completion is published only by the zero/stop hold above.
+    if (v.linear.x!=0.||v.angular.z!=0.) {terminal_stop_.nonzeroSelected();}
     finishMeasuredCycle(generation,!terminal_binding_&&handler_->finalPrefixWithin(remaining_length_),measured_sample);
     last_returned_command_=cmd;last_returned_command_valid_=true;
     return cmd;
@@ -870,6 +920,9 @@ private:
   std::shared_ptr<const goal_region::Binding> binding_;
   goal_region::HeadingCursor terminal_headings_,terminal_correction_headings_;
   goal_region::TerminalStopHold terminal_stop_;
+  goal_region::TerminalYawStability yaw_stability_;
+  goal_region::TerminalYawStability::Proof committed_yaw_proof_;
+  std::string yaw_odom_frame_,yaw_odom_child_;
   goal_region::TerminalTrackDriftGuard terminal_drift_;
   double command_yaw_limit_=.3;
   bool terminal_drift_active_=false;
@@ -965,6 +1018,7 @@ private:
     std::chrono::steady_clock::time_point receipt,valid_until;
     std::int64_t source_valid_until_ns;
     std::int64_t source_valid_from_ns;
+    goal_region::TerminalYawStability::Proof yaw_proof;
   };
   struct ReentryPermission {std::uint64_t generation,continuity;};
   std::optional<ReentryPermission> terminal_reentry_permission_;
@@ -985,12 +1039,32 @@ private:
     const auto previous=odom_?odomStamp(*odom_):0;
     const bool broken=odom_&&(stamp<=previous||stamp-previous>goal_region::kTerminalStopDwellNs||
       now-odom_receipt_>std::chrono::nanoseconds(goal_region::kTerminalStopDwellNs));
-    if (stamp<=0||age<-.05||age>odom_timeout_||broken||
-      !goal_region::terminalMeasuredStopped(message->twist.twist)) {
+    const auto & p=message->pose.pose;const auto & q=p.orientation;
+    const double norm=q.x*q.x+q.y*q.y+q.z*q.z+q.w*q.w;
+    const bool pose_valid=std::isfinite(p.position.x)&&std::isfinite(p.position.y)&&std::isfinite(p.position.z)&&
+      std::isfinite(q.x)&&std::isfinite(q.y)&&std::isfinite(q.z)&&std::isfinite(q.w)&&
+      std::isfinite(norm)&&std::abs(norm-1.)<1e-3&&
+      !message->header.frame_id.empty()&&!message->child_frame_id.empty();
+    const bool frame_changed=!yaw_odom_frame_.empty()&&
+      (yaw_odom_frame_!=message->header.frame_id||yaw_odom_child_!=message->child_frame_id);
+    const bool invalid=stamp<=0||age<-.05||age>odom_timeout_||broken||
+      !goal_region::terminalMeasuredStopped(message->twist.twist)||
+      (yaw_stability_.enabled()&&(!pose_valid||frame_changed));
+    if (invalid) {
       ++odom_continuity_;
       // Odom -> Completion is the sole nested lock order. The captured gate
       // survives cleanup without racing completion_.reset().
       gate->invalidate();
+    }
+    if (yaw_stability_.enabled()) {
+      const bool had_certificate=yaw_stability_.hasCertificate();
+      if (invalid) {yaw_stability_.reset();}
+      if (pose_valid&&stamp>0&&age>=-.05&&age<=odom_timeout_) {
+        yaw_odom_frame_=message->header.frame_id;yaw_odom_child_=message->child_frame_id;
+        yaw_stability_.observe(stamp,std::chrono::duration_cast<std::chrono::nanoseconds>(
+          now.time_since_epoch()).count(),yaw(p));
+      }
+      if (had_certificate&&!yaw_stability_.hasCertificate()) {gate->invalidate();}
     }
     odom_=std::move(message);odom_receipt_=now;
   }
@@ -1013,7 +1087,7 @@ private:
     const auto source_remaining=std::chrono::duration_cast<std::chrono::steady_clock::duration>(
       std::chrono::duration<double>(odom_timeout_-age));
     return {*odom_,odom_continuity_,odom_receipt_,std::min(odom_receipt_+timeout,now+source_remaining),
-      stamp+static_cast<std::int64_t>(odom_timeout_*1.e9),stamp-50000000LL};
+      stamp+static_cast<std::int64_t>(odom_timeout_*1.e9),stamp-50000000LL,yaw_stability_.measure()};
   }
   bool currentStoppedSampleLocked(const OdomSample & sample) const {
     if (!odom_||sample.continuity!=odom_continuity_||
@@ -1038,13 +1112,37 @@ private:
     terminal_reentry_permission_.reset();terminal_drift_.restoreReentryObligation(consumed);
     terminal_rotation_started_=false;
   }
-  void finishMeasuredCycle(std::uint64_t generation,bool ready,const OdomSample & sample) {
+  void clearYawCertificate() {
+    std::lock_guard<std::mutex> lock(odom_mutex_);yaw_stability_.clearCertificate();
+  }
+  void checkSettlingDeadlineLocked() {
+    const auto steady_ns=std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now().time_since_epoch()).count();
+    if (terminal_stop_.phaseExpired(steady_ns)) {
+      yaw_stability_.clearCertificate();completion_->invalidate();
+      throw nav2_core::NoValidControl("Terminal yaw settling exceeded its fixed phase deadline");
+    }
+  }
+  bool finishMeasuredCycle(std::uint64_t generation,bool ready,const OdomSample & sample) {
     std::lock_guard<std::mutex> lock(odom_mutex_);
+    checkSettlingDeadlineLocked();
     const auto node=node_.lock();const auto now=std::chrono::steady_clock::now();
     const auto stamp=odomStamp(sample.message);
     const double age=node?(node->now().nanoseconds()-stamp)/1.e9:std::numeric_limits<double>::infinity();
     ready=ready&&sample.continuity==odom_continuity_&&age>=-.05&&age<=odom_timeout_&&
       now<sample.valid_until;
+    auto valid_until=sample.valid_until;
+    if (yaw_stability_.enabled()) {
+      const auto proof=yaw_stability_.measure();
+      ready=ready&&yaw_stability_.qualifies(proof,terminal_stop_.zeroStamp(),terminal_stop_.zeroSteady());
+      if (ready) {
+        ready=yaw_stability_.certify(proof,terminal_stop_.zeroStamp(),terminal_stop_.zeroSteady());
+        committed_yaw_proof_=proof;
+        valid_until=std::min(valid_until,std::chrono::steady_clock::time_point(
+          std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+          std::chrono::nanoseconds(terminal_stop_.phaseDeadline()))));
+      } else {yaw_stability_.clearCertificate();}
+    }
     if (terminal_reentry_permission_) {
       if (!reentryPermissionCurrentLocked()||!currentStoppedSampleLocked(sample)) {
         revokeReentryPermission();ready=false;
@@ -1055,8 +1153,10 @@ private:
         terminal_reentry_permission_.reset();
       }
     }
-    completion_->finishCycle(generation,ready,sample.valid_until,sample.source_valid_until_ns,
+    if (!ready) {yaw_stability_.clearCertificate();}
+    completion_->finishCycle(generation,ready,valid_until,sample.source_valid_until_ns,
       sample.source_valid_from_ns);
+    return ready;
   }
   geometry_msgs::msg::PoseStamped latestBodyPose() {
     checkTransformFresh(map_->getGlobalFrameID(),map_->getBaseFrameID(),false);

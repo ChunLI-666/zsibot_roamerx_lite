@@ -4,6 +4,8 @@
 #include <condition_variable>
 #include <future>
 #include <thread>
+#include <limits>
+#include "official_lattice_rpp_adapter/terminal_yaw_stability.hpp"
 #include "official_lattice_rpp_adapter/terminal_goal_binding.hpp"
 #include "official_lattice_rpp_adapter/terminal_stop_hold.hpp"
 using namespace official_lattice_rpp_adapter;
@@ -227,4 +229,69 @@ TEST(P2StopHold, InnerAimIsOnlyAnEntryGateAndDoesNotReplaceOriginalToleranceOrAd
   EXPECT_EQ(h.observe(1,true,true,true,true,1400000000,2400000000,false),A::Ready);
   EXPECT_EQ(h.observe(2,false,true,true,true,1450000000,2450000000,true),A::Track);
   EXPECT_FALSE(h.holding());
+}
+
+
+namespace {
+using P5Yaw=goal_region::TerminalYawStability;
+void p5Fill(P5Yaw & h,std::int64_t start=1000000001LL,double heading=0.) {
+  for(int i=0;i<=500;++i)h.observe(start+i*2000000LL,2*start+i*2000000LL,heading);
+}
+}
+TEST(P5YawStability, FullDualClockWindowMustBeStrictlyAfterTheSelectedZero) {
+  P5Yaw h;h.configure(1000000000LL,.005);p5Fill(h);
+  auto p=h.measure();ASSERT_TRUE(p.covered);
+  EXPECT_EQ(p.last_stamp-p.first_stamp,1000000000LL);
+  EXPECT_EQ(p.last_steady-p.first_steady,1000000000LL);
+  EXPECT_TRUE(h.qualifies(p,1000000000LL,2000000000LL));
+  EXPECT_FALSE(h.qualifies(p,p.first_stamp,2000000000LL));
+  EXPECT_FALSE(h.qualifies(p,1000000000LL,p.first_steady));
+  ASSERT_TRUE(h.certify(p,1000000000LL,2000000000LL));
+  h.observe(p.last_stamp+2000000,p.last_steady+2000000,.001);
+  EXPECT_FALSE(h.certify(p,1000000000LL,2000000000LL)); // Stale revision cannot recertify.
+  P5Yaw source_short,receive_short;source_short.configure(1000000000LL,.005);receive_short.configure(1000000000LL,.005);
+  for(int i=0;i<=500;++i){source_short.observe(1000000001LL+i*1999999LL,2000000001LL+i*2000000LL,0.);
+    receive_short.observe(1000000001LL+i*2000000LL,2000000001LL+i*1999999LL,0.);}
+  EXPECT_FALSE(source_short.measure().covered);EXPECT_FALSE(receive_short.measure().covered);
+}
+TEST(P5YawStability, WrappedYawUsesShortArcButInsufficientRingCapacityNeverFabricatesCoverage) {
+  P5Yaw wrapped;wrapped.configure(1000000000LL,.005);
+  for(int i=0;i<=500;++i){const double value=M_PI-.002+.004*i/500.;
+    wrapped.observe(1000000001LL+i*2000000LL,2000000001LL+i*2000000LL,std::atan2(std::sin(value),std::cos(value)));}
+  auto p=wrapped.measure();ASSERT_TRUE(p.covered);EXPECT_NEAR(p.maximum-p.minimum,.004,1e-12);
+  EXPECT_TRUE(wrapped.certify(p,1000000000LL,2000000000LL));
+  P5Yaw crowded;crowded.configure(1000000000LL,.005);
+  for(int i=0;i<2000;++i)crowded.observe(1000000001LL+i*100000LL,2000000001LL+i*100000LL,0.);
+  EXPECT_FALSE(crowded.measure().covered);EXPECT_FALSE(crowded.certify(crowded.measure(),1,1));
+}
+TEST(P5YawStability, BadObservationClockDiscontinuityAndExcessSpanRevokeCertificates) {
+  for(int bad=0;bad<7;++bad){P5Yaw h;h.configure(1000000000LL,.005);p5Fill(h);auto p=h.measure();ASSERT_TRUE(h.certify(p,1,1));
+    auto stamp=p.last_stamp+2000000,steady=p.last_steady+2000000;double heading=0.;
+    if(bad==0)stamp=0;if(bad==1)stamp=p.last_stamp;if(bad==2)stamp=p.last_stamp-1;
+    if(bad==3)stamp=p.last_stamp+300000001LL;if(bad==4)steady=p.last_steady+300000001LL;
+    if(bad==5)heading=std::numeric_limits<double>::quiet_NaN();if(bad==6)heading=.005001;
+    h.observe(stamp,steady,heading);EXPECT_FALSE(h.hasCertificate())<<bad;
+    if(bad!=6)EXPECT_FALSE(h.measure().covered)<<bad;
+  }
+}
+TEST(P5YawStability, NativePairedZeroPreservesLegacyAndMalformedPairsFailClosed) {
+  P5Yaw h;h.configure(0,0.);EXPECT_FALSE(h.enabled());h.observe(0,0.,std::numeric_limits<double>::quiet_NaN());
+  EXPECT_TRUE(h.qualifies(h.measure(),0,0));EXPECT_FALSE(h.hasCertificate());
+  EXPECT_THROW(h.configure(0,.005),std::invalid_argument);
+  EXPECT_THROW(h.configure(1000000000,0.),std::invalid_argument);
+  EXPECT_THROW(h.configure(2000000001LL,.005),std::invalid_argument);
+  EXPECT_THROW(h.configure(1000000000,std::numeric_limits<double>::quiet_NaN()),std::invalid_argument);
+}
+TEST(P5StopHold, CorrectionReanchorsCurrentHoldWithoutRenewingSameGoalPhase) {
+  using H=goal_region::TerminalStopHold;using A=H::Action;H h;h.configureStability(true,2000000000LL);h.installGoal("map",0.,0.,0.);
+  EXPECT_EQ(h.observe(1,true,true,true,true,1000000000,2000000000),A::HoldZero);
+  EXPECT_EQ(h.phaseDeadline(),0);h.selectedZero(1000000000,2000000000);
+  ASSERT_EQ(h.phaseDeadline(),4000000000LL);
+  EXPECT_EQ(h.observe(1,true,true,true,true,1100000000,2100000000,true,false),A::HoldZero);
+  EXPECT_EQ(h.observe(1,true,true,true,true,1500000000,2500000000,true,false),A::HoldZero);
+  h.nonzeroSelected();h.observe(1,true,true,true,true,1600000000,2600000000);h.selectedZero(1600000000,2600000000);
+  EXPECT_EQ(h.zeroStamp(),1600000000);EXPECT_EQ(h.zeroSteady(),2600000000);EXPECT_EQ(h.phaseDeadline(),4000000000LL);
+  h.resetHold();h.installGoal("map",0.,0.,0.);EXPECT_EQ(h.phaseDeadline(),4000000000LL);
+  EXPECT_FALSE(h.phaseExpired(3999999999LL));EXPECT_TRUE(h.phaseExpired(4000000000LL));
+  h.installGoal("map",1.,0.,0.);EXPECT_EQ(h.phaseDeadline(),0);
 }
