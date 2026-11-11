@@ -15,6 +15,7 @@ import sys
 import tempfile
 import time
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 import uuid
 
@@ -369,6 +370,313 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(retained['fixture_concurrent_update'],operation)
             self.assertEqual(retained['stages'][2]['state'],'SUCCEEDED')
 
+    def recoverable_projection(self):
+        source=self.source();template=json.loads(self.template().read_text())
+        client=next(x for x in template['stages'] if x['kind']=='client')
+        client['client'].update(auto_resume_when_ready=True,auto_reconcile=True)
+        candidate=self.candidate();run=self.prepare(candidate,source,self.write('recovery_template.json',template))
+        identity=dict(variant='official',source_sha='a'*40,**{key:'b'*64 for key in
+            ('map_contract_sha256','footprint_sha256','acceptance_policy_sha256','effective_config_sha256')})
+        store=mission_state.MissionStore(run/'mission.db')
+        try:
+            store.create(self.route.read_bytes(),identity,json.loads(self.policy.read_text()))
+            attempt=store.reserve(str(uuid.uuid4()),run/'already_terminal');store.acknowledge(attempt['parent_action_uuid'],True)
+            result=dict(action_uuid=attempt['parent_action_uuid'],status=6,error_code=0,
+                missed_waypoints=[dict(index=0,error_code=60002)],children_quiescent=True,
+                final_measured_and_commanded_stop=True,owned_goal_shutdown={'stop':{'observed':True,'strict_stop_issues':[]}})
+            native=self.write('recoverable_native.json',result)
+            store.finish_attempt(result,True,result_path=native);observed=store.export(run/'already_terminal')
+        finally:store.close()
+        workflow=json.loads((run/'workflow_state.json').read_text());row=next(x for x in workflow['stages'] if x['id']=='mission')
+        row.update(state='HELD',reason='client outcome is HELD',client_response={'outcome':'HELD',
+            'references':{'state':inputs.pin(run/'already_terminal/state.json')}})
+        mission_state.atomic_json(run/'workflow_state.json',workflow)
+        return run,candidate,workflow,observed
+
+    def test_canceled_reconcile_publishes_latest_state_for_exact_closure_and_keeps_history(self):
+        """Resume a completed protocol worker through the real workflow driver."""
+        import close_recording
+        source=self.source();candidate=self.candidate();run=self.prepare(candidate,source,self.template())
+        plan=json.loads((run/'execution_plan.json').read_text());workflow=json.loads((run/'workflow_state.json').read_text())
+        stage=next(x for x in plan['stages'] if x['id']=='mission');row=next(x for x in workflow['stages'] if x['id']=='mission')
+        original_dir=run/'stages/mission/invocation_000';original_dir.mkdir(parents=True)
+        rec_dir=run/'stages/mission/reconcile_000';rec_dir.mkdir(parents=True)
+        identity=dict(variant='official',source_sha='a'*40,**{key:'b'*64 for key in
+            ('map_contract_sha256','footprint_sha256','acceptance_policy_sha256','effective_config_sha256')})
+        store=mission_state.MissionStore(run/'mission.db')
+        store.create(self.route.read_bytes(),identity,json.loads(self.policy.read_text()))
+        attempt=store.reserve(row['request_id'],original_dir/'client_output');store.acknowledge(attempt['parent_action_uuid'],True)
+        owned=attempt['parent_action_uuid']
+        native=dict(action_uuid=owned,status=None,error_code=None,missed_waypoints=None,children_quiescent=True,
+            final_measured_and_commanded_stop=True,stop_signals=[signal.SIGINT],
+            owned_goal_shutdown={'stop':{'observed':True,'strict_stop_issues':[]}})
+        native_path=self.write('original_unknown_native.json',native)
+        store.finish_attempt(native,True,result_path=native_path)
+
+        def output(directory,operation,request,outcome,code,reason):
+            state=store.export(directory/'client_output')
+            response=dict(schema='matrix.mission.operation.v1',operation=operation,request_id=request,
+                workflow_run_id=plan['workflow_run_id'],operation_outcome=outcome,exit_code=code,
+                mission_id=state['mission_id'],revision=state['revision'],attempt_id=state['attempt']['attempt_id'],
+                parent_action_uuid=owned,state_path=str(directory/'client_output/state.json'),
+                state_sha256=inputs.file_sha(directory/'client_output/state.json'),
+                result_path=str(directory/'client_output/result.json'),result_sha256=inputs.file_sha(directory/'client_output/result.json'),
+                reason=reason,result_flags=state['result_flags'])
+            mission_state.atomic_json(directory/'stdout.log',response)
+            return state
+
+        old_state=output(original_dir,'start',row['request_id'],'HELD',10,'UNKNOWN_DISPATCH')
+        old_response=driver.client_output(plan,dict(stage,request_id=row['request_id']),original_dir,10)
+        store.close()
+        request=str(uuid.uuid4());recovery_stage=copy.deepcopy(stage)
+        recovery_stage['id']='mission-reconcile-000';recovery_stage['client'].update(operation='reconcile',accepted_outcomes=['CANCELED','COMPLETED'])
+        spec,inspect=driver.prepare_invocation(run,plan,recovery_stage,request,rec_dir)
+        raw=(json.dumps(spec,sort_keys=True,separators=(',',':'))+'\n').encode()
+        (rec_dir/'invocation.json').write_bytes(raw);spec_sha=hashlib.sha256(raw).hexdigest()
+        store=mission_state.MissionStore(run/'mission.db')
+        try:
+            native.update(status=5,error_code=0,missed_waypoints=[],reconciliation=True,stop_signals=[])
+            reconciled_native=self.write('reconciled_canceled_native.json',native)
+            store.finish_attempt(native,True,result_path=reconciled_native)
+            fresh_state=output(rec_dir,'reconcile',request,'CANCELED',11,'OPERATOR_CANCEL')
+        finally:store.close()
+        pending=dict(state='RUNNING',directory=str(rec_dir),spec_sha256=spec_sha,request_id=request,
+            original_action_uuid=owned,stage=recovery_stage,inspect=inspect,intent_unix_ns=time.time_ns())
+        mission_state.atomic_json(rec_dir/'worker_result.json',dict(state='EXITED',returncode=11,spec_sha256=spec_sha))
+        row.update(state='HELD',reason='UNKNOWN_DISPATCH',client_response=old_response,invocations=[],reconciliations=[pending])
+        mission_state.atomic_json(run/'workflow_state.json',workflow)
+        originals={p:p.read_bytes() for p in original_dir.rglob('*') if p.is_file()}
+        self.assertEqual(driver.reconcile(run,'mission',candidate,True),10)
+        final=json.loads((run/'workflow_state.json').read_text());current=next(x for x in final['stages'] if x['id']=='mission')
+        self.assertEqual(current['state'],'HELD');self.assertTrue(current['recovery_forbidden'])
+        self.assertGreater(current['client_response']['references']['revision'],old_state['revision'])
+        self.assertEqual(current['client_response']['references']['revision'],fresh_state['revision'])
+        self.assertEqual(current['client_response']['references']['parent_action_uuid'],owned)
+        self.assertIn(old_response,[x['response'] for x in current['client_response_history']])
+        proof=close_recording.client_state(final,'mission')
+        self.assertEqual(proof['revision'],fresh_state['revision']);self.assertEqual(proof['action_uuid'],owned)
+        for path,original in originals.items():self.assertEqual(path.read_bytes(),original)
+        self.assertEqual(mission_state.MissionStore.inspect(run/'mission.db')['budgets']['mission_dispatches_reserved'],1)
+
+    def test_projection_same_revision_semantics_and_newer_unsafe_never_fall_back(self):
+        import close_recording
+        import mission_evidence
+        from test_mission_state import fixture
+        raw,identity,policy,_=fixture();store=mission_state.MissionStore(self.root/'projection.db')
+        store.create(raw,identity,policy);attempt=store.reserve(str(uuid.uuid4()),self.root/'projection_attempt')
+        result=dict(action_uuid=attempt['parent_action_uuid'],status=5,error_code=0,missed_waypoints=[],
+            children_quiescent=True,final_measured_and_commanded_stop=True,stop_signals=[signal.SIGINT],
+            owned_goal_shutdown={'stop':{'observed':True,'strict_stop_issues':[]}})
+        native=self.write('projection_native.json',result)
+        store.finish_attempt(result,True,result_path=native);state=store.export(self.root/'projection_output');store.close()
+        first={'outcome':'CANCELED','references':{'state':inputs.pin(self.root/'projection_output/state.json')}}
+        row={'id':'mission','state':'HELD','recovery_forbidden':True}
+        driver.publish_client_projection(row,first,'operation',attempt['parent_action_uuid'])
+        pretty=self.root/'same_revision_pretty.json';pretty.write_text(json.dumps(state,indent=3,sort_keys=False)+'\n')
+        self.assertNotEqual(inputs.file_sha(pretty),first['references']['state']['sha256'])
+        formatted={'outcome':'CANCELED','references':{'state':inputs.pin(pretty)}}
+        driver.publish_client_projection(row,formatted,'reconcile',attempt['parent_action_uuid'])
+        history=copy.deepcopy(row['client_response_history'])
+        driver.publish_client_projection(row,copy.deepcopy(formatted),'reconcile',attempt['parent_action_uuid'])
+        self.assertEqual(row['client_response_history'],history)
+        self.assertEqual(close_recording.client_state({'stages':[row]},'mission')['revision'],state['revision'])
+        unpublished=copy.deepcopy(state);unpublished['revision']+=100
+        unpublished_response={'outcome':'CANCELED','references':{'state':inputs.pin(self.write('unpublished_newer.json',unpublished))}}
+        row['reconciliations']=[{'state':'HELD','response':unpublished_response}]
+        self.assertEqual(mission_evidence.latest({'stages':[row]},'mission')[2],formatted['references']['state'])
+        original_files={p:p.read_bytes() for p in (native,pretty,self.root/'projection_output/state.json')}
+        for kind in ('revision_regression','same_revision_conflict','different_mission','different_identity'):
+            altered=copy.deepcopy(state)
+            if kind=='revision_regression':altered['revision']-=1
+            elif kind=='same_revision_conflict':altered['hold_reason']='CONFLICTING_SAME_REVISION'
+            elif kind=='different_mission':altered['mission_id']=str(uuid.uuid4())
+            else:altered['identity']['source_sha']='c'*40
+            response={'outcome':'CANCELED','references':{'state':inputs.pin(self.write(kind+'.json',altered))}}
+            rejected=copy.deepcopy(row)
+            with self.subTest(kind=kind),self.assertRaises(ValueError):
+                driver.publish_client_projection(rejected,response,'reconcile',attempt['parent_action_uuid'])
+            with self.subTest(kind=kind),self.assertRaises(ValueError):
+                close_recording.client_state({'stages':[rejected]},'mission')
+            with self.subTest(kind=kind),self.assertRaises(ValueError):
+                mission_evidence.latest({'stages':[rejected]},'mission')
+        unsafe=copy.deepcopy(state);unsafe['revision']+=1;unsafe['lifecycle']='HOLD';unsafe['hold_reason']='UNKNOWN_DISPATCH'
+        unsafe['attempt'].update(terminal_confirmed=False,children_quiescent=False,stopped=False)
+        unsafe['stop']={'state':'UNPROVEN'}
+        response={'outcome':'HELD','references':{'state':inputs.pin(self.write('newer_unknown.json',unsafe))}}
+        driver.publish_client_projection(row,response,'reconcile',attempt['parent_action_uuid'])
+        self.assertEqual(row['client_response'],response)
+        self.assertNotIn('client_projection_invalid',row)
+        self.assertEqual(mission_evidence.latest({'stages':[row]},'mission')[3]['revision'],unsafe['revision'])
+        with self.assertRaises(ValueError):close_recording.client_state({'stages':[row]},'mission')
+        for path,original in original_files.items():self.assertEqual(path.read_bytes(),original)
+
+    def test_new_reconcile_intent_and_unknown_worker_invalidate_old_safe_projection(self):
+        import close_recording
+        import mission_evidence
+        run,candidate,workflow,observed=self.recoverable_projection()
+        row=next(x for x in workflow['stages'] if x['id']=='mission')
+        self.assertEqual(close_recording.client_state(workflow,'mission')['revision'],observed['revision'])
+        previous=row['client_response'];original=(run/'already_terminal/state.json').read_bytes()
+        real_popen=subprocess.Popen;workers=[]
+        def spawn(argv,*args,**kwargs):
+            if len(argv)>2 and str(argv[2])==str(WORKFLOW/'workflow_worker.py'):
+                workers.append(list(argv));return None
+            return real_popen(argv,*args,**kwargs)
+        with patch.object(driver.subprocess,'Popen',side_effect=spawn):
+            self.assertEqual(driver.reconcile(run,'mission',candidate,False),0)
+        state=json.loads((run/'workflow_state.json').read_text());current=next(x for x in state['stages'] if x['id']=='mission')
+        self.assertEqual(len(workers),1);self.assertTrue(current['client_projection_invalid'])
+        self.assertEqual(current['client_response'],previous)
+        with self.assertRaises(ValueError):close_recording.client_state(state,'mission')
+        with self.assertRaises(ValueError):mission_evidence.latest(state,'mission')
+        current['reconciliations'][-1]['intent_unix_ns']-=6_000_000_000
+        mission_state.atomic_json(run/'workflow_state.json',state)
+        with patch.object(driver.subprocess,'Popen',side_effect=AssertionError('unknown worker must not be relaunched')):
+            self.assertEqual(driver.reconcile(run,'mission',candidate,False),10)
+        held=json.loads((run/'workflow_state.json').read_text());current=next(x for x in held['stages'] if x['id']=='mission')
+        self.assertTrue(current['client_projection_invalid']);self.assertEqual(current['reconciliations'][-1]['state'],'HELD')
+        with self.assertRaises(ValueError):close_recording.client_state(held,'mission')
+        self.assertEqual((run/'already_terminal/state.json').read_bytes(),original)
+        self.assertEqual(mission_state.MissionStore.inspect(run/'mission.db')['budgets']['mission_dispatches_reserved'],1)
+
+    def test_invalid_projection_blocks_retry_and_budget_close_before_and_after_final_flock(self):
+        run,candidate,workflow,observed=self.recoverable_projection()
+        original_request=next(x for x in workflow['stages'] if x['id']=='mission')['request_id']
+        db_bytes=(run/'mission.db').read_bytes()
+        cases=[(driver.retry_recoverable_when_ready,'retry'),(driver.close_exhausted_recoverable,'exhausted'),
+            (driver.close_expired_recoverable,'expired')]
+        for function,kind in cases:
+            client=copy.deepcopy(observed)
+            if kind=='exhausted':
+                client['budgets']['per_index_parent_dispatches'][0]=3;client['budgets']['per_index_reserved'][0]=6
+            elif kind=='expired':client['budgets']['deadline_boottime_sec']=time.clock_gettime(time.CLOCK_BOOTTIME)-1.
+            reference=inputs.pin(self.write('client_'+kind+'.json',client))
+            state=copy.deepcopy(workflow);row=next(x for x in state['stages'] if x['id']=='mission')
+            row['client_response']={'outcome':'HELD','references':{'state':reference}}
+            row['client_projection_invalid']={'reason':'new_reconciliation_pending'}
+            mission_state.atomic_json(run/'workflow_state.json',state)
+            with self.subTest(kind=kind,phase='entry'),patch.object(driver.fcntl,'flock',side_effect=AssertionError('invalid projection reached mutation lock')):
+                self.assertFalse(function(run,candidate,'mission'))
+            row.pop('client_projection_invalid');mission_state.atomic_json(run/'workflow_state.json',state)
+            now=time.time_ns();self.write('unused_READY.json',dict(ready=True,time_ns=now,valid_until_ns=now+500_000_000,
+                waypoint_ownership=dict(exclusive_nav_client=True,navigate_to_pose_active=[],follow_waypoints_active=[]),
+                recovery_runtime={'verified':True}))
+            real_flock=driver.fcntl.flock;injected=[]
+            def flock(stream,operation):
+                value=real_flock(stream,operation)
+                if operation & driver.fcntl.LOCK_EX and not injected:
+                    latest=json.loads((run/'workflow_state.json').read_text())
+                    current=next(x for x in latest['stages'] if x['id']=='mission')
+                    current['client_projection_invalid']={'reason':'concurrent_reconciliation_started_before_mutation'}
+                    mission_state.atomic_json(run/'workflow_state.json',latest);injected.append(True)
+                return value
+            with self.subTest(kind=kind,phase='locked'),patch.object(driver.fcntl,'flock',side_effect=flock):
+                self.assertFalse(function(run,candidate,'mission'))
+            self.assertEqual(injected,[True])
+            retained=json.loads((run/'workflow_state.json').read_text());current=next(x for x in retained['stages'] if x['id']=='mission')
+            self.assertEqual(current['state'],'HELD');self.assertEqual(current['request_id'],original_request)
+            self.assertTrue(current['client_projection_invalid']);self.assertEqual((run/'mission.db').read_bytes(),db_bytes)
+
+    def video_projection_fixture(self,name,accepted=False):
+        """Real Store receipts; native observations are explicit no-ROS fixtures."""
+        from test_mission_state import fixture
+        run=self.root/name;run.mkdir();raw,identity,policy,example=fixture()
+        store=mission_state.MissionStore(run/'mission.db');store.create(raw,identity,policy)
+        originals={};observed=[]
+        try:
+            for number in range(2 if accepted else 1):
+                directory=run/('attempt_%02d'%number);directory.mkdir()
+                attempt=store.reserve(str(uuid.uuid4()),directory);store.acknowledge(attempt['parent_action_uuid'],True)
+                visits=copy.deepcopy(example['ordered']['visits'])
+                for visit in visits[1:]:visit['passed']=None
+                visits[0]['entered']={'unix_ns':1_000_000_000+number*2_000_000_000}
+                visits[0]['passed'].update(unix_ns=2_000_000_000+number*2_000_000_000,
+                    steady_ns=2_000_000_000+number*2_000_000_000)
+                visits[0]['motion']={'signed_yaw_rad':.125+number}
+                promoted=accepted and number==1
+                store.observe(attempt['parent_action_uuid'],SimpleNamespace(active=1 if promoted else 0,visits=visits))
+                native=dict(action_uuid=attempt['parent_action_uuid'],status=6,error_code=0,
+                    missed_waypoints=[dict(index=1 if promoted else 0,error_code=60002)],
+                    children_quiescent=True,final_measured_and_commanded_stop=True,ordered={'visits':visits},
+                    owned_goal_shutdown={'stop':{'observed':True,'strict_stop_issues':[]}})
+                native_path=directory/'native_result.json';mission_state.atomic_json(native_path,native)
+                events=directory/'events.jsonl';events.write_text(json.dumps(dict(kind='goal_send',unix_ns=1_000_000_000+number*2_000_000_000,
+                    action_uuid=attempt['parent_action_uuid']))+'\n'+json.dumps(dict(kind='action_result',unix_ns=2_000_000_000+number*2_000_000_000,
+                    action_uuid=attempt['parent_action_uuid'],status=6))+'\n')
+                store.finish_attempt(native,True,result_path=native_path)
+                observed.append((copy.deepcopy(attempt),copy.deepcopy(native),inputs.pin(native_path)))
+                originals.update({p:p.read_bytes() for p in (native_path,events)})
+            state=store.export(run/'client_output')
+        finally:store.close()
+        reference=inputs.pin(run/'client_output/state.json')
+        mission_state.atomic_json(run/'workflow_state.json',dict(stages=[dict(id='mission_execute',state='HELD',
+            client_response_source='operation',client_response={'outcome':'HELD','references':{'state':reference}})]))
+        mission_state.atomic_json(run/'mcap_audit.json',dict(read_to_eof=True,integrity_pass=True,
+            first_log_ns=500_000_000,last_log_ns=5_000_000_000,synthetic_protocol_only=True))
+        originals[run/'client_output/state.json']=(run/'client_output/state.json').read_bytes()
+        return run,state,observed,originals
+
+    def consumer(self,script,run,*,success=True):
+        command=[str(self.binary),'-B',str(WORKFLOW/script),'--run-dir',str(run)]
+        result=subprocess.run(command,env=self.environment,capture_output=True,text=True,timeout=15)
+        row=dict(command=command,returncode=result.returncode,stdout=result.stdout,stderr=result.stderr)
+        self.commands.append(row);self.write('consumer_'+run.name+'_'+script+'.json',row)
+        if success:self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        else:self.assertNotEqual(result.returncode,0,result.stdout+result.stderr)
+        return result
+
+    def test_canonical_analysis_and_video_cli_reject_invalid_projection_before_reading_mcap(self):
+        run,state,observations,originals=self.video_projection_fixture('invalid_consumers')
+        workflow=json.loads((run/'workflow_state.json').read_text());row=workflow['stages'][0]
+        old=copy.deepcopy(row['client_response']);newer=copy.deepcopy(state);newer['revision']+=100
+        higher={'outcome':'HELD','references':{'state':inputs.pin(self.write('unpublished_safe_high_revision.json',newer))}}
+        row.update(client_projection_invalid={'reason':'new_reconciliation_outcome_unknown'},
+            client_response_history=[{'source':'operation','response':old}],
+            reconciliations=[{'state':'RECONCILED','response':higher}])
+        mission_state.atomic_json(run/'workflow_state.json',workflow)
+        for script in ('analyze_run.py','prepare_video_inputs.py'):
+            result=self.consumer(script,run,success=False)
+            self.assertIn('latest client observation is pending or invalid',result.stderr.lower())
+        for name in ('metrics.json','video_inputs.json','video_case'):self.assertFalse((run/name).exists())
+        for path,raw in originals.items():self.assertEqual(path.read_bytes(),raw)
+
+    def test_video_zero_accepted_keeps_native_pass_only_as_bound_observation(self):
+        run,state,observations,originals=self.video_projection_fixture('zero_accepted')
+        self.assertEqual(state['progress']['accepted_prefix_count'],0)
+        self.consumer('prepare_video_inputs.py',run)
+        derived=json.loads((run/'video_case/result.json').read_text());summary=json.loads((run/'video_inputs.json').read_text())
+        self.assertEqual(sum(bool(x.get('passed')) for x in derived['ordered']['visits']),0)
+        self.assertFalse(derived['ordered']['all_visited']);self.assertEqual(summary['accepted_visits'],0)
+        retained=derived['unaccepted_native_pass_observations'];self.assertEqual(len(retained),1)
+        attempt,native,reference=observations[0];observation=retained[0]
+        self.assertEqual(observation['attempt_id'],attempt['attempt_id'])
+        self.assertEqual(observation['parent_action_uuid'],attempt['parent_action_uuid'])
+        self.assertEqual(observation['native_result'],reference)
+        self.assertEqual(observation['visit'],native['ordered']['visits'][0])
+        self.assertEqual(derived['status'],native['status'])
+        self.assertEqual(json.loads(Path(observation['native_result']['path']).read_text())['status'],6)
+        for path,raw in originals.items():self.assertEqual(path.read_bytes(),raw)
+
+    def test_video_same_index_accepts_only_receipt_source_and_keeps_earlier_attempt_observation(self):
+        run,state,observations,originals=self.video_projection_fixture('accepted_later_source',accepted=True)
+        self.assertEqual(state['progress']['accepted_prefix_count'],1)
+        self.consumer('prepare_video_inputs.py',run)
+        derived=json.loads((run/'video_case/result.json').read_text());receipt=state['progress']['accepted_receipts'][0]
+        first,first_native,first_ref=observations[0];second,second_native,second_ref=observations[1]
+        self.assertNotEqual(first['parent_action_uuid'],second['parent_action_uuid'])
+        self.assertEqual(receipt['source_attempt_id'],second['attempt_id'])
+        self.assertEqual(derived['ordered']['visits'][0],receipt['visit'])
+        self.assertEqual(derived['ordered']['visits'][0]['passed']['unix_ns'],4_000_000_000)
+        self.assertEqual(sum(bool(x.get('passed')) for x in derived['ordered']['visits']),1)
+        self.assertFalse(derived['ordered']['all_visited'])
+        retained=derived['unaccepted_native_pass_observations'];self.assertEqual(len(retained),1)
+        self.assertEqual(retained[0]['index'],0);self.assertEqual(retained[0]['attempt_id'],first['attempt_id'])
+        self.assertEqual(retained[0]['parent_action_uuid'],first['parent_action_uuid'])
+        self.assertEqual(retained[0]['native_result'],first_ref)
+        self.assertEqual(retained[0]['visit'],first_native['ordered']['visits'][0])
+        self.assertEqual(derived['status'],second_native['status'])
+        for path,raw in originals.items():self.assertEqual(path.read_bytes(),raw)
+
     def test_builder_prepares_pinned_current_template_and_close_defaults_to_no_signal(self):
         source=self.source();original_render=self.root/'original_render_mobile_review.py';original_render.write_text(STAGE_CODE)
         extra=[HERE/name for name in ('matrix_navigation.py','recording_deadline.py','recovery_navigation.py',
@@ -392,13 +700,25 @@ class WorkflowTests(unittest.TestCase):
             planner_observer=str(self.stage),renderer=str(self.stage),phone_qa=str(self.stage),main_acceptance=str(candidate),
             tools={name:str(self.stage) for name in ('verify_source25_map.py','planner_observer_entry.py','verify_recording.py')},
             environment_stages=[],localization_stages=[],source_cleanup_stages=[],performance_stage=stage,
-            analysis_and_video_input_stages=[analysis],acceptance_stage=acceptance)
+            acceptance_stage=acceptance)
         path=self.write('bindings.json',binding);template=self.root/'builder_template.json'
         result=subprocess.run([str(self.binary),'-B',str(WORKFLOW/'build_matrix_plan.py'),'--bindings',str(path),'--output',str(template)],
             env=self.environment,capture_output=True,text=True,timeout=10)
         self.assertEqual(result.returncode,0,result.stdout+result.stderr);self.assertEqual(json.loads(result.stdout)['started_processes'],0)
         run=self.prepare(candidate,source,template,'BUILDER');self.cli('dry-run','--run-dir',run)
         plan=json.loads((run/'execution_plan.json').read_text());self.assertEqual(plan['stages'][0]['id'],'source_admission')
+        for stage_id,script,role in [('analyze_closed_recording','analyze_run.py','mcap'),
+                ('prepare_video_inputs','prepare_video_inputs.py','video')]:
+            selected=next(x for x in plan['stages'] if x['id']==stage_id)
+            self.assertEqual(selected['argv'][2],str(WORKFLOW/script));self.assertEqual(selected['roles'],[role])
+            pins={x['path']:x['sha256'] for x in selected['files']}
+            for path in (WORKFLOW/script,WORKFLOW/'mission_evidence.py'):
+                self.assertEqual(pins[str(path)],inputs.file_sha(path))
+        legacy=dict(binding,analysis_and_video_input_stages=[analysis]);legacy_path=self.write('obsolete_bindings.json',legacy)
+        rejected=self.root/'obsolete_template.json'
+        result=subprocess.run([str(self.binary),'-B',str(WORKFLOW/'build_matrix_plan.py'),'--bindings',str(legacy_path),'--output',str(rejected)],
+            env=self.environment,capture_output=True,text=True,timeout=10)
+        self.assertNotEqual(result.returncode,0);self.assertIn('obsolete',result.stderr);self.assertFalse(rejected.exists())
         closure=next(row for row in plan['stages'] if row['id']=='close_navigation');self.assertTrue(closure['exact_owned_cleanup'])
         self.assertEqual(closure['argv'][2],str(WORKFLOW/'close_recording.py'))
         target=self.root/'inert_close.json'

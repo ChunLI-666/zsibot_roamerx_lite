@@ -80,11 +80,18 @@ class MissionTests(unittest.TestCase):
         self.finish(result,True);self.finish(result,True)
         self.assertFalse(self.store.state()['result_flags']['operational_complete'])
         self.assertEqual(self.store.state()['budgets']['per_index_reserved'],[2,0,0,0,0,0,0])
-        for _ in range(2):
-            a=self.store.reserve(str(uuid.uuid4()),self.root);result['action_uuid']=a['parent_action_uuid'];self.finish(result,True)
+        for number in range(2):
+            request=str(uuid.uuid4())
+            if number==1:
+                self.assertEqual(self.store.state()['hold_reason'],'REPEATED_FAILURE_REVIEW_REQUIRED')
+                self.store.review_retry(request,'Reviewed original failure for the third budgeted attempt')
+            a=self.store.reserve(request,self.root);result['action_uuid']=a['parent_action_uuid'];self.finish(result,True)
         self.assertEqual(self.store.state()['budgets']['per_index_reserved'][0],6)
         self.assertEqual(self.store.state()['budgets']['per_index_parent_dispatches'][0],3)
-        with self.assertRaisesRegex(Hold,'FAILED_BUDGET'):self.store.reserve(str(uuid.uuid4()),self.root)
+        request=str(uuid.uuid4())
+        with self.assertRaisesRegex(Hold,'FAILED_BUDGET'):
+            self.store.review_retry(request,'A review does not reset the exhausted original budget')
+            self.store.reserve(request,self.root)
     def test_failure_classification_is_persisted_by_terminal_entry(self):
         a=self.store.reserve(str(uuid.uuid4()),self.root)
         result=dict(action_uuid=a['parent_action_uuid'],status=6,error_code=0,
@@ -93,15 +100,18 @@ class MissionTests(unittest.TestCase):
         self.assertEqual(self.store.state()['lifecycle'],'NEEDS_TASK_DECISION')
         with self.assertRaisesRegex(Hold,'Conflicting'):
             self.finish(dict(result,status=5),True)
-        a=self.store.reserve(str(uuid.uuid4()),self.root)
-        result['action_uuid']=a['parent_action_uuid']
-        result['cancel_reason']='input_became_invalid:scan_old';result['missed_waypoints']=[];result['status']=5
-        self.finish(result,True)
-        self.assertEqual(self.store.state()['lifecycle'],'PAUSED_INPUT_HEALTH')
-        result['stop_signals']=[2];self.finish(result,True)
-        self.assertEqual(self.store.state()['lifecycle'],'CANCELED')
-        self.finish(result,False)
-        self.assertEqual(self.store.state()['lifecycle'],'HOLD')
+        with self.assertRaises(Hold):self.store.reserve(str(uuid.uuid4()),self.root)
+        with self.assertRaises(Hold):self.store.review_retry(str(uuid.uuid4()),'Other task decisions need their own authority')
+        for name,children,signals,expected in [('input',True,[],'PAUSED_INPUT_HEALTH'),
+                ('operator',True,[2],'CANCELED'),('unproven_child',False,[],'HOLD')]:
+            self.store.close();self.store=MissionStore(self.root/(name+'.db'),self.root/'resource.lock')
+            self.store.create(self.raw,self.identity,self.policy)
+            a=self.store.reserve(str(uuid.uuid4()),self.root)
+            observation=dict(action_uuid=a['parent_action_uuid'],status=5,error_code=0,missed_waypoints=[],
+                final_measured_and_commanded_stop=True,cancel_reason='input_became_invalid:scan_old',stop_signals=signals)
+            self.finish(observation,children);self.assertEqual(self.store.state()['lifecycle'],expected)
+            if expected in ('CANCELED','HOLD'):
+                with self.assertRaises(Hold):self.store.reserve(str(uuid.uuid4()),self.root)
     def test_runtime_identity_is_checked_against_mission(self):
         session=Session(self.store,str(uuid.uuid4()),self.root)
         source=HERE/'goal_pilot_source'

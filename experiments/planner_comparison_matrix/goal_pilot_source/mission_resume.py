@@ -270,7 +270,7 @@ def parser():
     p.add_argument('--request-id');p.add_argument('--workflow-run-id');p.add_argument('--output',type=Path)
     p.add_argument('--ready',type=Path);p.add_argument('--execute',action='store_true');p.add_argument('--json',action='store_true')
     p.add_argument('--resource-lock',type=Path,default=Path('/tmp/matrix-domain185-mission.lock'))
-    p.add_argument('--reason',default='operator cancel')
+    p.add_argument('--reason',help='Explicit reviewed retry reason; never supplied by automatic recovery')
     p.add_argument('--odom-topic',default='/odom/current_pose');p.add_argument('--scan-topic',default='/laser_scan')
     p.add_argument('--simulation-scan-max-age-sec',type=float,choices=[.3,.5],default=.3)
     p.add_argument('--simulation-first-leg-max-distance-m',type=float,choices=[8.,8.5],default=8.)
@@ -344,6 +344,7 @@ def main(argv=None):
             store.import_closed(result,digest(raw),manifest['historical_bt_retries']);outcome='IMPORTED';code=0
         else:
             if not args.ready:raise ValueError('--ready required for ROS operations')
+            if args.operation=='cancel':store.request_cancel(args.request_id,args.reason)
             attempt=store.state().get('attempt')
             if attempt and attempt.get('dispatch_state')=='NOT_SENT_AFTER_INTENT':
                 raise Hold('NOT_SENT_AFTER_INTENT: no automatic cross-operation dispatch')
@@ -361,7 +362,13 @@ def main(argv=None):
                 code=10 if outcome=='HELD' else 11
             else:
                 outcome='HELD';code=10
-                for number in range(10):
+                control=store.state().get('retry_control') or {}
+                paused=bool(control.get('paused'))
+                if paused and args.operation=='resume' and args.reason:
+                    store.review_retry(args.request_id,args.reason)
+                    paused=False
+                if paused:outcome='NEEDS_TASK_DECISION';code=14
+                for number in range(0 if paused else 10):
                     if store.remaining()<=0:raise Hold('FAILED_BUDGET')
                     result=run_attempt(args,store,args.output/('attempt_%02d'%number))
                     s=store.state()

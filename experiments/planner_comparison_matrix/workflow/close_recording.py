@@ -42,6 +42,8 @@ def client_state(state, stage_id):
     rows = [x for x in state["stages"] if x["id"] == stage_id]
     if len(rows) != 1:
         raise ValueError("missing client stage")
+    if rows[0].get('client_projection_invalid'):
+        raise ValueError('Latest client observation is pending or invalid; older stop cannot authorize closure')
     ref = rows[0].get("client_response", {}).get("references", {}).get("state", {})
     path, expected = ref.get("path"), ref.get("sha256")
     if not path or not expected or digest(path) != expected:

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Materialize an executable Matrix stage plan from freshly verified bindings.
 
-This is preparation only: it never launches a node, simulator, or Action. The
-source and postprocessing stages are explicit inputs because source leases and
-the canonical client schema must not be guessed or silently reused.
+This is preparation only: it never launches a node, simulator, or Action.
+Source leases are explicit inputs. Mission analysis and video preparation use
+the canonical client projection reader from this source tree.
 """
 
 import argparse
@@ -36,6 +36,8 @@ def absolute(value):
 def build(binding):
     if binding.get("schema") != "terra.matrix.bindings.v1":
         raise ValueError("invalid Matrix binding schema")
+    if 'analysis_and_video_input_stages' in binding:
+        raise ValueError('analysis_and_video_input_stages is obsolete; canonical analysis and video preparation are fixed')
     variant = binding["variant"]
     if variant not in ("segmented", "official"):
         raise ValueError("only A/B primary variants are supported")
@@ -139,8 +141,13 @@ def build(binding):
                      "--static-audit", "{run_dir}/nav/static_layer_recording_audit.json", "--required-topics", absolute(binding["required_topics"]),
                      "--output", "{run_dir}/mcap_audit.json"], "files": [pin(tools["verify_recording.py"])],
             "success_files": [{"path": "{run_dir}/mcap_audit.json", "equals": {"read_to_eof": True, "integrity_pass": True, "static_snapshot_pass": True}}]})
-    for stage in binding["analysis_and_video_input_stages"]:
-        append(stage)
+    for stage_id, script, role, output in (
+            ('analyze_closed_recording', 'analyze_run.py', 'mcap', 'metrics.json'),
+            ('prepare_video_inputs', 'prepare_video_inputs.py', 'video', 'video_inputs.json')):
+        append({'id': stage_id, 'kind': 'command', 'roles': [role], 'cwd': cwd, 'env': env,
+                'argv': [py, '-B', str(HERE / script), '--run-dir', '{run_dir}'],
+                'files': [pin(HERE / script), pin(HERE / 'mission_evidence.py')],
+                'success_files': [{'path': '{run_dir}/' + output}]})
     append({"id": "phone_render", "kind": "command", "roles": ["video"], "cwd": cwd, "env": env,
             "argv": [py, "-B", str(renderer), "--input", "{run_dir}/nav/bag", "--closure-evidence", "{run_dir}/mcap_audit.json",
                      "--map-yaml", map_yaml, "--runtime-params", "{run_dir}/nav/runtime_parameters.json", "--route", absolute(mission["route"]),
@@ -160,8 +167,8 @@ def build(binding):
             acceptance.setdefault("success_files", []).append({"path": required})
     append(acceptance)
     required_roles = {role for stage in stages for role in stage.get("roles", [])}
-    if "acceptance" not in required_roles or not binding["analysis_and_video_input_stages"]:
-        raise ValueError("fresh environment, localization, source cleanup and analysis adapters are required")
+    if "acceptance" not in required_roles:
+        raise ValueError("an acceptance adapter is required")
     inputs = copy.deepcopy(binding.get("inputs", []))
     for path in (map_identity, mission["route"], mission["policy"], nav["source_snapshot"], binding["required_topics"]):
         inputs.append(pin(path))

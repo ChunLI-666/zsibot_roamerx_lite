@@ -66,6 +66,8 @@ struct Inputs {
   // Sweep/Nav2 APIs require a non-const Costmap2D reference; after conversion
   // this private generation is never mutated or shared with a map publisher.
   std::shared_ptr<nav2_costmap_2d::Costmap2D> cached_cost;
+  std::int64_t certificate_prepare_ns=0,certificate_commit_ns=0,certificate_commit_max_ns=0;
+  std::uint64_t certificate_checks=0,certificate_retries=0;
   std::vector<rclcpp::SubscriptionBase::SharedPtr> subs;
   std::mutex mutex;
   nav_msgs::msg::Odometry::ConstSharedPtr odom;
@@ -81,6 +83,7 @@ struct Inputs {
   double scan_age=.3;
   Footprint footprint;
   geometry_msgs::msg::PoseStamped planned_start;
+  geometry_msgs::msg::PoseStamped certified_map_body;
   bool start_captured=false,plan_invalidated=false,hold_confirmed=false,ownership_unknown=false;
   std::int64_t start_capture_ros=0,start_capture_steady=0,body_lookup_ros=0,body_lookup_steady=0;
   nav_msgs::msg::Path certificate_path;
@@ -252,39 +255,73 @@ struct Inputs {
     geometry_msgs::msg::PoseStamped p;p.header=t.header;p.pose.position.x=t.transform.translation.x;
     p.pose.position.y=t.transform.translation.y;p.pose.position.z=t.transform.translation.z;
     p.pose.orientation=t.transform.rotation;
+    validateBody(p);
+    last_body=p;body_observed=true;return p;
+  }
+  static void validateBody(const geometry_msgs::msg::PoseStamped & p) {
     const auto & q=p.pose.orientation;
     const double norm=q.x*q.x+q.y*q.y+q.z*q.z+q.w*q.w;
     if (!std::isfinite(p.pose.position.x)||!std::isfinite(p.pose.position.y)||!std::isfinite(yaw(p.pose))) {
       throw std::runtime_error("nonfinite body");
     }
     if (!std::isfinite(norm)||std::abs(norm-1.)>.01) {throw std::runtime_error("invalid body quaternion");}
-    last_body=p;body_observed=true;return p;
   }
   Certificate certified(std::unique_lock<std::mutex> & lock,const nav_msgs::msg::Path * path=nullptr) {
     using namespace robot_feasible_navigation;
+    struct Timing {
+      Inputs & inputs;std::int64_t start=0;
+      ~Timing() {if (!start) {return;}inputs.certificate_commit_ns=steady()-start;
+        inputs.certificate_commit_max_ns=std::max(inputs.certificate_commit_max_ns,inputs.certificate_commit_ns);}
+    } timing{*this};
     if (!basicHealthy() || !diagnostics.check(bool(map),Reject::MapMissing) ||
       !diagnostics.check(recent(map_receive),Reject::MapReceive) ||
       !diagnostics.check(stampFresh(map->header.stamp),Reject::MapStamp)) {return Certificate::InputWait;}
-    const auto & m=map->metadata;
-    if (!m.size_x||!m.size_y||!std::isfinite(m.resolution)||m.resolution<=0 ||
-      m.size_x>10000 || m.size_y>10000 || map->data.size()!=std::size_t(m.size_x)*m.size_y ||
-      !std::isfinite(m.origin.position.x)||!std::isfinite(m.origin.position.y)) {diagnostics.check(false,Reject::MapMetadata);return Certificate::InputWait;}
-    if (std::abs(m.origin.orientation.x)>1e-6 || std::abs(m.origin.orientation.y)>1e-6 ||
-      std::abs(m.origin.orientation.z)>1e-6 || std::abs(m.origin.orientation.w-1)>1e-6) {diagnostics.check(false,Reject::MapOrientation);return Certificate::InputWait;}
-    auto actual=body(map->header.frame_id);
+    if (path && (!diagnostics.check(!path->poses.empty(),Reject::PathMissing) ||
+      !diagnostics.check(path->header.frame_id=="map",Reject::PathFrame) || !start_captured)) {
+      return Certificate::InvalidPath;
+    }
+    const auto captured_map=map;const auto geometry=map_geometry_generation;
+    const auto phase=map_phase,handoff=epoch;const auto & m=captured_map->metadata;
+    auto cost=cost_generation==geometry?cached_cost:nullptr;
+    std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> cost_lock;
+    std::unique_ptr<sweep::ScopedObstacleIndex> index;
+    const auto prepare_started=steady();
+    lock.unlock();
+    try {
+      if (!cost) {
+        cost=std::make_shared<nav2_costmap_2d::Costmap2D>(m.size_x,m.size_y,m.resolution,
+          m.origin.position.x,m.origin.position.y);
+        std::copy(captured_map->data.begin(),captured_map->data.end(),cost->getCharMap());
+      }
+      // This map is immutable and private. Build the equivalent SAT sparse
+      // index outside Inputs' callback mutex, on this same certificate thread.
+      cost_lock=std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t>(*cost->getMutex());
+      index=std::make_unique<sweep::ScopedObstacleIndex>(*cost);
+    } catch (...) {lock.lock();throw;}
+    lock.lock();
+    certificate_prepare_ns=steady()-prepare_started;
+    timing.start=steady();
+    ++certificate_checks;
+    if (!diagnostics.check(map_polling && map_phase==phase && epoch==handoff && steady()<map_phase_deadline,
+      Reject::PhaseChanged)) {return Certificate::InputWait;}
+    if (!basicHealthy() || !diagnostics.check(recent(map_receive),Reject::MapReceive) ||
+      !diagnostics.check(stampFresh(map->header.stamp),Reject::MapStamp)) {return Certificate::InputWait;}
+    // Read one CURRENT body snapshot only after expensive preparation. A
+    // stopped estimator can legitimately vary; no comparison to an old TF is
+    // needed when the filled body/connector are checked at this decision.
+    const auto actual=body(map->header.frame_id);
+    auto original=actual;
+    if (actual.header.frame_id!="map") {original=tf->transform(actual,"map");}
+    validateBody(original);
+    if (!stampFresh(original.header.stamp)) {return Certificate::InputWait;}
     geometry_msgs::msg::PoseStamped local;
     if (path) {
-      if (!diagnostics.check(!path->poses.empty(),Reject::PathMissing) ||
-        !diagnostics.check(path->header.frame_id=="map",Reject::PathFrame)) {return Certificate::InvalidPath;}
-      if (!start_captured) {return Certificate::InvalidPath;}
-      auto current=body("map");
-      if (std::hypot(current.pose.position.x-planned_start.pose.position.x,
-        current.pose.position.y-planned_start.pose.position.y)>.03 ||
-        std::abs(angle(yaw(current.pose),yaw(planned_start.pose)))>.08) {
+      if (std::hypot(original.pose.position.x-planned_start.pose.position.x,
+        original.pose.position.y-planned_start.pose.position.y)>.03 ||
+        std::abs(angle(yaw(original.pose),yaw(planned_start.pose)))>.08) {
         diagnostics.check(false,Reject::BodyDrift);return Certificate::PlanInvalidated;
       }
       auto first=path->poses.front();first.header.frame_id=path->header.frame_id;
-      // Transform derived intent at current TF; retain every source sample header.
       first.header.stamp=actual.header.stamp;
       local=tf->transform(first,map->header.frame_id);
       if (std::hypot(local.pose.position.x-actual.pose.position.x,local.pose.position.y-actual.pose.position.y)>.05 ||
@@ -292,60 +329,27 @@ struct Inputs {
         diagnostics.check(false,Reject::PathStart);return Certificate::PlanInvalidated;
       }
     }
-    const auto captured_map=map;const auto sequence=map_sequence,geometry=map_geometry_generation;
-    const auto phase=map_phase,handoff=epoch;const auto received=map_receive;
-    auto cost=cost_generation==geometry?cached_cost:nullptr;
-    bool free=false,connector_free=true;
-    lock.unlock();
-    try {
-      if (!cost) {
-        auto converted=std::make_shared<nav2_costmap_2d::Costmap2D>(m.size_x,m.size_y,m.resolution,
-          m.origin.position.x,m.origin.position.y);
-        std::copy(captured_map->data.begin(),captured_map->data.end(),converted->getCharMap());cost=converted;
-      }
-      free=sweep::commandSweepFree(*cost,footprint,actual.pose.position.x,actual.pose.position.y,
-        yaw(actual.pose),0,0,1.);
-      if (path && free) {connector_free=sweep::sweepFree(*cost,footprint,actual.pose.position.x,
-        actual.pose.position.y,yaw(actual.pose),local.pose.position.x,local.pose.position.y,yaw(local.pose));}
-    } catch (...) {lock.lock();throw;}
-    lock.lock();
-    if (!diagnostics.check(map_polling && map_phase==phase && epoch==handoff && steady()<map_phase_deadline,
-      Reject::PhaseChanged)) {return Certificate::InputWait;}
-    if (!diagnostics.check(map_geometry_generation==geometry,Reject::MapChanged)) {return Certificate::InputWait;}
-    cached_cost=cost;cost_generation=geometry;
-    if (!basicHealthy() || !diagnostics.check(recent(received) && stampFresh(captured_map->header.stamp) &&
-      recent(map_receive) && stampFresh(map->header.stamp),Reject::MapReceive) ||
-      !diagnostics.check(stampFresh(actual.header.stamp),Reject::BodyChanged)) {return Certificate::InputWait;}
-    // A new healthy Odom/TF timestamp alone does not invalidate geometry. If the
-    // actual pose changed during the unlocked work, certify that pose next tick.
-    const auto current=body(captured_map->header.frame_id);
-    if (!diagnostics.check(std::hypot(current.pose.position.x-actual.pose.position.x,
-      current.pose.position.y-actual.pose.position.y)<=1e-9 &&
-      std::abs(angle(yaw(current.pose),yaw(actual.pose)))<=1e-9,Reject::BodyChanged)) {return Certificate::InputWait;}
-    if (path) {
-      const auto original=body("map");
-      if (std::hypot(original.pose.position.x-planned_start.pose.position.x,
-        original.pose.position.y-planned_start.pose.position.y)>.03 ||
-        std::abs(angle(yaw(original.pose),yaw(planned_start.pose)))>.08) {
-        diagnostics.check(false,Reject::BodyDrift);return Certificate::PlanInvalidated;
-      }
-      auto first=path->poses.front();first.header.frame_id=path->header.frame_id;
-      first.header.stamp=current.header.stamp;
-      const auto endpoint=tf->transform(first,captured_map->header.frame_id);
-      if (std::hypot(endpoint.pose.position.x-current.pose.position.x,
-        endpoint.pose.position.y-current.pose.position.y)>.05 ||
-        std::abs(angle(yaw(endpoint.pose),yaw(current.pose)))>.25) {
-        diagnostics.check(false,Reject::PathStart);return Certificate::PlanInvalidated;
-      }
-      if (!diagnostics.check(std::hypot(endpoint.pose.position.x-local.pose.position.x,
-        endpoint.pose.position.y-local.pose.position.y)<=1e-9 &&
-        std::abs(angle(yaw(endpoint.pose),yaw(local.pose)))<=1e-9,Reject::BodyChanged)) {return Certificate::InputWait;}
+    if (!diagnostics.check(map_geometry_generation==geometry,Reject::MapChanged)) {
+      ++certificate_retries;return Certificate::Retry;
     }
-    collision_map=captured_map;collision_body=actual;collision_map_sequence=sequence;
+    cached_cost=cost;cost_generation=geometry;
+    // Zero motion has exactly one pose. The old command horizon evaluated the
+    // identical footprint 100 times and extended the optimistic race window.
+    const bool free=sweep::footprintFree(*cost,footprint,actual.pose.position.x,actual.pose.position.y,yaw(actual.pose));
+    collision_map=map;collision_body=actual;collision_map_sequence=map_sequence;
     collision_checked=steady();collision_free=free;
     if (!diagnostics.check(free,Reject::BodyCollision)) {return Certificate::Blocked;}
-    if (!path) {return Certificate::Valid;}
-    return diagnostics.check(connector_free,Reject::PathSweep)?Certificate::Valid:Certificate::Blocked;
+    if (path && !diagnostics.check(sweep::sweepFree(*cost,footprint,actual.pose.position.x,
+      actual.pose.position.y,yaw(actual.pose),local.pose.position.x,local.pose.position.y,yaw(local.pose)),Reject::PathSweep)) {
+      return Certificate::Blocked;
+    }
+    if (!basicHealthy() || !recent(map_receive) || !stampFresh(map->header.stamp) ||
+      !stampFresh(actual.header.stamp) || !stampFresh(original.header.stamp) ||
+      !map_polling || map_phase!=phase || epoch!=handoff || steady()>=map_phase_deadline) {
+      return Certificate::InputWait;
+    }
+    certified_map_body=original;
+    return Certificate::Valid;
   }
   // Called at most once/second while waiting, plus a terminal failure snapshot.
   // No extra TF lookup, sensor publication, map copy, filesystem write or guard evaluation.
@@ -368,6 +372,9 @@ struct Inputs {
     }
     s<<"},\"recovery_error_code\":"<<recovery_error
       <<",\"ownership_unknown\":"<<ownership_unknown<<",\"hold_confirmed\":"<<hold_confirmed
+      <<",\"certificate_prepare_ns\":"<<certificate_prepare_ns<<",\"certificate_commit_ns\":"<<certificate_commit_ns
+      <<",\"certificate_commit_max_ns\":"<<certificate_commit_max_ns<<",\"certificate_checks\":"<<certificate_checks
+      <<",\"certificate_map_retries\":"<<certificate_retries
       <<",\"plan_invalidated\":"<<plan_invalidated
       <<",\"planned_start\":"<<(start_captured?poseDiagnostic(planned_start):"null")
       <<",\"planned_start_capture_ros_ns\":"<<start_capture_ros
@@ -457,7 +464,7 @@ public:
     if (!config().blackboard->get("matrix_stop_inputs",inputs_)) {
       inputs_=std::make_shared<Inputs>(*this);config().blackboard->set("matrix_stop_inputs",inputs_);
     }
-    started_=steady();stable_=0;pending_=false;request_registered_=false;acquired_=false;inspected_=false;completed_=false;
+    started_=steady();stable_=0;stable_segment_=0;release_segment_=0;pending_=false;request_registered_=false;acquired_=false;inspected_=false;completed_=false;
     {
       std::lock_guard<std::mutex> l(inputs_->mutex);
       inputs_->diagnostics=WaitCounters{};
@@ -490,6 +497,10 @@ public:
     if (phase_token_!=x.map_phase || !x.map_polling) {
       const bool expired=phase_token_==x.map_phase && steady()>=x.map_phase_deadline;
       return fail(expired?timeoutError():(release_ && pending_?OwnershipUnknown:InputHealthTimeout),"map_phase_closed");
+    }
+    if (release_ && pending_ && (!x.basicHealthy() || !x.barrier.ready(steady()) ||
+      x.barrier.diagnostic().first_steady!=release_segment_)) {
+      return fail(OwnershipUnknown,"stop_continuity_lost_during_release");
     }
     if (!x.client->service_is_ready()) {return waiting("WAIT_HANDOFF_SERVICE");}
     if (!release_ && !acquired_) {
@@ -528,6 +539,17 @@ public:
         (phase_token_==x.map_phase && steady()>=x.map_phase_deadline)) {
         return fail(timeoutError(),"certificate_deadline");
       }
+      const auto segment=x.barrier.diagnostic().first_steady;
+      if (release_ && pending_ && (segment!=release_segment_ || !x.basicHealthy() || !x.barrier.ready(steady()))) {
+        return fail(OwnershipUnknown,"stop_continuity_lost_during_certificate");
+      }
+      if (stable_ && segment!=stable_segment_) {stable_=0;stable_segment_=0;}
+      if (certificate==Certificate::Retry) {
+        // Preparation lost a map generation, not a healthy stopped segment.
+        // Never start a stability window or RELEASE from this result.
+        if (!x.basicHealthy() || !x.barrier.ready(steady())) {stable_=0;stable_segment_=0;}
+        return waiting("WAIT_CURRENT_MAP_CERTIFICATE");
+      }
       x.certificate=certificate;
       healthy=x.certificate==Certificate::Valid && x.diagnostics.check(x.barrier.ready(steady()),Reject::StopDwell);
     } catch (const std::exception & error) {
@@ -552,15 +574,15 @@ public:
       return fail(timeoutError(),"certificate_deadline");
     }
     if (!release_) {
-      if (!stable_) {stable_=steady();}
+      if (!stable_) {stable_=steady();stable_segment_=x.barrier.diagnostic().first_steady;}
       if (steady()-stable_<getInput<double>("health_stable").value()*1e9) {return waiting("WAIT_HEALTH_STABLE");}
       // Capture only after the unchanged stop/health predicates qualify. A TF
       // failure here is a finite input wait, not an exception escaping the BT.
-      try {x.planned_start=x.body("map");}
-      catch (const std::exception & error) {
-        x.last_exception=error.what();x.certificate=Certificate::InputWait;stable_=0;
+      if (!x.stampFresh(x.certified_map_body.header.stamp)) {
+        x.certificate=Certificate::InputWait;stable_=0;
         return waiting("WAIT_PLAN_START_TF");
       }
+      x.planned_start=x.certified_map_body;
       x.start_captured=true;x.plan_invalidated=false;
       x.start_capture_ros=x.node->now().nanoseconds();x.start_capture_steady=steady();
       diagnose("planned_start_captured",false);
@@ -628,6 +650,7 @@ private:
     auto req=std::make_shared<Service::Request>();req->run_id=inputs_->run;req->epoch=epoch;req->operation=op;
     static std::atomic<std::uint64_t> count{0};
     req->operation_id=inputs_->run+":"+std::to_string(steady())+":"+std::to_string(++count);
+    if (op=="RELEASE") {release_segment_=inputs_->barrier.diagnostic().first_steady;}
     pending_=true;request_registered_=false;
     try {
       auto f=inputs_->client->async_send_request(req);request_id_=f.request_id;future_=f.future.share();
@@ -644,7 +667,7 @@ private:
   }
   bool release_,pending_=false,request_registered_=false,acquired_=false,inspected_=false,completed_=false;
   std::uint64_t phase_token_=0;
-  std::int64_t started_=0,stable_=0,request_id_=0;
+  std::int64_t started_=0,stable_=0,stable_segment_=0,release_segment_=0,request_id_=0;
   const char * phase_="NOT_STARTED";
   std::int64_t last_diagnostic_=0;
   std::uint64_t diagnostic_drops_=0;

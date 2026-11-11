@@ -1,6 +1,7 @@
 // Software-only ROS integration, isolated domain; installed BT and real action transport.
 #include <gtest/gtest.h>
 #include <atomic>
+#include <array>
 #include <chrono>
 #include <cstdlib>
 #include <mutex>
@@ -97,6 +98,7 @@ protected:
   std::unique_ptr<nav2_costmap_2d::Costmap2D> real_map;
   std::unique_ptr<nav2_costmap_2d::Costmap2DPublisher> real_map_publisher;
   rclcpp::TimerBase::SharedPtr real_map_timer;
+  rclcpp::TimerBase::SharedPtr real_map_change_timer;
   rclcpp::TimerBase::SharedPtr stale_raw_timer;
   rclcpp::Publisher<nav2_msgs::msg::Costmap>::SharedPtr raw_map;
   rclcpp_action::Server<Plan>::SharedPtr planner;
@@ -114,6 +116,8 @@ protected:
   std::vector<DeferredMap> deferred_maps;
   std::atomic<bool> moving{false},stale{false};
   std::atomic<bool> actual_contract{false},stale_tf{false};
+  std::atomic<bool> actual_body_jitter{false};
+  std::atomic<int> body_jitter_samples{0},actual_map_changes{0};
   std::atomic<double> map_shift{0.};
   bool drift_after_first_plan=false,invalid_path_start=false,block_body_after_plan=false;
   bool planner_fails=false;
@@ -156,7 +160,9 @@ protected:
     inputs=node->create_wall_timer(2ms,[this]{
       ++odom_count;auto now=node->now();nav_msgs::msg::Odometry o;o.header.frame_id="odom";o.child_frame_id="base_link";
       o.header.stamp=stale?now-rclcpp::Duration::from_seconds(1):now;
-      if(actual_contract){o.pose.pose.position.x=.16;o.pose.pose.position.y=.01;o.pose.pose.orientation.z=std::sin(.07/2);o.pose.pose.orientation.w=std::cos(.07/2);}
+      if(actual_contract){const auto body=bodyCoordinates();o.pose.pose.position.x=body[0];o.pose.pose.position.y=body[1];
+        o.pose.pose.orientation.z=std::sin(body[2]/2);o.pose.pose.orientation.w=std::cos(body[2]/2);
+        if(actual_body_jitter){++body_jitter_samples;}}
       if(moving){o.twist.twist.linear.x=-.0717;o.twist.twist.linear.y=.1007;o.twist.twist.angular.z=.0125;}odom->publish(o);
       if(actual_contract){publishTf(now);if(odom_count%25==0){safe->publish(geometry_msgs::msg::Twist{});}}
       if(odom_count%(actual_contract?50:10)) return;
@@ -171,14 +177,21 @@ protected:
   void TearDown() override {
     // All action acceptance callbacks are finished before joining their workers.
     executor.cancel();spinning.join();for(auto & a:actions){if(a.joinable())a.join();}
-    if(real_map_node){executor.remove_node(real_map_node->get_node_base_interface());real_map_timer.reset();real_map_publisher.reset();real_map.reset();real_map_node.reset();}
+    if(real_map_node){executor.remove_node(real_map_node->get_node_base_interface());real_map_change_timer.reset();real_map_timer.reset();real_map_publisher.reset();real_map.reset();real_map_node.reset();}
     executor.remove_node(node);bt.reset();node.reset();
   }
+  std::array<double,3> bodyCoordinates() const {
+    const double tick=odom_count.load();
+    return {.16+(actual_body_jitter?.0015*std::sin(tick*.13):0.),
+      .01+(actual_body_jitter?.0015*std::cos(tick*.17):0.),
+      .07+(actual_body_jitter?.00015*std::sin(tick*.07):0.)};
+  }
   geometry_msgs::msg::PoseStamped bodyInMap() {
+    const auto body=bodyCoordinates();
     geometry_msgs::msg::PoseStamped p;p.header.frame_id="map";
-    p.pose.position.x=-8.218+std::cos(-2.278)*.16-std::sin(-2.278)*.01;
-    p.pose.position.y=11.516+std::sin(-2.278)*.16+std::cos(-2.278)*.01;
-    p.pose.orientation.z=std::sin((-2.278+.07)/2);p.pose.orientation.w=std::cos((-2.278+.07)/2);return p;
+    p.pose.position.x=-8.218+std::cos(-2.278)*body[0]-std::sin(-2.278)*body[1];
+    p.pose.position.y=11.516+std::sin(-2.278)*body[0]+std::cos(-2.278)*body[1];
+    p.pose.orientation.z=std::sin((-2.278+body[2])/2);p.pose.orientation.w=std::cos((-2.278+body[2])/2);return p;
   }
   void publishTf(const rclcpp::Time & now) {
     geometry_msgs::msg::TransformStamped t;t.header.stamp=stale_tf?now-rclcpp::Duration::from_seconds(1):now;
@@ -186,7 +199,8 @@ protected:
     auto u=t;u.header.frame_id="odom";u.child_frame_id="base_link";
     if(actual_contract){t.transform.translation.x=-8.218;t.transform.translation.y=11.516;
       t.transform.rotation.z=std::sin(-2.278/2);t.transform.rotation.w=std::cos(-2.278/2);
-      u.transform.translation.x=.16;u.transform.translation.y=.01;u.transform.rotation.z=std::sin(.07/2);u.transform.rotation.w=std::cos(.07/2);}
+      const auto body=bodyCoordinates();u.transform.translation.x=body[0];u.transform.translation.y=body[1];
+      u.transform.rotation.z=std::sin(body[2]/2);u.transform.rotation.w=std::cos(body[2]/2);}
     t.transform.translation.x+=map_shift.load();
     tf->sendTransform(std::vector<geometry_msgs::msg::TransformStamped>{t,u});
   }
@@ -208,6 +222,21 @@ protected:
   void fillActualMap(unsigned char value) {
     std::lock_guard<nav2_costmap_2d::Costmap2D::mutex_t> l(*real_map->getMutex());
     std::fill(real_map->getCharMap(),real_map->getCharMap()+360000,value);
+  }
+  void changeActualMapAtTenHz() {
+    real_map_change_timer=real_map_node->create_wall_timer(100ms,[this]{
+      {std::lock_guard<nav2_costmap_2d::Costmap2D::mutex_t> l(*real_map->getMutex());
+        // Real data generation changes, outside both padded body and connector.
+        real_map->setCost(0,0,(++actual_map_changes%2)?254:255);}
+      real_map_publisher->publishCostmap();
+    });
+  }
+  void paddedNearCell(unsigned char value) {
+    const auto body=bodyCoordinates();unsigned int x=0,y=0;
+    std::lock_guard<nav2_costmap_2d::Costmap2D::mutex_t> l(*real_map->getMutex());
+    // 0.75 m is outside the unpadded 0.647 m nose, inside its 0.797 m padded nose.
+    ASSERT_TRUE(real_map->worldToMap(body[0]+.75*std::cos(body[2]),body[1]+.75*std::sin(body[2]),x,y));
+    real_map->setCost(x,y,value);
   }
   nav2_msgs::msg::Costmap fixtureMap(unsigned char value=0,std::int64_t stamp=0) {
     nav2_msgs::msg::Costmap m;m.header.frame_id="odom";m.header.stamp=stamp?rclcpp::Time(stamp):node->now();
@@ -322,7 +351,11 @@ TEST_F(Native, FreshPlanStartDriftFailsTypedBeforeReleaseWithoutThirtySecondWait
   EXPECT_EQ(plans,1);EXPECT_EQ(follows,0);EXPECT_EQ(call("INSPECT")->mode,"HOLD");
   const auto diagnostic=diagnosticWith("plan_start_invalidated");
   EXPECT_NE(diagnostic.find("\"planned_start\":{\"frame\":\"map\""),std::string::npos);
-  EXPECT_NE(diagnostic.find("\"plan_start_delta_xy_m\":"),std::string::npos);
+  // The current certificate retains the measured body in the Costmap frame.
+  // A map/odom pair must not be presented as a same-frame numeric delta.
+  EXPECT_NE(diagnostic.find("\"last_valid_body\":{\"frame\":\"odom\""),std::string::npos);
+  EXPECT_NE(diagnostic.find("\"plan_invalidated\":true"),std::string::npos);
+  RecordProperty("frame_aware_drift_diagnostic",diagnostic);
 }
 TEST_F(Native, OneNativeRetryRecapturesActualStartAndClearsCurrentErrorOnly) {
   drift_after_first_plan=true;planning_ms=100;
@@ -492,6 +525,64 @@ TEST_F(Native, MapRpcHighFrequencyConstantPoseSucceedsAndMicroJitterTerminatesWi
   const auto begin=std::chrono::steady_clock::now();auto state=run(task,32000);done=true;jitter.join();
   EXPECT_NE(state,BT::NodeStatus::RUNNING);EXPECT_LT(std::chrono::steady_clock::now()-begin,32s);
   RecordProperty("micro_jitter_terminal",state==BT::NodeStatus::SUCCESS?"SUCCESS":"FINITE_FAILURE");
+}
+TEST_F(Native, ActualBodyMicroJitterAndTenHzMapChurnCompletePlanningAndRelease) {
+  actualCostmap(0);actual_body_jitter=true;changeActualMapAtTenHz();planning_ms=200;
+  BT::BehaviorTreeFactory factory;auto task=tree(factory);
+  const auto begin=std::chrono::steady_clock::now();
+  EXPECT_EQ(run(task,10000),BT::NodeStatus::SUCCESS);
+  EXPECT_EQ(plans,1);EXPECT_EQ(follows,1);EXPECT_GT(body_jitter_samples,500);EXPECT_GT(actual_map_changes,5);
+  EXPECT_LT(std::chrono::steady_clock::now()-begin,10s);
+  const auto released=call("INSPECT");EXPECT_EQ(released->mode,"CONTROLLER");
+  const auto report=diagnosticWith("\"certificate_checks\":");ASSERT_FALSE(report.empty());
+  EXPECT_GT(diagnosticNumber(report,"certificate_checks"),0U);
+  EXPECT_LT(diagnosticNumber(report,"certificate_commit_max_ns"),300000000U);
+  RecordProperty("actual_body_micro_jitter_and_map_churn_diagnostic",report);
+  RecordProperty("actual_body_jitter_sample_count",body_jitter_samples.load());
+  RecordProperty("actual_ten_hz_map_geometry_updates",actual_map_changes.load());
+}
+TEST_F(Native, ActualPaddedNearLethalAndUnknownCannotPlanOrReleaseUntilCleared) {
+  actualCostmap(0);actual_body_jitter=true;
+  for(const unsigned char value:{static_cast<unsigned char>(254),static_cast<unsigned char>(255)}) {
+    fillActualMap(0);paddedNearCell(value);BT::BehaviorTreeFactory factory;auto task=tree(factory);
+    EXPECT_EQ(run(task,1800),BT::NodeStatus::RUNNING);EXPECT_EQ(plans,0);EXPECT_EQ(follows,0);
+    EXPECT_EQ(call("INSPECT")->mode,"HOLD");task.haltTree();
+  }
+  fillActualMap(0);BT::BehaviorTreeFactory factory;auto task=tree(factory);
+  EXPECT_EQ(run(task,10000),BT::NodeStatus::SUCCESS);EXPECT_EQ(plans,1);EXPECT_EQ(follows,1);
+  EXPECT_EQ(call("INSPECT")->mode,"CONTROLLER");
+}
+TEST_F(Native, PendingReleaseMapRetryCannotHideDeliveredNonzeroOdomAndRecoveredStopSegment) {
+  raw_map=node->create_publisher<nav2_msgs::msg::Costmap>("/local_costmap/costmap_raw",rclcpp::QoS(1).reliable().transient_local());
+  planning_ms=200;BT::BehaviorTreeFactory factory;auto task=tree(factory);
+  for(int i=0;i<400 && !plans;++i){task.tickOnce();std::this_thread::sleep_for(10ms);}
+  ASSERT_EQ(plans,1);
+  struct ResumeOwnedGate {pid_t pid;~ResumeOwnedGate(){kill(pid,SIGCONT);}} resume{gate};
+  ASSERT_EQ(kill(gate,SIGSTOP),0);
+  for(int i=0;i<200 && diagnosticWith("\"phase\":\"WAIT_RELEASE_RESPONSE\"").empty();++i){
+    task.tickOnce();std::this_thread::sleep_for(10ms);
+  }
+  const auto before=diagnosticWith("\"phase\":\"WAIT_RELEASE_RESPONSE\"");ASSERT_FALSE(before.empty());
+  std::atomic<int> triggered{0};
+  struct ResetHook {~ResetHook(){conversion_hook_armed=false;conversion_callback={};}} reset;
+  conversion_callback=[this,&triggered]{
+    ++triggered;auto changed=fixtureMap();changed.data.back()=252;raw_map->publish(changed);
+    moving=true;std::this_thread::sleep_for(40ms);moving=false;
+    // Let the real subscription consume the bad sample and re-qualify a new
+    // segment before the plugin can see the queued old RELEASE response.
+    std::this_thread::sleep_for(400ms);
+  };
+  conversion_hook_armed=true;auto changed=fixtureMap();changed.data.back()=253;raw_map->publish(changed);
+  EXPECT_EQ(run(task,2000),BT::NodeStatus::FAILURE);EXPECT_EQ(triggered,1);
+  EXPECT_EQ(task.rootBlackboard()->get<int>("recovery_error_code"),matrix_recovery_bt::OwnershipUnknown);
+  EXPECT_EQ(follows,0);EXPECT_EQ(plans,1);
+  const auto after=diagnosticWith("stop_continuity_lost_during_certificate");ASSERT_FALSE(after.empty());
+  EXPECT_GT(diagnosticNumber(after,"first_steady_ns"),diagnosticNumber(before,"first_steady_ns"));
+  EXPECT_NE(after.find("\"qualified\":true"),std::string::npos);
+  RecordProperty("pending_release_recovered_segment_diagnostic",after);
+  kill(gate,SIGCONT);std::this_thread::sleep_for(150ms);
+  EXPECT_EQ(run(task,500),BT::NodeStatus::FAILURE);EXPECT_EQ(follows,0);
+  EXPECT_EQ(task.rootBlackboard()->get<int>("recovery_error_code"),matrix_recovery_bt::OwnershipUnknown);
 }
 TEST_F(Native, MapRpcConnectorTransformChangesDuringUnlockedConversionCannotRelease) {
   mark_map_after_plan=true;path_start_offset=.04;planning_ms=500;

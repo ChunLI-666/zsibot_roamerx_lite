@@ -13,6 +13,6 @@ enum RecoveryError : int {
   CollisionWaitTimeout = 60005,
 };
 enum class Certificate {
-  Valid, InputWait, PlanInvalidated, InvalidPath, Blocked
+  Valid, InputWait, PlanInvalidated, InvalidPath, Blocked, Retry
 };
 }  // namespace matrix_recovery_bt
