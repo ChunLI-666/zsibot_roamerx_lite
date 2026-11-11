@@ -38,6 +38,8 @@ def build(binding):
         raise ValueError("invalid Matrix binding schema")
     if 'analysis_and_video_input_stages' in binding:
         raise ValueError('analysis_and_video_input_stages is obsolete; canonical analysis and video preparation are fixed')
+    if 'acceptance_stage' in binding:
+        raise ValueError('acceptance_stage is obsolete; canonical finalization is fixed')
     variant = binding["variant"]
     if variant not in ("segmented", "official"):
         raise ValueError("only A/B primary variants are supported")
@@ -155,17 +157,17 @@ def build(binding):
                      "--end-ns", "@json:{run_dir}/video_inputs.json#end_ns", "--fps", "3", "--align-start-ready", "--output", "{run_dir}/phone"],
             "files": [pin(renderer), pin(renderer.parent / "original_render_mobile_review.py")],
             "success_files": [{"path": "{run_dir}/phone/video_metadata.json"}]})
+    append({'id':'phone_review','kind':'command','roles':['video'],'cwd':cwd,'env':env,
+            'argv':[py,'-B',str(HERE/'annotate_review_video.py'),'--run-dir','{run_dir}'],
+            'files':[pin(HERE/'annotate_review_video.py'),pin(HERE/'mission_evidence.py')],
+            'success_files':[{'path':'{run_dir}/phone_review/video_metadata.json'}]})
     append({"id": "phone_qa", "kind": "command", "roles": ["video_qa"], "cwd": cwd, "env": env,
-            "argv": [py, "-B", str(phone_qa), "--video-dir", "{run_dir}/phone"], "files": [pin(phone_qa)],
-            "success_files": [{"path": "{run_dir}/phone/encoded_QA/QA.json", "equals": {"encoded_checks_pass": True}}]})
-    acceptance = copy.deepcopy(binding["acceptance_stage"])
-    if "acceptance" not in acceptance.get("roles", []):
-        raise ValueError("acceptance stage must own the acceptance role")
-    existing_outputs = {item.get("path") for item in acceptance.get("success_files", [])}
-    for required in ("{run_dir}/acceptance.json", "{run_dir}/manifest.json", "{run_dir}/report.txt"):
-        if required not in existing_outputs:
-            acceptance.setdefault("success_files", []).append({"path": required})
-    append(acceptance)
+            "argv": [py, "-B", str(phone_qa), "--video-dir", "{run_dir}/phone_review"], "files": [pin(phone_qa)],
+            "success_files": [{"path": "{run_dir}/phone_review/encoded_QA/QA.json", "equals": {"encoded_checks_pass": True}}]})
+    append({'id':'finalize_acceptance','kind':'command','roles':['acceptance'],'cwd':cwd,'env':env,
+            'argv':[py,'-B',str(HERE/'finalize_run.py'),'--run-dir','{run_dir}'],
+            'files':[pin(HERE/'finalize_run.py'),pin(HERE/'mission_evidence.py'),pin(HERE/'workflow_inputs.py')],
+            'success_files':[{'path':'{run_dir}/'+name} for name in ('acceptance.json','manifest.json','report.txt')]})
     required_roles = {role for stage in stages for role in stage.get("roles", [])}
     if "acceptance" not in required_roles:
         raise ValueError("an acceptance adapter is required")
