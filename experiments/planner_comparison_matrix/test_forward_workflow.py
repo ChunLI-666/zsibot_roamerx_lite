@@ -18,6 +18,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 import uuid
+import shutil
 
 HERE=Path(__file__).resolve().parent
 REPO=HERE.parents[1]
@@ -616,9 +617,9 @@ class WorkflowTests(unittest.TestCase):
         originals[run/'client_output/state.json']=(run/'client_output/state.json').read_bytes()
         return run,state,observed,originals
 
-    def consumer(self,script,run,*,success=True):
+    def consumer(self,script,run,*,success=True,timeout=15):
         command=[str(self.binary),'-B',str(WORKFLOW/script),'--run-dir',str(run)]
-        result=subprocess.run(command,env=self.environment,capture_output=True,text=True,timeout=15)
+        result=subprocess.run(command,env=self.environment,capture_output=True,text=True,timeout=timeout)
         row=dict(command=command,returncode=result.returncode,stdout=result.stdout,stderr=result.stderr)
         self.commands.append(row);self.write('consumer_'+run.name+'_'+script+'.json',row)
         if success:self.assertEqual(result.returncode,0,result.stdout+result.stderr)
@@ -699,8 +700,7 @@ class WorkflowTests(unittest.TestCase):
             map_identity=str(self.map),map_dir=str(self.root),map_reserve_bytes=0,required_topics=str(topics),performance_topic='/fixture/performance',
             planner_observer=str(self.stage),renderer=str(self.stage),phone_qa=str(self.stage),main_acceptance=str(candidate),
             tools={name:str(self.stage) for name in ('verify_source25_map.py','planner_observer_entry.py','verify_recording.py')},
-            environment_stages=[],localization_stages=[],source_cleanup_stages=[],performance_stage=stage,
-            acceptance_stage=acceptance)
+            environment_stages=[],localization_stages=[],source_cleanup_stages=[],performance_stage=stage)
         path=self.write('bindings.json',binding);template=self.root/'builder_template.json'
         result=subprocess.run([str(self.binary),'-B',str(WORKFLOW/'build_matrix_plan.py'),'--bindings',str(path),'--output',str(template)],
             env=self.environment,capture_output=True,text=True,timeout=10)
@@ -708,17 +708,26 @@ class WorkflowTests(unittest.TestCase):
         run=self.prepare(candidate,source,template,'BUILDER');self.cli('dry-run','--run-dir',run)
         plan=json.loads((run/'execution_plan.json').read_text());self.assertEqual(plan['stages'][0]['id'],'source_admission')
         for stage_id,script,role in [('analyze_closed_recording','analyze_run.py','mcap'),
-                ('prepare_video_inputs','prepare_video_inputs.py','video')]:
+                ('prepare_video_inputs','prepare_video_inputs.py','video'),
+                ('phone_review','annotate_review_video.py','video'),
+                ('finalize_acceptance','finalize_run.py','acceptance')]:
             selected=next(x for x in plan['stages'] if x['id']==stage_id)
             self.assertEqual(selected['argv'][2],str(WORKFLOW/script));self.assertEqual(selected['roles'],[role])
             pins={x['path']:x['sha256'] for x in selected['files']}
             for path in (WORKFLOW/script,WORKFLOW/'mission_evidence.py'):
                 self.assertEqual(pins[str(path)],inputs.file_sha(path))
+            if stage_id=='finalize_acceptance':self.assertEqual(pins[str(WORKFLOW/'workflow_inputs.py')],inputs.file_sha(WORKFLOW/'workflow_inputs.py'))
+        qa=next(x for x in plan['stages'] if x['id']=='phone_qa')
+        self.assertIn('{run_dir}/phone_review',qa['argv'])
         legacy=dict(binding,analysis_and_video_input_stages=[analysis]);legacy_path=self.write('obsolete_bindings.json',legacy)
         rejected=self.root/'obsolete_template.json'
         result=subprocess.run([str(self.binary),'-B',str(WORKFLOW/'build_matrix_plan.py'),'--bindings',str(legacy_path),'--output',str(rejected)],
             env=self.environment,capture_output=True,text=True,timeout=10)
         self.assertNotEqual(result.returncode,0);self.assertIn('obsolete',result.stderr);self.assertFalse(rejected.exists())
+        legacy=dict(binding,acceptance_stage=acceptance);legacy_path=self.write('obsolete_acceptance_bindings.json',legacy)
+        result=subprocess.run([str(self.binary),'-B',str(WORKFLOW/'build_matrix_plan.py'),'--bindings',str(legacy_path),'--output',str(rejected)],
+            env=self.environment,capture_output=True,text=True,timeout=10)
+        self.assertNotEqual(result.returncode,0);self.assertIn('acceptance_stage is obsolete',result.stderr);self.assertFalse(rejected.exists())
         closure=next(row for row in plan['stages'] if row['id']=='close_navigation');self.assertTrue(closure['exact_owned_cleanup'])
         self.assertEqual(closure['argv'][2],str(WORKFLOW/'close_recording.py'))
         target=self.root/'inert_close.json'
@@ -729,6 +738,114 @@ class WorkflowTests(unittest.TestCase):
         result=subprocess.run(command,env=self.environment,capture_output=True,text=True,timeout=10)
         self.assertEqual(result.returncode,0,result.stderr);self.assertEqual(json.loads(result.stdout)['signals_sent'],0)
         self.assertFalse(target.exists());self.assertTrue(all(process.poll() is None for process in self.processes))
+
+    def review_schema_fixture(self,name):
+        """Synthetic label/guard fixture only; fake bytes are never video QA."""
+        import annotate_review_video as annotation
+        run,state,observations,originals=self.video_projection_fixture(name)
+        reference=inputs.pin(run/'client_output/state.json')
+        mission_state.atomic_json(run/'video_inputs.json',dict(mission_state_sha256=reference['sha256']))
+        phone=run/'phone';phone.mkdir();video=phone/'fixture.mp4';video.write_bytes(b'SYNTHETIC_NOT_AN_ENCODED_VIDEO')
+        meta=dict(source_sha256=annotation.RENDERER_SHA,helper_source_sha256=annotation.RENDERER_HELPER_SHA,
+            input_topics=['/camera/front/image/compressed'],video=dict(path=str(video),sha256=inputs.file_sha(video),width=1280,height=720))
+        mission_state.atomic_json(phone/'video_metadata.json',meta)
+        return run,state,meta
+
+    def test_review_annotation_rejects_invalid_current_projection_layout_renderer_and_camera(self):
+        for fault in ('invalid_projection','stale_video_inputs','wrong_layout','wrong_renderer','ambiguous_camera'):
+            run,state,meta=self.review_schema_fixture('review_reject_'+fault)
+            if fault=='invalid_projection':
+                workflow=json.loads((run/'workflow_state.json').read_text());workflow['stages'][0]['client_projection_invalid']=dict(reason='newer pending result')
+                mission_state.atomic_json(run/'workflow_state.json',workflow)
+            elif fault=='stale_video_inputs':mission_state.atomic_json(run/'video_inputs.json',dict(mission_state_sha256='a'*64))
+            elif fault=='wrong_layout':meta['video']['width']=640
+            elif fault=='wrong_renderer':meta['source_sha256']='a'*64
+            elif fault=='ambiguous_camera':meta['input_topics'].append('/front_camera/image/compressed')
+            mission_state.atomic_json(run/'phone/video_metadata.json',meta)
+            self.consumer('annotate_review_video.py',run,success=False)
+            self.assertFalse((run/'phone_review').exists())
+
+    def test_unknown_strict_status_stays_unconfirmed_in_review_labels(self):
+        import annotate_review_video as annotation
+        run,state,meta=self.review_schema_fixture('review_unknown_strict')
+        self.assertEqual(state['result_flags']['strict_timing_status'],'NOT_EVALUATED')
+        original=run/'phone/fixture.mp4';before=original.read_bytes()
+        def fake_encoder(command,**kwargs):
+            # Only this schema/label case stubs the encoder. The closed-case
+            # test below performs real encoding and full decoding separately.
+            shutil.copyfile(original,command[-1]);return subprocess.CompletedProcess(command,0)
+        with patch.object(sys,'argv',['annotate_review_video.py','--run-dir',str(run)]),patch.object(annotation.subprocess,'run',side_effect=fake_encoder):
+            annotation.main()
+        review=json.loads((run/'phone_review/video_metadata.json').read_text())['review']
+        self.assertIn('严格检查：未确认',review['labels']['native'])
+        self.assertEqual(review['strict_timing_status'],'NOT_EVALUATED');self.assertEqual(original.read_bytes(),before)
+
+    @unittest.skipUnless(os.environ.get('MATRIX_P4_CLOSED_CASE') and os.environ.get('MATRIX_P4_ORIGINAL_PHONE')
+        and os.environ.get('MATRIX_P4_QA_SCRIPT') and os.environ.get('MATRIX_P4_SOURCE_MANIFEST'),
+        'Explicit closed Source17 video/state fixtures are not bundled in the repository')
+    def test_closed_source17_review_video_and_exact_qa_finalizer_bindings(self):
+        closed=Path(os.environ['MATRIX_P4_CLOSED_CASE']).resolve();phone=Path(os.environ['MATRIX_P4_ORIGINAL_PHONE']).resolve()
+        qa_script=Path(os.environ['MATRIX_P4_QA_SCRIPT']).resolve();source=Path(os.environ['MATRIX_P4_SOURCE_MANIFEST']).resolve()
+        self.assertEqual(inputs.file_sha(qa_script),'934d3956554c8ba3af5f93dc88273f177f931289a3266a3eace8aac60471352f')
+        run=self.root/'closed_case_path_view';run.mkdir();(run/'phone').mkdir()
+        original_metadata=phone/'video_metadata.json';meta=json.loads(original_metadata.read_text())
+        original_video=phone/Path(meta['video']['path']).name
+        original_hashes={str(p):inputs.file_sha(p) for p in (original_metadata,original_video)}
+        self.assertEqual(original_hashes[str(original_video)],meta['video']['sha256'])
+        shutil.copy2(original_metadata,run/'phone/video_metadata.json')
+        (run/'phone'/original_video.name).symlink_to(original_video)
+        state_file=closed/'stages/mission_execute/invocation_000/state.copy.json'
+        state=json.loads(state_file.read_text());self.assertEqual(state['progress']['accepted_prefix_count'],4)
+        self.assertEqual(len(state['route']),5);self.assertEqual(state['result_flags']['strict_timing_status'],'FAIL')
+        shutil.copy2(state_file,run/'state.json');state_ref=inputs.pin(run/'state.json')
+        original_inputs=json.loads((closed/'video_inputs.json').read_text())
+        self.assertEqual(original_inputs['mission_state_sha256'],state_ref['sha256'])
+        shutil.copy2(closed/'video_inputs.json',run/'video_inputs.json')
+        workflow=dict(stages=[dict(id='mission_execute',state='HELD',client_response_source='operation',
+            client_response=dict(outcome='HELD',references={'state':state_ref}))])
+        mission_state.atomic_json(run/'workflow_state.json',workflow)
+        plan=json.loads((closed/'execution_plan.json').read_text());old_source=copy.deepcopy(plan['input_binding']['source'])
+        self.assertEqual(inputs.file_sha(source),old_source['sha256']);plan['input_binding']['source']=inputs.pin(source)
+        mission_state.atomic_json(run/'execution_plan.json',plan)
+        for name in ('metrics.json','mcap_audit.json'):shutil.copy2(closed/name,run/name)
+        self.write('CLOSED_CASE_PATH_VIEW.json',dict(original_state=inputs.pin(state_file),state_copy=state_ref,
+            original_phone=original_hashes,original_source_reference=old_source,new_source_reference=inputs.pin(source),
+            original_case_files_changed=False,raw_state_bytes_unchanged=True,
+            boundary='Derived local path view only; no MCAP replay, new navigation case or source acceptance'))
+        self.consumer('annotate_review_video.py',run,timeout=180)
+        output=run/'phone_review';annotated=json.loads((output/'video_metadata.json').read_text());review=annotated['review']
+        self.assertEqual(review['labels']['final'],'最终独立验收 4/5：未通过')
+        self.assertEqual(review['labels']['camera'],'画面话题 /camera/front/image/compressed')
+        self.assertIn('动作层：完成；严格检查：未通过',review['labels']['native'])
+        self.assertEqual(review['mission_state_sha256'],state_ref['sha256'])
+        self.assertEqual(review['original_video']['sha256'],original_hashes[str(original_video)])
+        self.assertEqual(review['original_metadata']['sha256'],original_hashes[str(original_metadata)])
+        command=[str(self.binary),'-B',str(qa_script),'--video-dir',str(output)]
+        result=subprocess.run(command,env=self.environment,capture_output=True,text=True,timeout=180)
+        self.commands.append(dict(command=command,returncode=result.returncode,stdout=result.stdout,stderr=result.stderr))
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        qa_path=output/'encoded_QA/QA.json';qa=json.loads(qa_path.read_text());self.assertTrue(qa['encoded_checks_pass'],qa)
+        self.assertEqual(len(qa['encoded_keyframes']),3);self.assertTrue(all(Path(p).is_file() for p in qa['encoded_keyframes']))
+        self.consumer('finalize_run.py',run)
+        acceptance=json.loads((run/'acceptance.json').read_text())
+        self.assertEqual((acceptance['accepted_waypoints'],acceptance['total_waypoints']),(4,5))
+        self.assertFalse(acceptance['mission_coverage_pass']);self.assertEqual(acceptance['strict_scan_300ms_status'],'FAIL')
+        acceptance_sha=inputs.file_sha(run/'acceptance.json');qa_bytes=qa_path.read_bytes()
+        old_qa=copy.deepcopy(qa);old_qa['video']=str(original_video)
+        old_qa['video_sha256_reused_from_renderer']=original_hashes[str(original_video)]
+        mission_state.atomic_json(qa_path,old_qa)
+        rejected=self.consumer('finalize_run.py',run,success=False)
+        self.assertIn('Encoded QA is not for this exact review video',rejected.stderr)
+        self.assertEqual(inputs.file_sha(run/'acceptance.json'),acceptance_sha);qa_path.write_bytes(qa_bytes)
+        changed=copy.deepcopy(state);changed['revision']+=1
+        mission_state.atomic_json(run/'newer_state.json',changed);stale=copy.deepcopy(workflow)
+        stale['stages'][0]['client_response']['references']['state']=inputs.pin(run/'newer_state.json')
+        mission_state.atomic_json(run/'workflow_state.json',stale)
+        rejected=self.consumer('finalize_run.py',run,success=False)
+        self.assertIn('current independent mission',rejected.stderr)
+        self.assertEqual(inputs.file_sha(run/'acceptance.json'),acceptance_sha)
+        self.write('REJECTED_NEWER_WORKFLOW.json',stale);mission_state.atomic_json(run/'workflow_state.json',workflow)
+        for path,expected in original_hashes.items():self.assertEqual(inputs.file_sha(Path(path)),expected)
 
     def test_performance_source_role_binding_stops_before_ros(self):
         import runtime_performance
