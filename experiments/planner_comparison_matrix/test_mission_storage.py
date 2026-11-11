@@ -620,4 +620,119 @@ class RetryControlTests(unittest.TestCase):
         self.assertEqual(state['attempt']['parent_action_uuid'],before['attempt']['parent_action_uuid'])
         self.assertEqual(state['budgets']['mission_dispatches_reserved'],1)
 
+class FinalResidualStorageTests(unittest.TestCase):
+    """Public StorageWorker transactions; no synthetic source/plant acceptance."""
+    def setUp(self):
+        from test_mission_state import residual_protocol_fixture
+        self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name)
+        self.worker=StorageWorker(self.root/'state.db',self.root/'resource.lock')
+        self.source,self.result,self.original_path,self.visits=residual_protocol_fixture(self.worker,self.root)
+        self.original_bytes=self.original_path.read_bytes();self.initial=self.worker.state()
+        self.assertEqual(self.initial['hold_reason'],'FINAL_GOAL_RESIDUAL_ERROR')
+
+    def tearDown(self):self.worker.close();self.temp.cleanup()
+
+    def reopen(self):
+        self.worker.close();self.worker=StorageWorker(self.root/'state.db',self.root/'resource.lock')
+
+    def reserve_correction(self,ack=True):
+        a=self.worker.reserve(str(uuid.uuid4()),self.root/'correction')
+        if ack:self.worker.acknowledge(a['parent_action_uuid'],True)
+        return a
+
+    def finish_correction(self,attempt,status=6,code=60002,**extra):
+        result=dict(action_uuid=attempt['parent_action_uuid'],status=status,error_code=0,error_msg='',
+            missed_waypoints=[dict(index=4,error_code=code)] if status==6 else [],
+            functional_status='FAIL',children_quiescent=True,final_measured_and_commanded_stop=True,
+            owned_goal_shutdown=copy.deepcopy(self.result['owned_goal_shutdown']),
+            evidence_writer=dict(evidence_complete=True),strict_scan_timing_status='NO_STRICT_SCAN_FAULT_RECORDED',
+            finished_ns=time.time_ns())
+        result.update(extra);path=self.root/('correction_result_'+str(uuid.uuid4())+'.json');atomic_json(path,result)
+        self.worker.finish_attempt(result,result['children_quiescent'],result_path=path);return result,path
+
+    def no_more(self):
+        before=self.worker.state()
+        with self.assertRaises(Hold):self.worker.reserve(str(uuid.uuid4()),self.root/'forbidden')
+        with self.assertRaises(Hold):self.worker.review_retry(str(uuid.uuid4()),'Review cannot manufacture another final correction')
+        after=self.worker.state();self.assertEqual(after['attempt']['parent_action_uuid'],before['attempt']['parent_action_uuid'])
+        self.assertEqual({k:v for k,v in after['budgets'].items() if k!='remaining_sec'},
+            {k:v for k,v in before['budgets'].items() if k!='remaining_sec'})
+        self.assertLessEqual(after['budgets']['remaining_sec'],before['budgets']['remaining_sec'])
+        self.assertEqual(self.original_path.read_bytes(),self.original_bytes)
+
+    def test_one_correction_reserve_preserves_original_prefix_index_uuid_binding_and_budget_across_reopen(self):
+        authority=copy.deepcopy(self.initial['attempt']['terminal_authority']);self.reopen();a=self.reserve_correction()
+        s=self.worker.state();c=s['final_goal_correction']
+        self.assertEqual(a['start_index'],4);self.assertEqual(a['final_goal_correction_for'],self.source['attempt_id'])
+        self.assertEqual(c['consumed_attempt_id'],a['attempt_id']);self.assertEqual(c['consumed_action_uuid'],a['parent_action_uuid'])
+        self.assertEqual(s['progress']['accepted_receipts'],self.initial['progress']['accepted_receipts'])
+        self.assertEqual(s['budgets']['deadline_boottime_sec'],self.initial['budgets']['deadline_boottime_sec'])
+        self.assertEqual(s['budgets']['per_index_reserved'],[2,2,2,2,4]);self.assertEqual(s['budgets']['mission_dispatches_reserved'],2)
+        self.assertEqual(s['attempts'][0]['terminal_authority'],authority)
+        self.reopen();self.no_more()
+
+    def test_repeated_source_reconciliation_does_not_regenerate_permission_or_rewrite_original_bytes(self):
+        before=self.worker.state()['final_goal_correction']
+        for _ in range(2):
+            p=self.root/('reconcile_'+str(uuid.uuid4())+'.json');atomic_json(p,self.result)
+            self.worker.finish_attempt(self.result,True,result_path=p)
+            self.assertEqual(self.worker.state()['final_goal_correction'],before)
+        self.reserve_correction();self.reopen();self.no_more()
+
+    def test_successful_correction_promotes_only_the_last_original_index_and_keeps_strict_failure(self):
+        a=self.reserve_correction();visits=copy.deepcopy(self.visits)
+        visits[4]['passed']['snapshot']['last']['pose']['stamp_ns']=2_000_000_000
+        self.worker.observe(a['parent_action_uuid'],SimpleNamespace(active=4,visits=visits))
+        self.finish_correction(a,status=4,functional_status='PASS')
+        s=self.worker.state();self.assertTrue(s['lifecycle'].startswith('COMPLETED'))
+        self.assertEqual(s['progress']['accepted_prefix_count'],5);self.assertIsNone(s['progress']['next_index'])
+        self.assertEqual(s['progress']['accepted_receipts'][:4],self.initial['progress']['accepted_receipts'])
+        self.assertEqual(s['progress']['accepted_receipts'][4]['source_action_uuid'],a['parent_action_uuid'])
+        self.assertEqual(s['final_goal_correction']['outcome'],'COMPLETE')
+        self.assertEqual(s['result_flags']['strict_timing_status'],'FAIL');self.no_more()
+
+    def test_different_known_failure_cannot_create_a_third_dispatch(self):
+        a=self.reserve_correction();self.finish_correction(a,code=60002);s=self.worker.state()
+        self.assertEqual((s['lifecycle'],s['hold_reason']),('NEEDS_TASK_DECISION','FINAL_GOAL_CORRECTION_FAILED'))
+        self.assertEqual(s['attempt']['native_status'],6);self.assertEqual(s['attempt']['missed_waypoints'][0]['error_code'],60002)
+        self.reopen();self.no_more()
+
+    def test_unknown_60003_holds_its_original_reason_and_cancel_keeps_cancel_precedence(self):
+        a=self.reserve_correction();result,path=self.finish_correction(a,code=60003)
+        s=self.worker.state();self.assertEqual((s['lifecycle'],s['hold_reason']),('HOLD','RECOVERY_OWNERSHIP_RECONCILIATION_REQUIRED'))
+        self.assertEqual(s['final_goal_correction']['outcome'],'HELD');self.no_more()
+        # Operator intent acts on the same original UUID; native status6 remains
+        # immutable even though task cancellation now takes precedence.
+        self.worker.request_cancel(str(uuid.uuid4()),'Operator cancels this held correction')
+        s=self.worker.state();self.assertEqual(s['lifecycle'],'CANCELED')
+        self.assertEqual(s['attempt']['native_status'],6);self.assertEqual(s['attempt']['parent_action_uuid'],a['parent_action_uuid'])
+        self.no_more()
+
+    def test_not_sent_reservation_is_never_refunded_after_reopen(self):
+        a=self.reserve_correction(ack=False);p=self.root/'not_sent.json'
+        atomic_json(p,dict(action_uuid=a['parent_action_uuid'],status=None,send_goal_async_invoked=False,goals_sent=0))
+        self.worker.record_not_sent(a['parent_action_uuid'],result_path=p,send_invoked=False)
+        s=self.worker.state();self.assertEqual(s['final_goal_correction']['outcome'],'NOT_SENT_AFTER_RESERVATION')
+        self.assertEqual(s['hold_reason'],'NOT_SENT_AFTER_INTENT_NO_AUTOMATIC_REDISPATCH')
+        self.reopen();self.no_more();self.assertEqual(self.worker.state()['budgets']['mission_dispatches_reserved'],2)
+
+    def test_budget_failure_before_reserve_leaves_the_available_permission_unconsumed(self):
+        b=self.worker.state()['budgets']
+        with patch('mission_state.boot_clock',return_value=(b['deadline_boot_id'],b['deadline_boottime_sec']+1.)):
+            with self.assertRaisesRegex(Hold,'FAILED_BUDGET'):self.reserve_correction()
+        s=self.worker.state();self.assertIsNone(s['final_goal_correction']['consumed_attempt_id'])
+        self.assertEqual(s['budgets']['mission_dispatches_reserved'],1)
+
+    def test_unknown_correction_terminal_retains_unknown_uuid_and_used_allowance(self):
+        a=self.reserve_correction();self.finish_correction(a,status=0)
+        s=self.worker.state();self.assertEqual((s['lifecycle'],s['hold_reason']),('HOLD','UNKNOWN_DISPATCH'))
+        self.assertEqual(s['final_goal_correction']['outcome'],'HELD')
+        self.reopen();self.no_more()
+
+    def test_correction_native_cancel_keeps_original_cancel_status_and_used_allowance(self):
+        a=self.reserve_correction();self.finish_correction(a,status=5,stop_signals=[signal.SIGINT])
+        s=self.worker.state();self.assertEqual((s['lifecycle'],s['hold_reason']),('CANCELED','OPERATOR_CANCEL'))
+        self.assertEqual(s['attempt']['native_status'],5);self.no_more()
+
+
 if __name__=='__main__':unittest.main()
