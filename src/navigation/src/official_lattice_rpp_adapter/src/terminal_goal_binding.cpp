@@ -147,21 +147,37 @@ std::uint64_t CompletionGate::beginCycle(std::uint64_t plan) {
   std::lock_guard<std::mutex> lock(mutex_);ready_=false;++epoch_;
   need(plan==0||plan==plan_generation_,"Stale terminal plan generation");return epoch_;
 }
-void CompletionGate::finishCycle(std::uint64_t epoch,bool complete) {
+void CompletionGate::finishCycle(std::uint64_t epoch,bool complete,
+  std::chrono::steady_clock::time_point valid_until,std::int64_t source_valid_until_ns,
+  std::int64_t source_valid_from_ns) {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (epoch==epoch_) {ready_=complete;updated_=std::chrono::steady_clock::now();}
+  if (epoch==epoch_) {
+    ready_=complete;updated_=std::chrono::steady_clock::now();
+    valid_until_=std::min(valid_until,updated_+std::chrono::milliseconds(250));
+    source_valid_until_ns_=source_valid_until_ns;
+    source_valid_from_ns_=source_valid_from_ns;
+    if (source_valid_until_ns_!=0&&
+      (source_valid_from_ns_<=0||source_valid_from_ns_>=source_valid_until_ns_)) {ready_=false;}
+  }
 }
 bool CompletionGate::eligibleLocked() const {
-  return ready_&&std::chrono::steady_clock::now()-updated_<std::chrono::milliseconds(250);
+  return ready_&&std::chrono::steady_clock::now()<valid_until_;
 }
 CompletionGate::Snapshot CompletionGate::snapshot() {
   std::lock_guard<std::mutex> lock(mutex_);
-  return {epoch_,plan_generation_,eligibleLocked(),binding_};
+  return {epoch_,plan_generation_,eligibleLocked(),binding_,source_valid_until_ns_,source_valid_from_ns_};
 }
-bool CompletionGate::stillEligible(const Snapshot & token) {
+bool CompletionGate::stillEligible(const Snapshot & token,std::function<std::int64_t()> source_clock) {
   std::lock_guard<std::mutex> lock(mutex_);
+  if (source_valid_until_ns_!=0) {
+    if (!source_clock) {return false;}
+    const auto now=source_clock();
+    if (now<source_valid_from_ns_||now>=source_valid_until_ns_) {return false;}
+  }
   return token.ready&&eligibleLocked()&&token.epoch==epoch_&&
-    token.plan_generation==plan_generation_&&token.binding==binding_;
+    token.plan_generation==plan_generation_&&token.binding==binding_&&
+    token.source_valid_until_ns==source_valid_until_ns_&&
+    token.source_valid_from_ns==source_valid_from_ns_;
 }
 
 void HeadingCursor::advance(double actual,double tolerance) {

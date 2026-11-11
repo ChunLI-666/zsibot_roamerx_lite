@@ -15,10 +15,72 @@
 #include <cmath>
 #include <cstdlib>
 #include <thread>
+#include <atomic>
+#include <future>
+#include <limits>
+#include <new>
+#include <rcl/time.h>
 #include "fixtures/b34_terminal_approaches.hpp"
 
 using namespace std::chrono_literals;
+namespace p1_allocation_fixture {
+// Test executable only: a thread-directed one-shot pause at a real DSO
+// allocation. No hook or altered code is linked into the product library.
+std::atomic<std::size_t> size{0};
+std::atomic<bool> armed{false},entered{false},released{false},timed_out{false};
+thread_local bool target_thread=false;
+class Barrier {
+public:
+  explicit Barrier(std::size_t bytes) {
+    size=bytes;entered=false;released=false;timed_out=false;armed=true;
+  }
+  ~Barrier() {release();armed=false;}
+  void release() {released=true;}
+  bool wait() const {
+    const auto end=std::chrono::steady_clock::now()+100ms;
+    while(!entered&&std::chrono::steady_clock::now()<end)std::this_thread::sleep_for(1ms);
+    return entered;
+  }
+};
+struct TargetThread {
+  TargetThread() {target_thread=true;}
+  ~TargetThread() {target_thread=false;}
+};
+}
+void * operator new(std::size_t bytes) {
+  void * value=std::malloc(bytes?bytes:1);if(!value)throw std::bad_alloc();
+  using namespace p1_allocation_fixture;
+  if(target_thread&&bytes==size.load()&&armed.exchange(false)) {
+    entered=true;const auto end=std::chrono::steady_clock::now()+80ms;
+    while(!released&&std::chrono::steady_clock::now()<end)std::this_thread::sleep_for(1ms);
+    if(!released)timed_out=true;
+  }
+  return value;
+}
+void operator delete(void * value) noexcept {std::free(value);}
+void operator delete(void * value,std::size_t) noexcept {std::free(value);}
 namespace {
+class CallbackExecutor : public rclcpp::executors::SingleThreadedExecutor {
+public:
+  bool reserve(rclcpp::AnyExecutable & executable,std::chrono::nanoseconds wait) {
+    return get_next_executable(executable,wait);
+  }
+  void execute(rclcpp::AnyExecutable & executable) {execute_any_executable(executable);}
+  nav_msgs::msg::Odometry deliver(rclcpp::AnyExecutable & executable) {
+    if (!executable.subscription) {throw std::runtime_error("No reserved Odom subscription");}
+    auto sub=executable.subscription;auto message=sub->create_message();rclcpp::MessageInfo info;
+    struct ReturnGroup {
+      rclcpp::AnyExecutable & e;
+      ~ReturnGroup() {if(e.callback_group)e.callback_group->can_be_taken_from().store(true);}
+    } group{executable};
+    if (!sub->take_type_erased(message.get(),info)) {throw std::runtime_error("Reserved Odom was not taken");}
+    const auto received=*std::static_pointer_cast<nav_msgs::msg::Odometry>(message);
+    // This is the registered subscription's real callback, with a message taken
+    // from DDS. No observer subscription or copied callback stands in for it.
+    sub->handle_message(message,info);sub->return_message(message);
+    return received;
+  }
+};
 geometry_msgs::msg::PoseStamped pose(double x, double heading=M_PI) {
   geometry_msgs::msg::PoseStamped p;
   p.header.frame_id="map";p.pose.position.x=x;
@@ -33,6 +95,7 @@ protected:
   virtual bool stoppedEntry() const {return false;}
   virtual double driftLimit() const {return .05;}
   virtual double mapOrigin() const {return -3.;}
+  virtual std::string globalFrame() const {return "map";}
   virtual void configureExtra() {}
   static void SetUpTestSuite() {
     const char * domain=std::getenv("ROS_DOMAIN_ID");
@@ -64,7 +127,7 @@ protected:
     map_=std::make_shared<nav2_costmap_2d::Costmap2DROS>("reentry_test_costmap");
     const auto changed=map_->set_parameters({
       rclcpp::Parameter("plugins",std::vector<std::string>{}),
-      rclcpp::Parameter("global_frame","map"),
+      rclcpp::Parameter("global_frame",globalFrame()),
       rclcpp::Parameter("robot_base_frame","base_link"),
       rclcpp::Parameter("width",6),rclcpp::Parameter("height",6),
       rclcpp::Parameter("origin_x",mapOrigin()),rclcpp::Parameter("origin_y",mapOrigin()),
@@ -100,9 +163,9 @@ protected:
     loader_.reset();
   }
   nav_msgs::msg::Path plan(double start) {
-    nav_msgs::msg::Path p;p.header.frame_id="map";p.header.stamp=node_->now();
+    nav_msgs::msg::Path p;p.header.frame_id=globalFrame();p.header.stamp=node_->now();
     p.poses={pose(start),pose(0.),pose(0.)};
-    for (auto & x:p.poses) {x.header.stamp=p.header.stamp;}
+    for (auto & x:p.poses) {x.header=p.header;}
     return p;
   }
   nav_msgs::msg::Path turnPlan(double start) {
@@ -114,14 +177,19 @@ protected:
   }
   geometry_msgs::msg::PoseStamped inputAt(double x,double y,double heading,
     double speed=0.,double lateral=0.,double angular=0.) {
-    auto p=pose(x,heading);p.pose.position.y=y;p.header.stamp=node_->now();
-    geometry_msgs::msg::TransformStamped t;t.header=p.header;t.child_frame_id="base_link";
+    auto p=pose(x,heading);p.header.frame_id=globalFrame();p.pose.position.y=y;
+    geometry_msgs::msg::TransformStamped t;t.child_frame_id="base_link";
     t.transform.translation.x=x;t.transform.translation.y=y;t.transform.rotation=p.pose.orientation;
-    EXPECT_TRUE(map_->getTfBuffer()->setTransform(t,"synthetic_test_input",false));
-    nav_msgs::msg::Odometry o;o.header=p.header;o.child_frame_id="base_link";
+    nav_msgs::msg::Odometry o;o.child_frame_id="base_link";
     o.pose.pose=p.pose;o.twist.twist.linear.x=speed;o.twist.twist.linear.y=lateral;
     o.twist.twist.angular.z=angular;
-    for (int i=0;i<5;++i) {publisher_->publish(o);executor_.spin_some();std::this_thread::sleep_for(2ms);}
+    // Each real send has its own original stamp. The old five identical
+    // headers now deliberately mean a delivered duplicate/continuity break.
+    for (int i=0;i<5;++i) {
+      p.header.stamp=node_->now();t.header=p.header;o.header=p.header;
+      EXPECT_TRUE(map_->getTfBuffer()->setTransform(t,"synthetic_test_input",false));
+      publisher_->publish(o);executor_.spin_some();std::this_thread::sleep_for(2ms);
+    }
     return p;
   }
   geometry_msgs::msg::TwistStamped command(double x,double speed=0.) {
@@ -150,8 +218,269 @@ protected:
   std::shared_ptr<nav2_core::Controller> controller_;
   std::shared_ptr<nav2_core::GoalChecker> checker_;
   rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Odometry>::SharedPtr publisher_;
-  rclcpp::executors::SingleThreadedExecutor executor_;
+  CallbackExecutor executor_;
 };
+
+class P1DeliveredStop : public PluginReentry {
+protected:
+  void SetUp() override {
+    PluginReentry::SetUp();publisher_->on_activate();
+    controller_->setPlan(plan(.02));checker_->reset();
+  }
+  geometry_msgs::msg::PoseStamped current_pose_;
+  nav_msgs::msg::Odometry last_delivered_;
+  std::size_t callbacks_=0;
+  virtual void updateSourceClock() {}
+  virtual double odomAge() const {return 0.;}
+  void freshTransform() {
+    updateSourceClock();
+    current_pose_=pose(.02);current_pose_.header.frame_id=globalFrame();current_pose_.header.stamp=node_->now();
+    geometry_msgs::msg::TransformStamped t;t.header=current_pose_.header;t.child_frame_id="base_link";
+    t.transform.translation.x=.02;t.transform.rotation=current_pose_.pose.orientation;
+    ASSERT_TRUE(map_->getTfBuffer()->setTransform(t,"p1_registered_callback_fixture",false));
+  }
+  nav_msgs::msg::Odometry message(double linear=0.,double angular=0.) {
+    freshTransform();nav_msgs::msg::Odometry o;o.header=current_pose_.header;
+    o.header.stamp=node_->now()-rclcpp::Duration::from_seconds(odomAge());
+    o.child_frame_id="base_link";o.pose.pose=current_pose_.pose;
+    o.twist.twist.linear.x=linear;o.twist.twist.angular.z=angular;return o;
+  }
+  rclcpp::AnyExecutable reserveOdometry(std::chrono::milliseconds wait=100ms) {
+    const auto end=std::chrono::steady_clock::now()+wait;
+    while (std::chrono::steady_clock::now()<end) {
+      rclcpp::AnyExecutable executable;
+      if (!executor_.reserve(executable,2ms)) {continue;}
+      if (executable.subscription&&
+        std::string(executable.subscription->get_topic_name())=="/reentry_test_odom") {return executable;}
+      executor_.execute(executable);
+    }
+    throw std::runtime_error("Registered Odom callback was not ready within100ms");
+  }
+  void deliver(const nav_msgs::msg::Odometry & value) {
+    publisher_->publish(value);auto executable=reserveOdometry();
+    last_delivered_=executor_.deliver(executable);++callbacks_;
+    ASSERT_EQ(last_delivered_.header.stamp,value.header.stamp);
+    ASSERT_EQ(last_delivered_.child_frame_id,value.child_frame_id);
+    // Copying NaN is intentional in its rejection case.
+    if (std::isfinite(value.twist.twist.angular.z)) {
+      ASSERT_DOUBLE_EQ(last_delivered_.twist.twist.angular.z,value.twist.twist.angular.z);
+    }
+  }
+  geometry_msgs::msg::TwistStamped tick() {
+    freshTransform();return controller_->computeVelocityCommands(current_pose_,geometry_msgs::msg::Twist{},checker_.get());
+  }
+  bool check() {
+    freshTransform();return checker_->isGoalReached(current_pose_.pose,pose(0.).pose,geometry_msgs::msg::Twist{});
+  }
+  bool healthyFor(std::chrono::milliseconds duration,bool forbid_ready=false) {
+    const auto start=std::chrono::steady_clock::now();const auto end=start+duration;
+    auto next_tick=start;auto next_sample=start;bool ready=false;
+    while (std::chrono::steady_clock::now()<end) {
+      deliver(message());
+      const auto now=std::chrono::steady_clock::now();
+      if (now>=next_tick) {
+        const auto cmd=tick();EXPECT_DOUBLE_EQ(cmd.twist.linear.x,0.);EXPECT_DOUBLE_EQ(cmd.twist.angular.z,0.);
+        ready=check();if(forbid_ready)EXPECT_FALSE(ready);
+        next_tick=now+50ms;
+      }
+      next_sample+=2ms;std::this_thread::sleep_until(next_sample);
+    }
+    return ready;
+  }
+  void establishReady() {
+    ASSERT_TRUE(healthyFor(450ms));ASSERT_TRUE(check());
+  }
+  void fullDwellAfterRevocation() {
+    const auto start=std::chrono::steady_clock::now();
+    ASSERT_FALSE(check());const auto cmd=tick();
+    EXPECT_DOUBLE_EQ(cmd.twist.linear.x,0.);EXPECT_DOUBLE_EQ(cmd.twist.angular.z,0.);
+    EXPECT_FALSE(check());healthyFor(275ms,true);
+    EXPECT_LT(std::chrono::steady_clock::now()-start,300ms);
+    EXPECT_TRUE(healthyFor(150ms));
+  }
+};
+
+TEST_F(P1DeliveredStop, Healthy500HzOriginalSamplesCompleteWith20HzControl) {
+  const auto start=std::chrono::steady_clock::now();
+  ASSERT_TRUE(healthyFor(450ms));EXPECT_TRUE(check());
+  EXPECT_GE(callbacks_,150u);EXPECT_GE(std::chrono::steady_clock::now()-start,300ms);
+  RecordProperty("registered_dds_callbacks",static_cast<int>(callbacks_));
+}
+
+TEST_F(P1DeliveredStop, FourteenMillisecondAngularPulseRevokesReadyBetweenControllerTicks) {
+  establishReady();const auto start=std::chrono::steady_clock::now();std::size_t pulse=0;
+  const auto end=start+14ms;
+  do {deliver(message(0.,.08));++pulse;std::this_thread::sleep_for(2ms);} while(std::chrono::steady_clock::now()<end);
+  ASSERT_FALSE(check());deliver(message());ASSERT_FALSE(check());
+  ASSERT_LT(std::chrono::steady_clock::now()-start,50ms);EXPECT_GE(pulse,5u);
+  RecordProperty("delivered_nonstop_samples",static_cast<int>(pulse));fullDwellAfterRevocation();
+}
+
+TEST_F(P1DeliveredStop, FourteenMillisecondLinearPulseRevokesReadyBetweenControllerTicks) {
+  establishReady();const auto start=std::chrono::steady_clock::now();const auto end=start+14ms;
+  do {deliver(message(.0314));std::this_thread::sleep_for(2ms);} while(std::chrono::steady_clock::now()<end);
+  ASSERT_FALSE(check());deliver(message());ASSERT_FALSE(check());
+  ASSERT_LT(std::chrono::steady_clock::now()-start,50ms);fullDwellAfterRevocation();
+}
+
+TEST_F(P1DeliveredStop, DuplicateAndRegressingDeliveredHeadersCannotBeHiddenByALaterZero) {
+  for (bool regression:{false,true}) {
+    establishReady();auto bad=last_delivered_;
+    if(regression)bad.header.stamp=rclcpp::Time(rclcpp::Time(bad.header.stamp).nanoseconds()-1000000);
+    deliver(bad);ASSERT_FALSE(check());deliver(message());ASSERT_FALSE(check());fullDwellAfterRevocation();
+  }
+}
+
+TEST_F(P1DeliveredStop, NonfiniteDeliveredTwistRevokesReadyBeforeTheNextControlRead) {
+  establishReady();auto bad=message();bad.twist.twist.angular.z=std::numeric_limits<double>::quiet_NaN();
+  deliver(bad);ASSERT_FALSE(check());deliver(message());fullDwellAfterRevocation();
+}
+
+class P1ShortProof : public P1DeliveredStop {
+protected:
+  void configureExtra() override {node_->declare_parameter("FollowPath.odom_timeout",.1);}
+  double odomAge() const override {return .06;}
+};
+
+TEST_F(P1ShortProof, FreshHealthyCallbackAndRepeatedControlReadsCannotExtendTheOriginalProof) {
+  healthyFor(450ms);
+  auto original=message();
+  deliver(original);tick();ASSERT_TRUE(check());
+  const auto start=std::chrono::steady_clock::now();
+  std::this_thread::sleep_until(start+15ms);tick();ASSERT_TRUE(check());
+  std::this_thread::sleep_until(start+55ms);EXPECT_FALSE(check());
+  EXPECT_THROW(tick(),nav2_core::NoValidControl);
+  // A new healthy callback can replace the input, but never grants completion
+  // until the controller certifies that new input through its ordinary cycle.
+  deliver(message());EXPECT_FALSE(check());tick();EXPECT_TRUE(check());
+  EXPECT_LT(std::chrono::steady_clock::now()-start,250ms);
+}
+
+class P1TwoClocks : public P1DeliveredStop {
+protected:
+  void configureExtra() override {node_->declare_parameter("FollowPath.odom_timeout",.5);}
+  void SetUp() override {
+    P1DeliveredStop::SetUp();source_base_=node_->now().nanoseconds();steady_base_=std::chrono::steady_clock::now();
+    ASSERT_EQ(rcl_enable_ros_time_override(node_->get_clock()->get_clock_handle()),RCL_RET_OK);
+    manual_clock_=true;updateSourceClock();
+  }
+  void TearDown() override {
+    if(manual_clock_) {EXPECT_EQ(rcl_disable_ros_time_override(node_->get_clock()->get_clock_handle()),RCL_RET_OK);manual_clock_=false;}
+    P1DeliveredStop::TearDown();
+  }
+  bool manual_clock_=false;double rate_=1.;std::int64_t source_base_=0;
+  std::chrono::steady_clock::time_point steady_base_;
+  void updateSourceClock() override {
+    if(!manual_clock_)return;
+    const auto elapsed=std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now()-steady_base_).count();
+    ASSERT_EQ(rcl_set_ros_time_override(node_->get_clock()->get_clock_handle(),
+      source_base_+static_cast<std::int64_t>(elapsed*rate_)),RCL_RET_OK);
+  }
+  void rate(double value) {
+    updateSourceClock();source_base_=node_->now().nanoseconds();steady_base_=std::chrono::steady_clock::now();rate_=value;
+  }
+  void jump(std::chrono::milliseconds value) {source_base_+=std::chrono::duration_cast<std::chrono::nanoseconds>(value).count();updateSourceClock();}
+};
+
+TEST_F(P1TwoClocks, SourceGapRevokesContinuityWithoutAReceiveGap) {
+  establishReady();const auto previous=last_delivered_;const auto start=std::chrono::steady_clock::now();
+  jump(310ms);deliver(message());ASSERT_FALSE(check());
+  EXPECT_GT(rclcpp::Time(last_delivered_.header.stamp).nanoseconds()-
+    rclcpp::Time(previous.header.stamp).nanoseconds(),300000000);
+  ASSERT_LT(std::chrono::steady_clock::now()-start,50ms);fullDwellAfterRevocation();
+}
+
+TEST_F(P1TwoClocks, ReceiveGapRevokesContinuityWhileSourceGapAndOriginalFreshnessRemainBounded) {
+  establishReady();deliver(message());tick();ASSERT_TRUE(check());
+  const auto previous=last_delivered_;rate(.2);const auto start=std::chrono::steady_clock::now();
+  for (int i=1;i<=6;++i) {std::this_thread::sleep_until(start+i*50ms);tick();ASSERT_TRUE(check());}
+  std::this_thread::sleep_until(start+315ms);deliver(message());ASSERT_FALSE(check());
+  const auto span=rclcpp::Time(last_delivered_.header.stamp).nanoseconds()-rclcpp::Time(previous.header.stamp).nanoseconds();
+  EXPECT_GT(span,0);EXPECT_LT(span,300000000);rate(1.);fullDwellAfterRevocation();
+}
+
+TEST_F(P1DeliveredStop, CancelResetDeactivateAndNewPlanCannotReuseReady) {
+  establishReady();controller_->cancel();EXPECT_FALSE(check());
+  deliver(message());tick();EXPECT_FALSE(check());
+  controller_->reset();controller_->setPlan(plan(.02));checker_->reset();EXPECT_FALSE(check());
+  // Same-goal reset retains its independent Track reentry .3s debt, before
+  // the separate final .3s stop hold. A450ms whole-fixture budget cannot cover
+  // both unchanged gates; allow a bounded850ms without relaxing either one.
+  ASSERT_TRUE(healthyFor(850ms));ASSERT_TRUE(check());
+  controller_->deactivate();EXPECT_FALSE(check());
+}
+
+TEST_F(P1DeliveredStop, AReservedRealSubscriptionCallbackRetainsItsGateAcrossCleanup) {
+  establishReady();auto bad=message(0.,.08);publisher_->publish(bad);
+  auto queued=reserveOdometry();auto original=std::move(controller_);
+  original->deactivate();original->cleanup();
+  // The executable retains the subscription and its captured gate, while the
+  // controller object (and its Odom mutex) deliberately remains alive.
+  const auto delivered=executor_.deliver(queued);
+  EXPECT_EQ(delivered.header.stamp,bad.header.stamp);EXPECT_DOUBLE_EQ(delivered.twist.twist.angular.z,.08);
+  EXPECT_FALSE(check());original.reset();
+}
+
+TEST_F(P1DeliveredStop, ReadyCommitCannotRegrantTheCycleRevokedAfterItsOriginalOdomRead) {
+  establishReady();ASSERT_EQ(map_->getCostmap()->getSizeInCellsX(),600u);
+  ASSERT_EQ(map_->getCostmap()->getSizeInCellsY(),600u);
+  // ScopedObstacleIndex allocates its 76x76 uint32 prefix after measuredOdometry.
+  // Pausing here preserves the real public compute path and its old Odom copy.
+  p1_allocation_fixture::Barrier barrier(76u*76u*sizeof(std::uint32_t));
+  const auto input=current_pose_;
+  auto computed=std::async(std::launch::async,[&]{
+    p1_allocation_fixture::TargetThread target;
+    return controller_->computeVelocityCommands(input,geometry_msgs::msg::Twist{},checker_.get());
+  });
+  const bool injected=barrier.wait();
+  if(injected) {
+    auto pulse=last_delivered_;pulse.header.stamp=node_->now();pulse.twist.twist.angular.z=.08;deliver(pulse);
+    auto stopped=pulse;stopped.header.stamp=node_->now();stopped.twist.twist.angular.z=0.;deliver(stopped);
+  }
+  barrier.release();geometry_msgs::msg::TwistStamped result;ASSERT_NO_THROW(result=computed.get());
+  ASSERT_TRUE(injected);ASSERT_FALSE(p1_allocation_fixture::timed_out);
+  EXPECT_DOUBLE_EQ(result.twist.linear.x,0.);EXPECT_DOUBLE_EQ(result.twist.angular.z,0.);
+  EXPECT_FALSE(check());RecordProperty("real_allocation_pause_bytes",23104);
+  fullDwellAfterRevocation();
+}
+
+class P1CheckerConsume : public P1DeliveredStop {
+protected:
+  std::string globalFrame() const override {return "p1_checker_frame_"+std::string(111,'x');}
+};
+
+TEST_F(P1CheckerConsume, CallbackAfterTokenSnapshotDefeatsTheFinalGoalCheckerConsume) {
+  establishReady();freshTransform();const auto input=current_pose_;const auto goal=pose(0.);
+  // Snapshot copies no string; the first frame-sized allocation is inside the
+  // real latestBody/TF lookup, after the immutable completion token was taken.
+  const auto bytes=globalFrame().size()+1;p1_allocation_fixture::Barrier barrier(bytes);
+  auto checked=std::async(std::launch::async,[&]{
+    p1_allocation_fixture::TargetThread target;
+    return checker_->isGoalReached(input.pose,goal.pose,geometry_msgs::msg::Twist{});
+  });
+  const bool injected=barrier.wait();
+  if(injected) {
+    // Do not write TF while its real lookup is paused. Registered Odom callback
+    // execution does not require that TF mutex, and all geometry stays fixed.
+    auto pulse=last_delivered_;pulse.header.stamp=node_->now();pulse.twist.twist.angular.z=.08;deliver(pulse);
+    auto stopped=pulse;stopped.header.stamp=node_->now();stopped.twist.twist.angular.z=0.;deliver(stopped);
+  }
+  barrier.release();const bool reached=checked.get();
+  ASSERT_TRUE(injected);ASSERT_FALSE(p1_allocation_fixture::timed_out);EXPECT_FALSE(reached);
+  EXPECT_FALSE(check());RecordProperty("real_frame_allocation_pause_bytes",static_cast<int>(bytes));
+  fullDwellAfterRevocation();
+}
+
+TEST_F(P1DeliveredStop, InvalidOriginalStampCannotBeHiddenByAFreshStoppedCallback) {
+  for (int invalid=0;invalid<3;++invalid) {
+    establishReady();auto bad=message();
+    if(invalid==0) {bad.header.stamp.sec=0;bad.header.stamp.nanosec=0;}
+    if(invalid==1)bad.header.stamp=node_->now()+rclcpp::Duration::from_seconds(.06);
+    if(invalid==2)bad.header.stamp=node_->now()-rclcpp::Duration::from_seconds(.31);
+    deliver(bad);ASSERT_FALSE(check());deliver(message());fullDwellAfterRevocation();
+  }
+}
 
 TEST_F(PluginReentry, FreshOrdinaryPathCanRepairOutsideRegionWithoutGrantingCompletion) {
   publisher_->on_activate();escapedTerminalAndFreshPlan();

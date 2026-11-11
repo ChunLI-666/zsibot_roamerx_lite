@@ -22,6 +22,9 @@ class TerminalStopHold {
 public:
   enum class Action {Track,HoldZero,CorrectYaw,Ready,Outside};
   void reset() {generation_=0;holding_=false;zero_odom_stamp_=0;observed_=false;resetDwell();}
+  // Called by the control thread after it observes an Odom callback epoch
+  // change. The callback only revokes permission; it never touches this cursor.
+  void invalidateStopContinuity() {resetDwell();}
   bool holding() const {return holding_;}
   Action observe(std::uint64_t generation,bool ordered_complete,bool in_xy,bool in_yaw,
     bool measured_stopped,std::int64_t odom_stamp,std::int64_t steady_ns) {

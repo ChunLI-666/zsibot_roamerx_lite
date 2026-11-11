@@ -115,7 +115,8 @@ public:
       reached=inner_->isGoalReached(actual,
         token.binding?token.binding->original_goal.pose:goal,velocity);
     }
-    return reached&&state_->stillEligible(token);
+    const auto node=node_.lock();
+    return reached&&node&&state_->stillEligible(token,[node] {return node->now().nanoseconds();});
   }
   bool getTolerances(geometry_msgs::msg::Pose & p,geometry_msgs::msg::Twist & v) override {
     std::lock_guard<std::mutex> lock(inner_mutex_);return inner_->getTolerances(p,v);
@@ -279,9 +280,8 @@ public:
     require(std::isfinite(odom_timeout_)&&odom_timeout_>0.&&odom_timeout_<=0.5,"invalid odom timeout");
     const auto odom_topic=parameter<std::string>(node,"odom_topic","odom");
     odom_sub_=node->create_subscription<nav_msgs::msg::Odometry>(odom_topic,rclcpp::SensorDataQoS(),
-      [this](nav_msgs::msg::Odometry::ConstSharedPtr msg) {
-        std::lock_guard<std::mutex> lock(odom_mutex_);
-        odom_=msg;odom_receipt_=std::chrono::steady_clock::now();
+      [this,gate=completion_](nav_msgs::msg::Odometry::ConstSharedPtr msg) {
+        receiveOdometry(std::move(msg),gate);
       });
     guard_=freeze(node,name);
   }
@@ -393,7 +393,12 @@ public:
     if (path_frame_!=map_->getGlobalFrameID()) {
       checkTransformFresh(map_->getGlobalFrameID(),path_frame_,allow_static_path_transform_);
     }
-    const auto measured=measuredOdometry();
+    const auto measured_sample=measuredOdometry();
+    const auto & measured=measured_sample.message;
+    if (terminal_odom_continuity_!=measured_sample.continuity) {
+      terminal_stop_.invalidateStopContinuity();
+      terminal_odom_continuity_=measured_sample.continuity;
+    }
     const bool measured_stopped=goal_region::terminalMeasuredStopped(measured.twist.twist);
     const auto measured_odom_stamp=rclcpp::Time(measured.header.stamp).nanoseconds();
     const bool early_braking_speed=std::hypot(measured.twist.twist.linear.x,
@@ -409,7 +414,7 @@ public:
       if (!sweep::commandSweepFree(*map,fp,actual.pose.position.x,actual.pose.position.y,
         yaw(actual.pose),0.,0.,horizon_)) {throw nav2_core::NoValidControl("Filled terminal stop sweep blocked");}
       geometry_msgs::msg::TwistStamped zero;zero.header=actual.header;
-      completion_->finishCycle(generation,ready&&!terminal_cancelled_);
+      finishMeasuredCycle(generation,ready&&!terminal_cancelled_,measured_sample);
       last_returned_command_=zero;last_returned_command_valid_=true;return zero;
     };
     const auto zero_command=[&](bool ready) {return zero_at(pose,ready);};
@@ -632,7 +637,8 @@ public:
     {
       // Source TF can advance at500Hz during this20Hz compute. Sample once,
       // then certify the entire remaining turn and command at THAT fresh origin.
-      const auto latest_measured=measuredOdometry();
+      const auto latest_sample=measuredOdometry();
+      const auto & latest_measured=latest_sample.message;
       const auto fresh=latestBodyPose();
       if (!goal_region::terminalMeasuredStopped(latest_measured.twist.twist)) {
         return begin_braking(fresh);
@@ -685,7 +691,7 @@ public:
     }
     if (checked_terminal_entry) {terminal_rotation_started_=true;}
     // Bound terminal completion is published only by the zero/stop hold above.
-    completion_->finishCycle(generation,!terminal_binding_&&handler_->finalPrefixWithin(remaining_length_));
+    finishMeasuredCycle(generation,!terminal_binding_&&handler_->finalPrefixWithin(remaining_length_),measured_sample);
     last_returned_command_=cmd;last_returned_command_valid_=true;
     return cmd;
   }
@@ -786,20 +792,71 @@ private:
   nav_msgs::msg::Odometry::ConstSharedPtr odom_;
   std::mutex odom_mutex_;
   std::chrono::steady_clock::time_point odom_receipt_;
+  std::uint64_t odom_continuity_=0;
+  std::uint64_t terminal_odom_continuity_=std::numeric_limits<std::uint64_t>::max();
+  struct OdomSample {
+    nav_msgs::msg::Odometry message;
+    std::uint64_t continuity;
+    std::chrono::steady_clock::time_point receipt,valid_until;
+    std::int64_t source_valid_until_ns;
+    std::int64_t source_valid_from_ns;
+  };
   rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Path>::SharedPtr segment_pub_;
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr guard_;
-  nav_msgs::msg::Odometry measuredOdometry() {
+  static std::int64_t odomStamp(const nav_msgs::msg::Odometry & message) {
+    const auto & stamp=message.header.stamp;
+    if (stamp.sec<0||stamp.nanosec>=1000000000U) {return 0;}
+    return static_cast<std::int64_t>(stamp.sec)*1000000000LL+stamp.nanosec;
+  }
+  void receiveOdometry(nav_msgs::msg::Odometry::ConstSharedPtr message,
+    const std::shared_ptr<CompletionState> & gate) {
+    std::lock_guard<std::mutex> lock(odom_mutex_);
+    const auto now=std::chrono::steady_clock::now();
+    const auto stamp=odomStamp(*message);
+    const auto node=node_.lock();
+    const double age=node?(node->now().nanoseconds()-stamp)/1.e9:std::numeric_limits<double>::infinity();
+    const auto previous=odom_?odomStamp(*odom_):0;
+    const bool broken=odom_&&(stamp<=previous||stamp-previous>goal_region::kTerminalStopDwellNs||
+      now-odom_receipt_>std::chrono::nanoseconds(goal_region::kTerminalStopDwellNs));
+    if (stamp<=0||age<-.05||age>odom_timeout_||broken||
+      !goal_region::terminalMeasuredStopped(message->twist.twist)) {
+      ++odom_continuity_;
+      // Odom -> Completion is the sole nested lock order. The captured gate
+      // survives cleanup without racing completion_.reset().
+      gate->invalidate();
+    }
+    odom_=std::move(message);odom_receipt_=now;
+  }
+  OdomSample measuredOdometry() {
     std::lock_guard<std::mutex> odom_lock(odom_mutex_);
     if (!odom_) {throw nav2_core::NoValidControl("No measured odometry");}
-    const double age=(node_.lock()->now()-rclcpp::Time(odom_->header.stamp)).seconds();
-    const double received=std::chrono::duration<double>(std::chrono::steady_clock::now()-odom_receipt_).count();
+    const auto stamp=odomStamp(*odom_);const auto node=node_.lock();
+    if (!node||stamp<=0) {throw nav2_core::NoValidControl("Invalid measured odometry source clock");}
+    const auto now=std::chrono::steady_clock::now();
+    const double age=(node->now().nanoseconds()-stamp)/1.e9;
+    const double received=std::chrono::duration<double>(now-odom_receipt_).count();
     const auto & v=odom_->twist.twist;
     if (age<-.05||age>odom_timeout_||received>odom_timeout_||
       !std::isfinite(v.linear.x)||!std::isfinite(v.linear.y)||!std::isfinite(v.linear.z)||
       !std::isfinite(v.angular.x)||!std::isfinite(v.angular.y)||!std::isfinite(v.angular.z)) {
       throw nav2_core::NoValidControl("Missing, stale, future or nonfinite measured odometry");
     }
-    return *odom_;
+    const auto timeout=std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+      std::chrono::duration<double>(odom_timeout_));
+    const auto source_remaining=std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+      std::chrono::duration<double>(odom_timeout_-age));
+    return {*odom_,odom_continuity_,odom_receipt_,std::min(odom_receipt_+timeout,now+source_remaining),
+      stamp+static_cast<std::int64_t>(odom_timeout_*1.e9),stamp-50000000LL};
+  }
+  void finishMeasuredCycle(std::uint64_t generation,bool ready,const OdomSample & sample) {
+    std::lock_guard<std::mutex> lock(odom_mutex_);
+    const auto node=node_.lock();const auto now=std::chrono::steady_clock::now();
+    const auto stamp=odomStamp(sample.message);
+    const double age=node?(node->now().nanoseconds()-stamp)/1.e9:std::numeric_limits<double>::infinity();
+    ready=ready&&sample.continuity==odom_continuity_&&age>=-.05&&age<=odom_timeout_&&
+      now<sample.valid_until;
+    completion_->finishCycle(generation,ready,sample.valid_until,sample.source_valid_until_ns,
+      sample.source_valid_from_ns);
   }
   geometry_msgs::msg::PoseStamped latestBodyPose() {
     checkTransformFresh(map_->getGlobalFrameID(),map_->getBaseFrameID(),false);

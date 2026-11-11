@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <gtest/gtest.h>
+#include <atomic>
+#include <condition_variable>
+#include <future>
+#include <thread>
 #include "official_lattice_rpp_adapter/terminal_goal_binding.hpp"
+#include "official_lattice_rpp_adapter/terminal_stop_hold.hpp"
 using namespace official_lattice_rpp_adapter;
 static geometry_msgs::msg::PoseStamped at(double x,double y,double a) {
   geometry_msgs::msg::PoseStamped p;p.header.frame_id="map";p.pose.position.x=x;p.pose.position.y=y;
@@ -142,4 +147,71 @@ TEST(CompletionGate, SamePlanCannotReplaceOrReinstallItsImmutableOriginalGoal) {
   EXPECT_THROW(gate.installBinding(different),std::runtime_error);
   EXPECT_EQ(gate.snapshot().binding,first);EXPECT_TRUE(gate.stillEligible(token));
   EXPECT_NO_THROW(bound(gate));EXPECT_FALSE(gate.stillEligible(token));
+}
+
+TEST(CompletionGate, OriginalSourceFutureAndExpiryBoundsCannotUseANewerClockSample) {
+  goal_region::CompletionGate gate;const auto binding=bound(gate);
+  gate.finishCycle(gate.beginCycle(binding->generation),true,
+    std::chrono::steady_clock::now()+std::chrono::seconds(1),300,100);
+  const auto token=gate.snapshot();ASSERT_TRUE(token.ready);
+  EXPECT_FALSE(gate.stillEligible(token));
+  EXPECT_FALSE(gate.stillEligible(token,[]{return 99;}));
+  EXPECT_TRUE(gate.stillEligible(token,[]{return 100;}));
+  EXPECT_TRUE(gate.stillEligible(token,[]{return 299;}));
+  EXPECT_FALSE(gate.stillEligible(token,[]{return 300;}));
+  gate.finishCycle(gate.beginCycle(binding->generation),true,
+    std::chrono::steady_clock::now()-std::chrono::nanoseconds(1),300,100);
+  EXPECT_FALSE(gate.snapshot().ready);
+  EXPECT_FALSE(gate.stillEligible(token,[]{return 200;}));
+}
+
+TEST(CompletionGate, SourceClockIsSampledUnderTheFinalGateLock) {
+  using namespace std::chrono_literals;
+  goal_region::CompletionGate gate;const auto binding=bound(gate);
+  gate.finishCycle(gate.beginCycle(binding->generation),true,
+    std::chrono::steady_clock::now()+1s,300,100);
+  const auto token=gate.snapshot();std::atomic<std::int64_t> source{200};
+  std::promise<void> first_entered,release_first;
+  auto release=release_first.get_future().share();
+  auto first=std::async(std::launch::async,[&]{
+    return gate.stillEligible(token,[&]{first_entered.set_value();release.wait();return source.load();});
+  });
+  const auto entered=first_entered.get_future().wait_for(100ms);
+  if (entered!=std::future_status::ready) {
+    release_first.set_value();(void)first.get();
+    FAIL()<<"First clock provider did not acquire the gate within the bounded fixture wait";
+    return;
+  }
+  std::atomic<bool> second_provider_called{false};
+  auto second=std::async(std::launch::async,[&]{
+    return gate.stillEligible(token,[&]{second_provider_called=true;return source.load();});
+  });
+  std::this_thread::sleep_for(5ms);
+  const bool called_while_locked=second_provider_called.load();
+  source=300;release_first.set_value();
+  EXPECT_FALSE(called_while_locked);EXPECT_FALSE(first.get());EXPECT_FALSE(second.get());
+  EXPECT_TRUE(second_provider_called.load());
+}
+
+TEST(CompletionGate, SteadyDeadlineIsCheckedAfterTheSourceClockProviderReturns) {
+  using namespace std::chrono_literals;
+  goal_region::CompletionGate gate;const auto binding=bound(gate);
+  gate.finishCycle(gate.beginCycle(binding->generation),true,
+    std::chrono::steady_clock::now()+15ms,300,100);
+  const auto token=gate.snapshot();ASSERT_TRUE(token.ready);
+  EXPECT_FALSE(gate.stillEligible(token,[]{std::this_thread::sleep_for(25ms);return 200;}));
+}
+
+TEST(P1StopHold, CallbackContinuityRevocationRetainsHoldAndRestartsBothOriginalDwellClocks) {
+  using H=goal_region::TerminalStopHold;H hold;
+  const auto sample=[&](std::int64_t source,std::int64_t steady){
+    return hold.observe(1,true,true,true,true,source,steady);
+  };
+  EXPECT_EQ(sample(1000000000,2000000000),H::Action::HoldZero);
+  EXPECT_EQ(sample(1050000000,2050000000),H::Action::HoldZero);
+  EXPECT_EQ(sample(1350000000,2350000000),H::Action::Ready);
+  hold.invalidateStopContinuity();ASSERT_TRUE(hold.holding());
+  EXPECT_EQ(sample(1400000000,2400000000),H::Action::HoldZero);
+  EXPECT_EQ(sample(1699999999,2700000000),H::Action::HoldZero);
+  EXPECT_EQ(sample(1700000000,2700000000),H::Action::Ready);
 }

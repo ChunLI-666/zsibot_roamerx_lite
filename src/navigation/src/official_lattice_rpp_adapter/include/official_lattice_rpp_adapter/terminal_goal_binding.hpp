@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
+#include <functional>
 #include <cstdint>
 #include <chrono>
 #include <limits>
@@ -43,21 +44,29 @@ public:
     std::uint64_t epoch=0,plan_generation=0;
     bool ready=false;
     std::shared_ptr<const Binding> binding;
+    std::int64_t source_valid_until_ns=0;
+    std::int64_t source_valid_from_ns=0;
   };
   void invalidate(); // GoalChecker reset-after-setPlan preserves the new binding.
   void clearPlan();
   std::uint64_t bindPlan();
   void installBinding(std::shared_ptr<const Binding> binding);
   std::uint64_t beginCycle(std::uint64_t plan=0);
-  void finishCycle(std::uint64_t epoch,bool complete);
+  void finishCycle(std::uint64_t epoch,bool complete,
+    std::chrono::steady_clock::time_point valid_until=std::chrono::steady_clock::time_point::max(),
+    std::int64_t source_valid_until_ns=0,std::int64_t source_valid_from_ns=0);
   Snapshot snapshot();
-  bool stillEligible(const Snapshot & token);
+  // The provider only reads the source clock; it runs under the gate lock.
+  bool stillEligible(const Snapshot & token,std::function<std::int64_t()> source_clock={});
 private:
   bool eligibleLocked() const;
   std::mutex mutex_;
   std::uint64_t epoch_=0,plan_generation_=0;
   bool ready_=false;
   std::chrono::steady_clock::time_point updated_;
+  std::chrono::steady_clock::time_point valid_until_;
+  std::int64_t source_valid_until_ns_=0;
+  std::int64_t source_valid_from_ns_=0;
   std::shared_ptr<const Binding> binding_;
 };
 
