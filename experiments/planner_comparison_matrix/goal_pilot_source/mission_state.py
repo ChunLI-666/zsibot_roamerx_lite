@@ -65,11 +65,48 @@ def check_identity_state(state,identity):
         if identity.get(key)!=state['identity'].get(key):raise Hold('IDENTITY_MISMATCH:'+key)
 
 
-def remaining_state(state):
-    boot,now=boot_clock();budget=state['budgets']
+def remaining_state(state, *, boot=None, now=None):
+    if boot is None or now is None:boot,now=boot_clock()
+    budget=state['budgets']
     if budget['deadline_boottime_sec'] is None:return budget['remaining_sec']
     if boot!=budget['deadline_boot_id']:raise Hold('CLOCK_UNTRUSTED: mission boot changed')
     return max(0.,budget['deadline_boottime_sec']-now)
+
+
+def mission_guard_state(state):
+    """One committed revision's bounded validation view; no route/history copy."""
+    return dict(revision=state['revision'],variant=state['variant'],
+        identity={key:state['identity'].get(key) for key in
+            (*IDENTITY_KEYS,'variant','source_sha','effective_config_sha256')},
+        policy=dict(bt_retries=state['policy']['bt_retries']),
+        budgets={key:state['budgets'][key] for key in
+            ('deadline_boottime_sec','deadline_boot_id','remaining_sec')},
+        progress=dict(next_index=state['progress']['next_index']))
+
+
+def dispatch_budget_exhaustion(state):
+    """Prospective reservation policy shared by the store and its workflow."""
+    policy,budget=state['policy'],state['budgets'];index=state['progress']['next_index']
+    parents=budget['mission_dispatches_reserved'];counts=budget['per_index_reserved']
+    per_index_parents=budget['per_index_parent_dispatches']
+    if (any(type(policy.get(k)) is not int for k in ('max_parent_dispatches','max_attempts_per_index','bt_retries'))
+            or not 1<=policy['max_parent_dispatches']<=10 or not 1<=policy['max_attempts_per_index']<=6
+            or policy['bt_retries'] not in (0,1) or policy.get('max_parent_dispatches_per_index',3)!=3
+            or type(parents) is not int or parents<0 or type(index) is not int
+            or not isinstance(counts,list) or not isinstance(per_index_parents,list)
+            or len(counts)!=len(state['route']) or len(per_index_parents)!=len(counts) or not 0<=index<len(counts)
+            or any(type(v) is not int or v<0 for v in counts+per_index_parents)):
+        raise Hold('Invalid prospective dispatch budget')
+    slots=1+policy['bt_retries']
+    child_exhausted=[i for i in range(index,len(counts)) if counts[i]+slots>policy['max_attempts_per_index']]
+    parent_exhausted=[i for i in range(index,len(counts)) if per_index_parents[i]>=3]
+    global_exhausted=parents>=policy['max_parent_dispatches']
+    if not global_exhausted and not child_exhausted and not parent_exhausted:return None
+    return dict(global_parent_exhausted=global_exhausted,mission_dispatches_reserved=parents,
+        max_parent_dispatches=policy['max_parent_dispatches'],next_index=index,child_slots_needed=slots,
+        max_attempts_per_index=policy['max_attempts_per_index'],max_parent_dispatches_per_index=3,
+        exhausted_suffix_indices=child_exhausted,exhausted_parent_suffix_indices=parent_exhausted,
+        per_index_reserved=list(counts),per_index_parent_dispatches=list(per_index_parents))
 
 
 def validate_visit(route, index, visit, legacy=False):
@@ -371,9 +408,7 @@ class MissionStore:
             if boot!=budget['deadline_boot_id'] or now>=budget['deadline_boottime_sec']:
                 raise Hold('FAILED_BUDGET: deadline exhausted or boot changed')
             child_slots=1+policy['bt_retries']
-            if (budget['mission_dispatches_reserved']>=policy['max_parent_dispatches']
-                    or any(count>=3 for count in budget['per_index_parent_dispatches'][index:]) or any(
-                    count+child_slots>policy['max_attempts_per_index'] for count in budget['per_index_reserved'][index:])):
+            if dispatch_budget_exhaustion(s):
                 raise Hold('FAILED_BUDGET: dispatch allowance exhausted')
             budget['mission_dispatches_reserved']+=1
             for i in range(index,len(s['route'])):

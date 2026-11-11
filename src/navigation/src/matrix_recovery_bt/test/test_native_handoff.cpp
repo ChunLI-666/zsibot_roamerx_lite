@@ -6,6 +6,9 @@
 #include <mutex>
 #include <thread>
 #include <vector>
+#include <limits>
+#include <functional>
+#include <new>
 #include <csignal>
 #include <cstdarg>
 #include <cstdio>
@@ -33,6 +36,20 @@ using Service=matrix_recovery_bt::srv::RecoveryHandoff;
 using Plan=nav2_msgs::action::ComputePathToPose;
 using Follow=nav2_msgs::action::FollowPath;
 namespace {
+// Test executable only. Costmap2D allocates its byte array after the plugin
+// unlocks Inputs. A one-shot allocation pause lets real TF DDS callbacks land
+// deterministically during that conversion, without a product test hook.
+std::atomic<bool> conversion_hook_armed{false};
+std::function<void()> conversion_callback;
+}
+void * operator new[](std::size_t size) {
+  void * value=std::malloc(size?size:1);if(!value){throw std::bad_alloc();}
+  if(size==22500 && conversion_hook_armed.exchange(false)){conversion_callback();}
+  return value;
+}
+void operator delete[](void * value) noexcept {std::free(value);}
+void operator delete[](void * value,std::size_t) noexcept {std::free(value);}
+namespace {
 std::mutex diagnostic_mutex;
 std::vector<std::string> diagnostic_lines;
 rcutils_logging_output_handler_t previous_log_handler=nullptr;
@@ -46,6 +63,11 @@ std::string diagnosticWith(const std::string & wanted) {
   std::lock_guard<std::mutex> l(diagnostic_mutex);
   for(auto it=diagnostic_lines.rbegin();it!=diagnostic_lines.rend();++it){if(it->find(wanted)!=std::string::npos){return *it;}}
   return {};
+}
+std::uint64_t diagnosticNumber(const std::string & line,const std::string & field) {
+  const auto marker="\""+field+"\":";auto start=line.find(marker);
+  if(start==std::string::npos){throw std::runtime_error("missing diagnostic field "+field);}
+  return std::stoull(line.substr(start+marker.size()));
 }
 }
 class Native : public testing::Test {
@@ -75,6 +97,8 @@ protected:
   std::unique_ptr<nav2_costmap_2d::Costmap2D> real_map;
   std::unique_ptr<nav2_costmap_2d::Costmap2DPublisher> real_map_publisher;
   rclcpp::TimerBase::SharedPtr real_map_timer;
+  rclcpp::TimerBase::SharedPtr stale_raw_timer;
+  rclcpp::Publisher<nav2_msgs::msg::Costmap>::SharedPtr raw_map;
   rclcpp_action::Server<Plan>::SharedPtr planner;
   rclcpp_action::Server<Follow>::SharedPtr follower;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf;
@@ -83,10 +107,18 @@ protected:
   std::mutex mutex;
   std::vector<double> commands;
   std::atomic<int> plans{0},follows{0},cancels{0},odom_count{0};
+  std::atomic<int> rpc_seen{0},auto_reply_from{1};
+  std::atomic<std::int64_t> last_rpc_stamp{0};
+  std::mutex rpc_mutex;
+  struct DeferredMap {std::shared_ptr<rmw_request_id_t> header;std::int64_t requested;bool replied=false;};
+  std::vector<DeferredMap> deferred_maps;
   std::atomic<bool> moving{false},stale{false};
   std::atomic<bool> actual_contract{false},stale_tf{false};
   std::atomic<double> map_shift{0.};
   bool drift_after_first_plan=false,invalid_path_start=false,block_body_after_plan=false;
+  bool planner_fails=false;
+  bool mark_map_after_plan=false;
+  double path_start_offset=0.;
   int planning_ms=450,following_ms=40;
   void SetUp() override {
     {std::lock_guard<std::mutex> l(diagnostic_mutex);diagnostic_lines.clear();}
@@ -101,9 +133,7 @@ protected:
     tf=std::make_unique<tf2_ros::TransformBroadcaster>(node);
     output=node->create_subscription<geometry_msgs::msg::Twist>("/cmd_vel_nav",100,[this](geometry_msgs::msg::Twist::ConstSharedPtr v){std::lock_guard<std::mutex> l(mutex);commands.push_back(v->linear.x);});
     map=node->create_service<nav2_msgs::srv::GetCostmap>("/local_costmap/get_costmap",[this](const nav2_msgs::srv::GetCostmap::Request::SharedPtr,nav2_msgs::srv::GetCostmap::Response::SharedPtr r){
-      auto & m=r->map;m.header.frame_id="odom";m.header.stamp=node->now();m.metadata.size_x=150;m.metadata.size_y=150;
-      m.metadata.resolution=.02;m.metadata.origin.position.x=-1.5;m.metadata.origin.position.y=-1.5;m.metadata.origin.orientation.w=1.;
-      m.data.resize(22500,block_body_after_plan && plans>0 ? 254 : 0);
+      ++rpc_seen;r->map=fixtureMap(block_body_after_plan && plans>0 ? 254 : 0);
     });
     planner=rclcpp_action::create_server<Plan>(node,"compute_path_to_pose",
       [](const auto &,const auto &){return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;},
@@ -114,10 +144,10 @@ protected:
         auto result=std::make_shared<Plan::Result>();result->path.header.frame_id="map";result->path.header.stamp=node->now();
         geometry_msgs::msg::PoseStamped start;start.header=result->path.header;start.pose.orientation.w=1.;
         if(actual_contract){start=bodyInMap();start.header=result->path.header;}
-        start.pose.position.x+=planned_shift+(invalid_path_start?.1:0.);
+        start.pose.position.x+=planned_shift+(invalid_path_start?.1:path_start_offset);
         result->path.poses={start,g->get_goal()->goal};
         if(drift_after_first_plan && plan_number==1){map_shift=.06;std::this_thread::sleep_for(150ms);}
-        if(g->is_canceling()){g->canceled(result);}else {g->succeed(result);}});});
+        if(g->is_canceling()){g->canceled(result);}else if(planner_fails){result->error_code=208;g->abort(result);}else {g->succeed(result);}});});
     follower=rclcpp_action::create_server<Follow>(node,"follow_path",
       [](const auto &,const auto &){return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;},
       [this](const auto &){++cancels;return rclcpp_action::CancelResponse::ACCEPT;},
@@ -179,16 +209,53 @@ protected:
     std::lock_guard<nav2_costmap_2d::Costmap2D::mutex_t> l(*real_map->getMutex());
     std::fill(real_map->getCharMap(),real_map->getCharMap()+360000,value);
   }
+  nav2_msgs::msg::Costmap fixtureMap(unsigned char value=0,std::int64_t stamp=0) {
+    nav2_msgs::msg::Costmap m;m.header.frame_id="odom";m.header.stamp=stamp?rclcpp::Time(stamp):node->now();
+    last_rpc_stamp=rclcpp::Time(m.header.stamp).nanoseconds();m.metadata.size_x=m.metadata.size_y=150;
+    m.metadata.resolution=.02;m.metadata.origin.position.x=m.metadata.origin.position.y=-1.5;
+    m.metadata.origin.orientation.w=1.;m.data.resize(22500,value);
+    if(mark_map_after_plan && plans>0 && value==0){m.data.front()=1;}
+    return m;
+  }
+  void deferredCostmap(int first_automatic=std::numeric_limits<int>::max()) {
+    executor.cancel();spinning.join();map.reset();rpc_seen=0;auto_reply_from=first_automatic;
+    map=node->create_service<nav2_msgs::srv::GetCostmap>("/local_costmap/get_costmap",
+      [this](std::shared_ptr<rmw_request_id_t> header,nav2_msgs::srv::GetCostmap::Request::SharedPtr) {
+        const int number=++rpc_seen;
+        {std::lock_guard<std::mutex> lock(rpc_mutex);deferred_maps.push_back({header,
+          std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(),false});}
+        if(number>=auto_reply_from.load()){replyMap(number);}
+      });
+    spinning=std::thread([this]{executor.spin();});
+  }
+  void replyMap(std::size_t number,unsigned char value=0,std::int64_t stamp=0) {
+    std::shared_ptr<rmw_request_id_t> header;
+    {std::lock_guard<std::mutex> lock(rpc_mutex);
+      if(!number || number>deferred_maps.size() || deferred_maps[number-1].replied){throw std::runtime_error("invalid deferred request");}
+      auto & pending=deferred_maps[number-1];pending.replied=true;header=pending.header;}
+    nav2_msgs::srv::GetCostmap::Response response;response.map=fixtureMap(value,stamp);map->send_response(*header,response);
+  }
+  void publishOldRawAgainstRpc() {
+    raw_map=node->create_publisher<nav2_msgs::msg::Costmap>("/local_costmap/costmap_raw",rclcpp::QoS(1).reliable().transient_local());
+    stale_raw_timer=node->create_wall_timer(10ms,[this]{
+      const auto stamp=last_rpc_stamp.load();if(!stamp){return;}
+      // Alternate strictly older raw and equal-header raw with blocked data.
+      static bool equal=false;equal=!equal;auto m=fixtureMap(254,stamp-(equal?0:50000000));
+      last_rpc_stamp=stamp;raw_map->publish(m);
+    });
+  }
   Service::Response::SharedPtr call(const std::string & op,uint64_t epoch=0) {
     auto req=std::make_shared<Service::Request>();req->run_id="native_test";req->operation=op;req->epoch=epoch;
     static int sequence=0;req->operation_id="native_test:"+std::to_string(++sequence);
     auto future=service->async_send_request(req);if(future.wait_for(3s)!=std::future_status::ready)throw std::runtime_error("service timeout");return future.get();
   }
-  BT::Tree tree(BT::BehaviorTreeFactory & factory,bool recovery=false,double timeout=5.) {
+  BT::Tree tree(BT::BehaviorTreeFactory & factory,bool recovery=false,double timeout=5.,bool scope_exception=false) {
     factory.registerFromPlugin(PLUGIN_PATH);
     factory.registerFromPlugin("/opt/ros/jazzy/lib/libnav2_compute_path_to_pose_action_bt_node.so");
     factory.registerFromPlugin("/opt/ros/jazzy/lib/libnav2_follow_path_action_bt_node.so");
     if(recovery){factory.registerFromPlugin("/opt/ros/jazzy/lib/libnav2_recovery_node_bt_node.so");}
+    if(scope_exception){factory.registerSimpleAction("FixtureScopeException",[](BT::TreeNode &)->BT::NodeStatus {
+      throw std::runtime_error("fixture exception after real measured-stop Wait");});}
     auto board=BT::Blackboard::create();board->set("node",bt);board->set("server_timeout",std::chrono::milliseconds(1000));
     board->set("bt_loop_duration",std::chrono::milliseconds(10));board->set("wait_for_service_timeout",std::chrono::milliseconds(3000));
     geometry_msgs::msg::PoseStamped goal;goal.header.frame_id="map";goal.pose.orientation.w=1.;goal.pose.position.x=.5;
@@ -197,9 +264,10 @@ protected:
     // Omit both timing ports: exercise the production defaults of 1s and 30s.
     if(actual_contract){attrs=" run_id='native_test' footprint='[[-0.647,-0.53],[0.647,-0.53],[0.647,0.53],[-0.647,0.53]]' padding='0.15'";}
     attrs+=" error_code_id='{recovery_error_code}'";
-    auto sequence="<Sequence><BeginStoppedReplanAttempt controller_error_code='{follow_path_error_code}' planner_error_code='{compute_path_error_code}' recovery_error_code='{recovery_error_code}'/>"
-      "<WaitForStoppedAndHealthy"+attrs+"/><ComputePathToPose goal='{goal}' path='{path}' planner_id='GridBased' use_start='false' error_code_id='{compute_path_error_code}'/>"
-      "<ValidateStoppedPlanStart"+attrs+" path='{path}'/><FollowPath path='{path}' controller_id='FollowPath' error_code_id='{follow_path_error_code}'/></Sequence>";
+    auto sequence="<Sequence><StoppedReplanScope><Sequence><BeginStoppedReplanAttempt controller_error_code='{follow_path_error_code}' planner_error_code='{compute_path_error_code}' recovery_error_code='{recovery_error_code}'/>"
+      "<WaitForStoppedAndHealthy"+attrs+"/>"+(scope_exception?std::string("<FixtureScopeException/>"):
+      std::string("<ComputePathToPose goal='{goal}' path='{path}' planner_id='GridBased' use_start='false' error_code_id='{compute_path_error_code}'/>"))+
+      "<ValidateStoppedPlanStart"+attrs+" path='{path}'/></Sequence></StoppedReplanScope><FollowPath path='{path}' controller_id='FollowPath' error_code_id='{follow_path_error_code}'/></Sequence>";
     if(recovery){sequence="<RecoveryNode number_of_retries='1'>"+sequence+
       "<WouldAStoppedPlanRecoveryHelp error_code='{recovery_error_code}'/></RecoveryNode>";}
     return factory.createTreeFromText("<root BTCPP_format='4'><BehaviorTree ID='Test'>"+sequence+"</BehaviorTree></root>",board);
@@ -349,4 +417,101 @@ TEST_F(Native, ActualCostmapStaleTfReportsExceptionAndFreshTfRestoresNormalEntry
   EXPECT_EQ(run(task,1500),BT::NodeStatus::RUNNING);EXPECT_EQ(plans,0);EXPECT_EQ(follows,0);
   auto stale_snapshot=diagnosticWith("stale body TF");ASSERT_FALSE(stale_snapshot.empty());RecordProperty("stale_tf_diagnostic",stale_snapshot);
   stale_tf=false;EXPECT_EQ(run(task,7000),BT::NodeStatus::SUCCESS);EXPECT_EQ(follows,1);
+}
+TEST_F(Native, MapRpcMissingFirstResponseHasFiniteRequestAndRecoversInSameTree) {
+  deferredCostmap(2);BT::BehaviorTreeFactory factory;auto task=tree(factory);
+  EXPECT_EQ(run(task),BT::NodeStatus::SUCCESS);EXPECT_EQ(plans,1);EXPECT_EQ(follows,1);
+  ASSERT_GE(rpc_seen.load(),2);
+  {std::lock_guard<std::mutex> lock(rpc_mutex);ASSERT_GE(deferred_maps.size(),2U);
+    const auto elapsed=deferred_maps[1].requested-deferred_maps[0].requested;
+    // These are server receipt times. The difference contains two independent
+    // DDS transport delays; the product's exact 500ms deadline is separately
+    // established by its timeout counter and the new request generation.
+    EXPECT_GE(elapsed,480000000LL);EXPECT_LT(elapsed,950000000LL);RecordProperty("server_receipt_retry_interval_ns",elapsed);}
+  const auto report=diagnosticWith("WAIT_RELEASE_RESPONSE");ASSERT_FALSE(report.empty());
+  EXPECT_GE(diagnosticNumber(report,"rpc_timeouts"),1U);RecordProperty("timeout_recovery_diagnostic",report);
+}
+TEST_F(Native, MapRpcLateOldResponseCannotClearNewPendingOrInstallOldGeometry) {
+  deferredCostmap();BT::BehaviorTreeFactory factory;auto task=tree(factory);
+  for(int i=0;i<150 && rpc_seen<2;++i){task.tickOnce();std::this_thread::sleep_for(10ms);}
+  ASSERT_EQ(rpc_seen,2);replyMap(1,254);const auto second_seen=rpc_seen.load();
+  EXPECT_EQ(run(task,150),BT::NodeStatus::RUNNING);EXPECT_EQ(rpc_seen,second_seen);EXPECT_EQ(follows,0);
+  auto_reply_from=3;
+  EXPECT_EQ(run(task),BT::NodeStatus::SUCCESS);EXPECT_EQ(plans,1);EXPECT_EQ(follows,1);
+  const auto report=diagnosticWith("WAIT_RELEASE_RESPONSE");ASSERT_FALSE(report.empty());
+  EXPECT_GE(diagnosticNumber(report,"rpc_timeouts"),2U);RecordProperty("late_reply_diagnostic",report);
+}
+TEST_F(Native, MapRpcNewerAndEqualRpcRejectOutOfOrderBlockedRaw) {
+  publishOldRawAgainstRpc();BT::BehaviorTreeFactory factory;auto task=tree(factory);
+  EXPECT_EQ(run(task),BT::NodeStatus::SUCCESS);EXPECT_EQ(follows,1);
+  const auto report=diagnosticWith("WAIT_RELEASE_RESPONSE");ASSERT_FALSE(report.empty());
+  EXPECT_NE(report.find("\"source\":\"GetCostmap\""),std::string::npos);
+  EXPECT_GT(diagnosticNumber(report,"rejected_samples"),0U);RecordProperty("map_selection_diagnostic",report);
+}
+TEST_F(Native, MapRpcPollsThroughPlanningThenStopsThroughoutFollowPathAndAfterHalt) {
+  planning_ms=1000;following_ms=1000;BT::BehaviorTreeFactory factory;auto task=tree(factory);
+  for(int i=0;i<400 && !plans;++i){task.tickOnce();std::this_thread::sleep_for(10ms);}
+  ASSERT_EQ(plans,1);const auto during_plan=rpc_seen.load();
+  EXPECT_EQ(run(task,300),BT::NodeStatus::RUNNING);EXPECT_GE(rpc_seen-during_plan,2);
+  for(int i=0;i<300 && !follows;++i){task.tickOnce();std::this_thread::sleep_for(10ms);}
+  ASSERT_EQ(follows,1);std::this_thread::sleep_for(120ms);const auto released=rpc_seen.load();
+  EXPECT_EQ(run(task,300),BT::NodeStatus::RUNNING);EXPECT_EQ(rpc_seen,released);
+  task.haltTree();std::this_thread::sleep_for(250ms);EXPECT_EQ(rpc_seen,released);
+}
+TEST_F(Native, MapRpcScopeClosesOnRealPlannerFailureAndOnPlannerHalt) {
+  planner_fails=true;planning_ms=100;BT::BehaviorTreeFactory factory;auto task=tree(factory);
+  EXPECT_EQ(run(task),BT::NodeStatus::FAILURE);EXPECT_EQ(follows,0);
+  std::this_thread::sleep_for(120ms);auto stopped=rpc_seen.load();std::this_thread::sleep_for(250ms);EXPECT_EQ(rpc_seen,stopped);
+  planner_fails=false;planning_ms=1000;task.haltTree();
+  for(int i=0;i<400 && plans<2;++i){task.tickOnce();std::this_thread::sleep_for(10ms);}
+  ASSERT_EQ(plans,2);task.haltTree();std::this_thread::sleep_for(120ms);stopped=rpc_seen.load();
+  std::this_thread::sleep_for(250ms);EXPECT_EQ(rpc_seen,stopped);EXPECT_EQ(follows,0);
+}
+TEST_F(Native, MapRpcHaltRetiresPendingAndReentryHasFreshRequestPhase) {
+  deferredCostmap();BT::BehaviorTreeFactory factory;auto task=tree(factory);
+  for(int i=0;i<80 && !rpc_seen;++i){task.tickOnce();std::this_thread::sleep_for(10ms);}
+  ASSERT_EQ(rpc_seen,1);task.haltTree();std::this_thread::sleep_for(650ms);EXPECT_EQ(rpc_seen,1);
+  auto_reply_from=2;
+  EXPECT_EQ(run(task),BT::NodeStatus::SUCCESS);EXPECT_EQ(plans,1);EXPECT_EQ(follows,1);
+  replyMap(1,254);std::this_thread::sleep_for(150ms);EXPECT_EQ(call("INSPECT")->mode,"CONTROLLER");
+}
+TEST_F(Native, MapRpcBlockedValidateUsesSharedPhaseDeadlineAndTypedCollisionCause) {
+  block_body_after_plan=true;planning_ms=200;BT::BehaviorTreeFactory factory;auto task=tree(factory,false,1.8);
+  const auto started=std::chrono::steady_clock::now();
+  EXPECT_EQ(run(task,3500),BT::NodeStatus::FAILURE);EXPECT_EQ(plans,1);EXPECT_EQ(follows,0);
+  EXPECT_EQ(task.rootBlackboard()->get<int>("recovery_error_code"),matrix_recovery_bt::CollisionWaitTimeout);
+  EXPECT_GE(std::chrono::steady_clock::now()-started,1700ms);EXPECT_LT(std::chrono::steady_clock::now()-started,3200ms);
+  const auto report=diagnosticWith("\"phase\":\"WAIT_PLAN_START_CERTIFICATE\"");ASSERT_FALSE(report.empty());
+  RecordProperty("validate_collision_diagnostic",report);
+}
+TEST_F(Native, MapRpcHighFrequencyConstantPoseSucceedsAndMicroJitterTerminatesWithinBudget) {
+  actualCostmap(0);planning_ms=150;BT::BehaviorTreeFactory factory;auto task=tree(factory);
+  const auto before=odom_count.load();EXPECT_EQ(run(task,7000),BT::NodeStatus::SUCCESS);EXPECT_GT(odom_count-before,250);EXPECT_EQ(follows,1);
+  task.haltTree();std::atomic<bool> done{false};
+  std::thread jitter([this,&done]{int i=0;while(!done){map_shift=(++i%2)?.0001:0.;std::this_thread::sleep_for(2ms);}});
+  const auto begin=std::chrono::steady_clock::now();auto state=run(task,32000);done=true;jitter.join();
+  EXPECT_NE(state,BT::NodeStatus::RUNNING);EXPECT_LT(std::chrono::steady_clock::now()-begin,32s);
+  RecordProperty("micro_jitter_terminal",state==BT::NodeStatus::SUCCESS?"SUCCESS":"FINITE_FAILURE");
+}
+TEST_F(Native, MapRpcConnectorTransformChangesDuringUnlockedConversionCannotRelease) {
+  mark_map_after_plan=true;path_start_offset=.04;planning_ms=500;
+  BT::BehaviorTreeFactory factory;auto task=tree(factory);std::atomic<int> triggered{0};
+  struct ResetHook {~ResetHook(){conversion_hook_armed=false;conversion_callback={};}} reset;
+  for(int i=0;i<400 && !plans;++i){task.tickOnce();std::this_thread::sleep_for(10ms);}
+  ASSERT_EQ(plans,1);
+  conversion_callback=[this,&triggered]{
+    ++triggered;map_shift=-.02;publishTf(node->now());std::this_thread::sleep_for(60ms);
+  };
+  conversion_hook_armed=true;
+  EXPECT_EQ(run(task),BT::NodeStatus::FAILURE);EXPECT_EQ(triggered,1);
+  EXPECT_EQ(task.rootBlackboard()->get<int>("recovery_error_code"),matrix_recovery_bt::PlanStartInvalidated);
+  EXPECT_EQ(plans,1);EXPECT_EQ(follows,0);EXPECT_EQ(call("INSPECT")->mode,"HOLD");
+  const auto report=diagnosticWith("plan_start_invalidated");ASSERT_FALSE(report.empty());
+  RecordProperty("connector_race_diagnostic",report);
+}
+TEST_F(Native, MapRpcScopeExceptionClosesPollingAndPreservesConfirmedGateHold) {
+  BT::BehaviorTreeFactory factory;auto task=tree(factory,false,5.,true);
+  EXPECT_THROW(run(task),BT::NodeExecutionError);EXPECT_EQ(plans,0);EXPECT_EQ(follows,0);
+  std::this_thread::sleep_for(120ms);const auto stopped=rpc_seen.load();
+  std::this_thread::sleep_for(250ms);EXPECT_EQ(rpc_seen,stopped);EXPECT_EQ(call("INSPECT")->mode,"HOLD");
 }

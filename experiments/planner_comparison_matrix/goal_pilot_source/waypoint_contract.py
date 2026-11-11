@@ -575,6 +575,12 @@ class OrderedVisits:
         return (value.get('receive_age_s', math.inf) <= .3
                 and (not stamped or -.05 <= value.get('header_age_s', math.inf) <= .3))
 
+    def invalidate_stop(self):
+        """A delivered invalid/moving sample breaks the current unfinished visit."""
+        if self.active is None or self.visits[self.active]['passed'] is not None:return
+        self.dwell_start=self.dwell_start_stamp=None
+        if self.advancing_stop is not None:self.advancing_stop.reset()
+
     def observe(self, snapshot, steady_ns, unix_ns, healthy):
         if self.active is None or self.violation:
             return None

@@ -20,7 +20,10 @@ def signal_before_send_batch(node,options,route,trace):
     """Actual batch/interrupt methods inside the normal CLI, with fake ROS I/O."""
     from waypoint_contract import OwnedGoalIdentity
     class Pose:
-        def __init__(self):self.header=SimpleNamespace();self.pose=SimpleNamespace(position=SimpleNamespace(),orientation=SimpleNamespace())
+        def __init__(self):
+            self.header=SimpleNamespace();self.pose=SimpleNamespace(position=SimpleNamespace(),orientation=SimpleNamespace())
+            trace['constructed_pose_count']=trace.get('constructed_pose_count',0)+1
+            if trace['constructed_pose_count']==len(route):os.kill(os.getpid(),signal.SIGINT)
     class Client:
         def __init__(self,*args):pass
         def wait_for_server(self,**kwargs):return True
@@ -38,14 +41,13 @@ def signal_before_send_batch(node,options,route,trace):
     node.native_feedback=lambda m:None
     snapshot={'last':{'pose':{'x':0.,'y':0.,'stamp_ns':1}}}
     node.execution_ready=lambda **kwargs:(True,[],snapshot)
+    node.decision_ready=lambda *args,**kwargs:(True,[],snapshot)
     node.wait_stable_preflight=lambda *args:(True,[],snapshot)
     node.check_interruption=MethodType(method('check_interruption',ns),node)
     node.post_intent_preflight=MethodType(method('post_intent_preflight',ns),node)
     def emit(kind,**fields):
         if kind=='goal_send':
             trace['goal_send_events']=trace.get('goal_send_events',0)+1
-            trace['constructed_pose_count']=len(fields['pose_header_stamps_ns'])
-            os.kill(os.getpid(),signal.SIGINT)
     node.emit=emit
     return method('run_batch',ns)(node)
 
@@ -59,10 +61,11 @@ class StorageTests(unittest.TestCase):
                 schema='matrix.mission.resume_capability.v1',bt_retries=state['policy']['bt_retries'],
                 client_sources_sha256={name:digest((SOURCE/name).read_bytes()) for name in CLIENT_SOURCES})))
         session=Session(self.worker,str(uuid.uuid4()),self.root/'health')
-        with patch.object(self.worker,'state',wraps=self.worker.state) as reads:
+        with patch.object(self.worker,'guard_state',wraps=self.worker.guard_state) as reads, \
+                patch.object(self.worker,'state',side_effect=AssertionError('full history on hot guard')):
             session.validate_ready(ready);self.assertEqual(reads.call_count,1)
         state['budgets'].update(deadline_boot_id=boot,deadline_boottime_sec=now+100)
-        with patch.object(self.worker,'state',return_value=state):
+        with patch.object(self.worker,'guard_state',return_value=state):
             with patch('mission_state.boot_clock',return_value=(boot,now+101)):
                 with self.assertRaisesRegex(Hold,'FAILED_BUDGET'):session.validate_ready(ready)
             with patch('mission_state.boot_clock',return_value=('changed-boot',now)):
@@ -72,6 +75,101 @@ class StorageTests(unittest.TestCase):
             self.assertGreater(self.worker.remaining(),0)
             self.worker.check_identity(before['identity'])
         self.assertEqual(self.worker.state(),before)
+
+    def test_guard_is_bounded_for_41_points_and_does_not_copy_history(self):
+        from mission_state import encoded,mission_guard_state
+        raw,identity,policy,_=fixture();document=json.loads(raw)
+        document['waypoints']=[dict(id='G%02d'%i,pose=[float(i),0.,0.],require_stopped=True) for i in range(41)]
+        changes={}
+        class HistoryStore(MissionStore):
+            def flush_state_read_timing(inner,checkpoint):
+                if checkpoint=='fixture_history':
+                    with inner.transaction('FIXTURE_HISTORY') as state:
+                        state['evidence']['fixture_history']=['x'*4096]*changes['rows']
+                return super().flush_state_read_timing(checkpoint)
+        worker=StorageWorker(self.root/'large.db',factory=HistoryStore)
+        try:
+            worker.create(json.dumps(document).encode(),identity,policy)
+            before=worker.guard_state();size=len(encoded(before));real_copy=copy.deepcopy
+            for rows in (1,250):
+                changes['rows']=rows;worker.flush_state_read_timing('fixture_history')
+                state=worker.state();view=worker.guard_state()
+                self.assertEqual(view,mission_guard_state(state))
+                self.assertEqual(len(state['route']),41)
+                self.assertLessEqual(len(encoded(view)),size+4)
+                self.assertNotIn('route',view);self.assertNotIn('evidence',view)
+                def bounded_copy(value,*args,**kwargs):
+                    if isinstance(value,dict) and ('route' in value or 'evidence' in value):
+                        raise AssertionError('hot guard copied full state/history')
+                    return real_copy(value,*args,**kwargs)
+                with patch('mission_storage.copy.deepcopy',side_effect=bounded_copy):
+                    self.assertEqual(worker.guard_state()['revision'],state['revision'])
+                    self.assertGreater(worker.remaining(),0.)
+                view['identity']['source_sha']='c'*40
+                self.assertEqual(worker.guard_state()['identity']['source_sha'],identity['source_sha'])
+        finally:worker.close()
+
+    def test_guard_and_full_state_publish_one_revision_after_commit_or_rollback(self):
+        from mission_state import mission_guard_state
+        changes={};observed=[]
+        class TransactionStore(MissionStore):
+            def flush_state_read_timing(inner,checkpoint):
+                if checkpoint=='fixture_transaction':
+                    with inner.transaction('FIXTURE_GUARD') as state:
+                        state['progress']['next_index']=1;state['current_target']=state['route'][1]
+                        if changes.get('rollback'):raise RuntimeError('fixture rollback before commit')
+                        time.sleep(.05)
+                return super().flush_state_read_timing(checkpoint)
+        worker=StorageWorker(self.root/'transaction.db',factory=TransactionStore)
+        try:
+            raw,identity,policy,_=fixture();worker.create(raw,identity,policy);before=worker.state()
+            def pump():
+                state=worker.state();guard=worker.guard_state()
+                observed.append((state['revision'],guard['revision'],guard['progress']['next_index']))
+                self.assertEqual(guard,mission_guard_state(state));time.sleep(.001)
+            worker.pump=pump;worker.flush_state_read_timing('fixture_transaction')
+            self.assertTrue(observed)
+            self.assertEqual(set(observed),{(before['revision'],before['revision'],0)})
+            after=worker.state();self.assertEqual(after['revision'],before['revision']+1)
+            self.assertEqual(worker.guard_state(),mission_guard_state(after))
+            worker.pump=None;changes['rollback']=True
+            with self.assertRaisesRegex(RuntimeError,'rollback'):
+                worker.flush_state_read_timing('fixture_transaction')
+            self.assertEqual(worker.state(),after);self.assertEqual(worker.guard_state(),mission_guard_state(after))
+        finally:worker.close()
+
+    def test_remaining_rechecks_boottime_without_file_io_and_reopen_rejects_other_boot(self):
+        from mission_state import boot_clock
+        session=Session(self.worker,str(uuid.uuid4()),self.root/'budget');session.reserve()
+        state=self.worker.state();deadline=state['budgets']['deadline_boottime_sec']
+        with patch.object(Path,'read_text',side_effect=AssertionError('hot boot file I/O')), \
+                patch('mission_storage.time.clock_gettime',return_value=deadline+.1):
+            self.assertEqual(self.worker.remaining(),0.)
+        self.worker.close();boot,_=boot_clock()
+        with patch('mission_storage.boot_clock',return_value=('fixture-different-boot',0.)):
+            reopened=StorageWorker(self.root/'mission.db',self.root/'owner.lock')
+        try:
+            self.assertNotEqual(boot,'fixture-different-boot')
+            with self.assertRaisesRegex(Hold,'CLOCK_UNTRUSTED'):reopened.remaining()
+            self.assertEqual(reopened.guard_state()['revision'],state['revision'])
+        finally:reopened.close()
+
+    def test_settle_validation_preserves_identity_when_motion_budget_is_exhausted(self):
+        from mission_continuation import CLIENT_SOURCES
+        from mission_state import digest,boot_clock
+        state=self.worker.guard_state();boot,now=boot_clock()
+        state['budgets'].update(deadline_boot_id=boot,deadline_boottime_sec=now-1)
+        ready=dict(variant=state['variant'],mission_identity=dict(state['identity'],verified=True),
+            recovery_runtime=dict(verified=True),waypoint_contract=dict(mission_resume=dict(
+                schema='matrix.mission.resume_capability.v1',bt_retries=state['policy']['bt_retries'],
+                client_sources_sha256={name:digest((SOURCE/name).read_bytes()) for name in CLIENT_SOURCES})))
+        session=Session(self.worker,str(uuid.uuid4()),self.root/'settle')
+        with patch.object(self.worker,'guard_state',return_value=state):
+            with self.assertRaisesRegex(Hold,'FAILED_BUDGET'):session.validate_ready(ready)
+            session.validate_ready(ready,require_budget=False)
+            ready['mission_identity']['source_sha']='c'*40
+            with self.assertRaisesRegex(Hold,'IDENTITY_MISMATCH'):
+                session.validate_ready(ready,require_budget=False)
 
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name)
@@ -306,13 +404,13 @@ class DispatchTests(unittest.TestCase):
                     args=SimpleNamespace(preflight_seconds=40.,stable_preflight_seconds=10.,timeout=100.,simulation_first_leg_max_distance_m=8.,simulation_scan_max_age_sec=.3),
                     event_pub=SimpleNamespace(get_subscription_count=lambda:1),emit=lambda kind,**kwargs:events.append((kind,kwargs)),
                     get_clock=lambda:SimpleNamespace(now=lambda:SimpleNamespace(to_msg=lambda:time.time_ns())),native_feedback=lambda m:None)
-                def check(**kwargs):
+                def check(*args,**kwargs):
                     snapshot={'last':{'pose':{'x':0.,'y':0.,'stamp_ns':len(snapshots)}}};snapshots.append(snapshot)
                     return True,[],snapshot
                 def wait(deadline,started):
                     stable.append((deadline,started));ok=ready_after or session.action_uuid is None
                     return ok,[] if ok else ['input_stale'],check()[2]
-                node.execution_ready=check;node.wait_stable_preflight=wait;node.spin_until=lambda predicate,timeout:predicate()
+                node.execution_ready=check;node.decision_ready=check;node.wait_stable_preflight=wait;node.spin_until=lambda predicate,timeout:predicate()
                 node.post_intent_preflight=MethodType(method('post_intent_preflight',ns),node)
                 try:
                     result=method('run_batch',ns)(node)
@@ -327,7 +425,7 @@ class DispatchTests(unittest.TestCase):
                         self.assertEqual(result['classification'],'goal_rejected')
                     else:self.assertEqual(result['classification'],'invalid_post_intent_preflight_not_sent')
                 finally:worker.close()
-    def test_normal_cli_signal_from_goal_send_event_is_not_sent_after_intent(self):
+    def test_normal_cli_signal_during_request_construction_is_not_sent_after_intent(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d);raw,identity,policy,_=fixture();route=json.loads(raw)
             route['waypoints']=[dict(id='F%02d'%i,pose=[0.,0.,0.],require_stopped=True) for i in range(41)]
@@ -340,7 +438,7 @@ class DispatchTests(unittest.TestCase):
             p=subprocess.run(cmd,env=dict(os.environ,ROS_DOMAIN_ID='185'),capture_output=True,text=True,timeout=15)
             self.assertEqual(p.returncode,10,p.stdout+p.stderr)
             trace=json.loads(transport.with_suffix('.trace.json').read_text())
-            self.assertEqual(trace['goal_send_events'],1);self.assertEqual(trace['constructed_pose_count'],41)
+            self.assertEqual(trace.get('goal_send_events',0),0);self.assertEqual(trace['constructed_pose_count'],41)
             self.assertEqual(trace['goals_sent'],0)
             state=MissionStore.inspect(root/'mission.db');native=json.loads((root/'operation/attempt_00/native_result.json').read_text())
             self.assertEqual(state['attempt']['dispatch_state'],'NOT_SENT_AFTER_INTENT')

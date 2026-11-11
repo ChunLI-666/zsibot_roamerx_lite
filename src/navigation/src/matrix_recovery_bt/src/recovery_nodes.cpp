@@ -8,6 +8,7 @@
 #include <behaviortree_cpp/bt_factory.h>
 #include <behaviortree_cpp/action_node.h>
 #include <behaviortree_cpp/condition_node.h>
+#include <behaviortree_cpp/decorator_node.h>
 #include <rclcpp/rclcpp.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
@@ -58,6 +59,13 @@ struct Inputs {
   rclcpp::Client<nav2_msgs::srv::GetCostmap>::SharedPtr map_client;
   rclcpp::TimerBase::SharedPtr map_timer;
   bool map_pending=false;
+  bool map_polling=false;
+  std::uint64_t map_phase=0,map_request_generation=0,map_geometry_generation=0,cost_generation=0;
+  std::int64_t map_request_id=0,map_request_deadline=0,map_phase_deadline=0;
+  std::uint64_t map_timeouts=0,map_late_responses=0,map_errors=0,map_rejected=0;
+  // Sweep/Nav2 APIs require a non-const Costmap2D reference; after conversion
+  // this private generation is never mutated or shared with a map publisher.
+  std::shared_ptr<nav2_costmap_2d::Costmap2D> cached_cost;
   std::vector<rclcpp::SubscriptionBase::SharedPtr> subs;
   std::mutex mutex;
   nav_msgs::msg::Odometry::ConstSharedPtr odom;
@@ -113,8 +121,7 @@ struct Inputs {
       },options));
     subs.push_back(node->create_subscription<nav2_msgs::msg::Costmap>("/local_costmap/costmap_raw",
       rclcpp::QoS(1).reliable().transient_local(),[this](nav2_msgs::msg::Costmap::ConstSharedPtr v) {
-        std::lock_guard<std::mutex> l(mutex);map=v;map_receive=steady();
-        ++map_sequence;map_source="raw_topic";
+        std::lock_guard<std::mutex> l(mutex);acceptMap(v,"raw_topic");
       },options));
     subs.push_back(node->create_subscription<geometry_msgs::msg::Twist>("/cmd_vel_safe",10,
       [this](geometry_msgs::msg::Twist::ConstSharedPtr v) {
@@ -143,20 +150,80 @@ struct Inputs {
     map_client=node->create_client<nav2_msgs::srv::GetCostmap>("/local_costmap/get_costmap",rmw_qos_profile_services_default,group);
     // Normal costmap publication is 1 Hz. Query the current locked map while
     // stopped; never pretend a publication is a fresh sensor sample.
-    map_timer=node->create_wall_timer(std::chrono::milliseconds(100),[this] {
-      if (map_pending || !map_client->service_is_ready()) {return;}
-      {std::lock_guard<std::mutex> l(mutex);map_pending=true;++map_requests;map_requested=steady();}
-      map_client->async_send_request(std::make_shared<nav2_msgs::srv::GetCostmap::Request>(),
-        [this](rclcpp::Client<nav2_msgs::srv::GetCostmap>::SharedFuture f) {
-          std::lock_guard<std::mutex> l(mutex);map_pending=false;
-          map=std::make_shared<nav2_msgs::msg::Costmap>(f.get()->map);map_receive=steady();
-          ++map_sequence;++map_responses;map_responded=steady();map_source="GetCostmap";
-        });
-    },group);
+    map_timer=node->create_wall_timer(std::chrono::milliseconds(100),[this] {pollMap();},group);
     executor.add_callback_group(group,node->get_node_base_interface());
     thread=std::thread([this]{executor.spin();});
   }
   ~Inputs() {executor.cancel();if (thread.joinable()) {thread.join();}}
+  // Lifecycle methods below are called with mutex held. Request, phase and
+  // geometry identities are independent; an old completion owns only itself.
+  void retireMapRequest() {
+    if (map_pending) {map_client->remove_pending_request(map_request_id);}
+    map_pending=false;map_request_id=0;map_request_deadline=0;++map_request_generation;
+  }
+  std::uint64_t beginMapPhase(std::int64_t deadline) {
+    retireMapRequest();++map_phase;map_polling=true;map_phase_deadline=deadline;return map_phase;
+  }
+  void endMapPhase(std::uint64_t token) {
+    if (!token || token!=map_phase) {return;}
+    map_polling=false;retireMapRequest();
+  }
+  bool mapMetadataValid(const nav2_msgs::msg::Costmap & candidate) const {
+    const auto & m=candidate.metadata;const auto & q=m.origin.orientation;
+    return !candidate.header.frame_id.empty() && m.size_x && m.size_y &&
+      m.size_x<=10000 && m.size_y<=10000 && std::isfinite(m.resolution) && m.resolution>0 &&
+      candidate.data.size()==std::size_t(m.size_x)*m.size_y &&
+      std::isfinite(m.origin.position.x) && std::isfinite(m.origin.position.y) && std::isfinite(m.origin.position.z) &&
+      std::isfinite(q.x) && std::isfinite(q.y) && std::isfinite(q.z) && std::isfinite(q.w) &&
+      std::abs(q.x)<=1e-6 && std::abs(q.y)<=1e-6 && std::abs(q.z)<=1e-6 && std::abs(q.w-1)<=1e-6;
+  }
+  void acceptMap(nav2_msgs::msg::Costmap::ConstSharedPtr candidate,const char * source) {
+    if (!mapMetadataValid(*candidate) || !stampFresh(candidate->header.stamp) ||
+      (map && candidate->header.frame_id!=map->header.frame_id)) {++map_rejected;return;}
+    if (map) {
+      const auto incoming=rclcpp::Time(candidate->header.stamp).nanoseconds();
+      const auto current=rclcpp::Time(map->header.stamp).nanoseconds();
+      if (incoming<current || (incoming==current && std::string(source)=="raw_topic" &&
+        std::string(map_source)=="GetCostmap")) {++map_rejected;return;}
+      if (*candidate==*map && std::string(source)==map_source) {return;}
+    }
+    const auto & m=candidate->metadata;
+    // Rolling origin changes are geometry changes, not a new map authority.
+    const bool same_geometry=map && map->metadata.size_x==m.size_x && map->metadata.size_y==m.size_y &&
+      map->metadata.resolution==m.resolution && map->metadata.origin==m.origin && map->data==candidate->data;
+    if (!same_geometry) {++map_geometry_generation;cached_cost.reset();}
+    map=std::move(candidate);map_receive=steady();++map_sequence;map_source=source;
+  }
+  void pollMap() {
+    std::lock_guard<std::mutex> l(mutex);const auto now=steady();
+    if (map_polling && now>=map_phase_deadline) {endMapPhase(map_phase);}
+    if (!map_polling) {return;}
+    if (map_pending && now>=map_request_deadline) {++map_timeouts;retireMapRequest();}
+    if (map_pending || !map_client->service_is_ready()) {return;}
+    const auto generation=++map_request_generation,phase=map_phase;
+    map_pending=true;++map_requests;map_requested=now;map_request_deadline=now+500000000LL;
+    try {
+      auto request=map_client->async_send_request(std::make_shared<nav2_msgs::srv::GetCostmap::Request>(),
+        [this,generation,phase](rclcpp::Client<nav2_msgs::srv::GetCostmap>::SharedFuture f) {
+          nav2_msgs::msg::Costmap::ConstSharedPtr candidate;std::string error;
+          try {candidate=std::make_shared<nav2_msgs::msg::Costmap>(std::move(f.get()->map));}
+          catch (const std::exception & e) {error=e.what();}
+          std::lock_guard<std::mutex> guard(mutex);
+          if (!map_pending || generation!=map_request_generation || phase!=map_phase || !map_polling) {
+            ++map_late_responses;return;
+          }
+          if (steady()>=map_request_deadline || steady()>=map_phase_deadline) {
+            ++map_timeouts;retireMapRequest();return;
+          }
+          map_pending=false;map_request_id=0;map_request_deadline=0;
+          if (!candidate) {++map_errors;last_exception=error;return;}
+          ++map_responses;map_responded=steady();acceptMap(std::move(candidate),"GetCostmap");
+        });
+      map_request_id=request.request_id;
+    } catch (const std::exception & e) {
+      ++map_errors;last_exception=e.what();retireMapRequest();
+    }
+  }
   bool recent(std::int64_t receipt,double limit=.3) const {
     auto delta=steady()-receipt;return receipt>0 && delta>=0 && delta<=limit*1e9;
   }
@@ -193,7 +260,7 @@ struct Inputs {
     if (!std::isfinite(norm)||std::abs(norm-1.)>.01) {throw std::runtime_error("invalid body quaternion");}
     last_body=p;body_observed=true;return p;
   }
-  Certificate certified(const nav_msgs::msg::Path * path=nullptr) {
+  Certificate certified(std::unique_lock<std::mutex> & lock,const nav_msgs::msg::Path * path=nullptr) {
     using namespace robot_feasible_navigation;
     if (!basicHealthy() || !diagnostics.check(bool(map),Reject::MapMissing) ||
       !diagnostics.check(recent(map_receive),Reject::MapReceive) ||
@@ -225,16 +292,60 @@ struct Inputs {
         diagnostics.check(false,Reject::PathStart);return Certificate::PlanInvalidated;
       }
     }
-    nav2_costmap_2d::Costmap2D cost(m.size_x,m.size_y,m.resolution,m.origin.position.x,m.origin.position.y);
-    std::copy(map->data.begin(),map->data.end(),cost.getCharMap());
-    const bool free=sweep::commandSweepFree(cost,footprint,actual.pose.position.x,actual.pose.position.y,
-      yaw(actual.pose),0,0,1.);
-    collision_map=map;collision_body=actual;collision_map_sequence=map_sequence;collision_checked=steady();collision_free=free;
+    const auto captured_map=map;const auto sequence=map_sequence,geometry=map_geometry_generation;
+    const auto phase=map_phase,handoff=epoch;const auto received=map_receive;
+    auto cost=cost_generation==geometry?cached_cost:nullptr;
+    bool free=false,connector_free=true;
+    lock.unlock();
+    try {
+      if (!cost) {
+        auto converted=std::make_shared<nav2_costmap_2d::Costmap2D>(m.size_x,m.size_y,m.resolution,
+          m.origin.position.x,m.origin.position.y);
+        std::copy(captured_map->data.begin(),captured_map->data.end(),converted->getCharMap());cost=converted;
+      }
+      free=sweep::commandSweepFree(*cost,footprint,actual.pose.position.x,actual.pose.position.y,
+        yaw(actual.pose),0,0,1.);
+      if (path && free) {connector_free=sweep::sweepFree(*cost,footprint,actual.pose.position.x,
+        actual.pose.position.y,yaw(actual.pose),local.pose.position.x,local.pose.position.y,yaw(local.pose));}
+    } catch (...) {lock.lock();throw;}
+    lock.lock();
+    if (!diagnostics.check(map_polling && map_phase==phase && epoch==handoff && steady()<map_phase_deadline,
+      Reject::PhaseChanged)) {return Certificate::InputWait;}
+    if (!diagnostics.check(map_geometry_generation==geometry,Reject::MapChanged)) {return Certificate::InputWait;}
+    cached_cost=cost;cost_generation=geometry;
+    if (!basicHealthy() || !diagnostics.check(recent(received) && stampFresh(captured_map->header.stamp) &&
+      recent(map_receive) && stampFresh(map->header.stamp),Reject::MapReceive) ||
+      !diagnostics.check(stampFresh(actual.header.stamp),Reject::BodyChanged)) {return Certificate::InputWait;}
+    // A new healthy Odom/TF timestamp alone does not invalidate geometry. If the
+    // actual pose changed during the unlocked work, certify that pose next tick.
+    const auto current=body(captured_map->header.frame_id);
+    if (!diagnostics.check(std::hypot(current.pose.position.x-actual.pose.position.x,
+      current.pose.position.y-actual.pose.position.y)<=1e-9 &&
+      std::abs(angle(yaw(current.pose),yaw(actual.pose)))<=1e-9,Reject::BodyChanged)) {return Certificate::InputWait;}
+    if (path) {
+      const auto original=body("map");
+      if (std::hypot(original.pose.position.x-planned_start.pose.position.x,
+        original.pose.position.y-planned_start.pose.position.y)>.03 ||
+        std::abs(angle(yaw(original.pose),yaw(planned_start.pose)))>.08) {
+        diagnostics.check(false,Reject::BodyDrift);return Certificate::PlanInvalidated;
+      }
+      auto first=path->poses.front();first.header.frame_id=path->header.frame_id;
+      first.header.stamp=current.header.stamp;
+      const auto endpoint=tf->transform(first,captured_map->header.frame_id);
+      if (std::hypot(endpoint.pose.position.x-current.pose.position.x,
+        endpoint.pose.position.y-current.pose.position.y)>.05 ||
+        std::abs(angle(yaw(endpoint.pose),yaw(current.pose)))>.25) {
+        diagnostics.check(false,Reject::PathStart);return Certificate::PlanInvalidated;
+      }
+      if (!diagnostics.check(std::hypot(endpoint.pose.position.x-local.pose.position.x,
+        endpoint.pose.position.y-local.pose.position.y)<=1e-9 &&
+        std::abs(angle(yaw(endpoint.pose),yaw(local.pose)))<=1e-9,Reject::BodyChanged)) {return Certificate::InputWait;}
+    }
+    collision_map=captured_map;collision_body=actual;collision_map_sequence=sequence;
+    collision_checked=steady();collision_free=free;
     if (!diagnostics.check(free,Reject::BodyCollision)) {return Certificate::Blocked;}
     if (!path) {return Certificate::Valid;}
-    return diagnostics.check(sweep::sweepFree(cost,footprint,actual.pose.position.x,actual.pose.position.y,yaw(actual.pose),
-      local.pose.position.x,local.pose.position.y,yaw(local.pose)),Reject::PathSweep) ?
-      Certificate::Valid : Certificate::Blocked;
+    return diagnostics.check(connector_free,Reject::PathSweep)?Certificate::Valid:Certificate::Blocked;
   }
   // Called at most once/second while waiting, plus a terminal failure snapshot.
   // No extra TF lookup, sensor publication, map copy, filesystem write or guard evaluation.
@@ -292,6 +403,12 @@ struct Inputs {
       <<",\"last_exception\":"<<jsonText(last_exception)<<",\"last_valid_body\":"<<(body_observed?poseDiagnostic(last_body):"null")
       <<"},\"map\":{\"source\":"<<jsonText(map_source)<<",\"sequence\":"<<map_sequence<<",\"receive_age_sec\":"<<age(map_receive)
       <<",\"rpc_pending\":"<<map_pending<<",\"rpc_requests\":"<<map_requests<<",\"rpc_responses\":"<<map_responses
+      <<",\"polling\":"<<map_polling<<",\"phase_generation\":"<<map_phase
+      <<",\"request_generation\":"<<map_request_generation<<",\"request_id\":"<<map_request_id
+      <<",\"request_deadline_steady_ns\":"<<map_request_deadline<<",\"phase_deadline_steady_ns\":"<<map_phase_deadline
+      <<",\"geometry_generation\":"<<map_geometry_generation<<",\"cached_geometry_generation\":"<<cost_generation
+      <<",\"rpc_timeouts\":"<<map_timeouts<<",\"rpc_late_responses\":"<<map_late_responses
+      <<",\"rpc_errors\":"<<map_errors<<",\"rejected_samples\":"<<map_rejected
       <<",\"rpc_request_age_sec\":"<<age(map_requested)<<",\"rpc_response_age_sec\":"<<age(map_responded);
     if(map){const auto & m=map->metadata;s<<",\"frame\":"<<jsonText(map->header.frame_id)<<",\"source_header\":"<<header(map->header.stamp)
       <<",\"size_xy\":["<<m.size_x<<','<<m.size_y<<"],\"data_size\":"<<map->data.size()<<",\"resolution\":"<<jsonNumber(m.resolution)
@@ -340,7 +457,7 @@ public:
     if (!config().blackboard->get("matrix_stop_inputs",inputs_)) {
       inputs_=std::make_shared<Inputs>(*this);config().blackboard->set("matrix_stop_inputs",inputs_);
     }
-    started_=steady();stable_=0;pending_=false;acquired_=false;inspected_=false;
+    started_=steady();stable_=0;pending_=false;request_registered_=false;acquired_=false;inspected_=false;completed_=false;
     {
       std::lock_guard<std::mutex> l(inputs_->mutex);
       inputs_->diagnostics=WaitCounters{};
@@ -350,6 +467,9 @@ public:
       if (!release_) {
         inputs_->start_captured=false;
         inputs_->certificate_path=nav_msgs::msg::Path{};
+        phase_token_=inputs_->beginMapPhase(started_+static_cast<std::int64_t>(getInput<double>("timeout").value()*1e9));
+      } else {
+        phase_token_=inputs_->map_phase;
       }
     }
     outputError(None);
@@ -358,22 +478,31 @@ public:
   }
   BT::NodeStatus onRunning() override {
     auto & x=*inputs_;
-    std::lock_guard<std::mutex> l(x.mutex);
+    std::unique_lock<std::mutex> l(x.mutex);
     if (x.ownership_unknown) {
       // Removing a pending client future cannot undo an accepted RELEASE.
       // No automatic retry may treat this as a confirmed zero-owning epoch.
       return fail(OwnershipUnknown,"ownership_requires_reconcile");
     }
     if (steady()-started_>getInput<double>("timeout").value()*1e9) {
-      const int code=(pending_ || (!release_ && !acquired_)) ? OwnershipUnknown :
-        (x.certificate==Certificate::Blocked ? CollisionWaitTimeout : InputHealthTimeout);
-      return fail(code,"timeout");
+      return fail(timeoutError(),"timeout");
+    }
+    if (phase_token_!=x.map_phase || !x.map_polling) {
+      const bool expired=phase_token_==x.map_phase && steady()>=x.map_phase_deadline;
+      return fail(expired?timeoutError():(release_ && pending_?OwnershipUnknown:InputHealthTimeout),"map_phase_closed");
     }
     if (!x.client->service_is_ready()) {return waiting("WAIT_HANDOFF_SERVICE");}
     if (!release_ && !acquired_) {
-      if (!pending_) {send(inspected_?"ACQUIRE":"INSPECT",x.epoch);return waiting(inspected_?"WAIT_ACQUIRE_RESPONSE":"WAIT_INSPECT_RESPONSE");}
+      if (!pending_) {
+        if (!send(inspected_?"ACQUIRE":"INSPECT",x.epoch)) {return BT::NodeStatus::FAILURE;}
+        return waiting(inspected_?"WAIT_ACQUIRE_RESPONSE":"WAIT_INSPECT_RESPONSE");
+      }
       if (future_.wait_for(std::chrono::seconds(0))!=std::future_status::ready) {return waiting(phase_);}
-      auto r=future_.get();pending_=false;
+      std::shared_ptr<Service::Response> r;
+      try {r=future_.get();}
+      catch (const std::exception & error) {x.last_exception=error.what();return fail(OwnershipUnknown,"handoff_result_exception");}
+      pending_=false;request_registered_=false;
+      if (!r) {return fail(OwnershipUnknown,"empty_handoff_response");}
       if (!inspected_) {
         if (!r->accepted) {return fail(OwnershipUnknown,"inspect_rejected");}
         x.epoch=r->epoch;inspected_=true;return waiting("WAIT_ACQUIRE_RESPONSE");
@@ -392,10 +521,21 @@ public:
         if (!input) {return fail(InvalidPlanContract,"missing_path_input");}
         path=input.value();x.certificate_path=path;
       }
-      x.certificate=x.certified(release_?&path:nullptr);
+      const auto certificate=x.certified(l,release_?&path:nullptr);
+      // A discarded computation at the deadline is not a new health failure.
+      // Preserve the last committed cause (notably collision) for the result.
+      if (steady()-started_>=getInput<double>("timeout").value()*1e9 ||
+        (phase_token_==x.map_phase && steady()>=x.map_phase_deadline)) {
+        return fail(timeoutError(),"certificate_deadline");
+      }
+      x.certificate=certificate;
       healthy=x.certificate==Certificate::Valid && x.diagnostics.check(x.barrier.ready(steady()),Reject::StopDwell);
     } catch (const std::exception & error) {
       x.diagnostics.check(false,Reject::Exception);x.last_exception=error.what();
+      if (steady()-started_>=getInput<double>("timeout").value()*1e9 ||
+        (phase_token_==x.map_phase && steady()>=x.map_phase_deadline)) {
+        return fail(timeoutError(),"certificate_deadline");
+      }
       x.certificate=Certificate::InputWait;
     }
     if (!healthy) {
@@ -407,6 +547,9 @@ public:
       }
       if (x.certificate==Certificate::InvalidPath) {return fail(InvalidPlanContract,"invalid_plan_contract");}
       return waiting(release_?"WAIT_PLAN_START_CERTIFICATE":"WAIT_STOP_AND_HEALTH");
+    }
+    if (steady()-started_>=getInput<double>("timeout").value()*1e9 || steady()>=x.map_phase_deadline) {
+      return fail(timeoutError(),"certificate_deadline");
     }
     if (!release_) {
       if (!stable_) {stable_=steady();}
@@ -421,33 +564,53 @@ public:
       x.start_captured=true;x.plan_invalidated=false;
       x.start_capture_ros=x.node->now().nanoseconds();x.start_capture_steady=steady();
       diagnose("planned_start_captured",false);
-      outputError(None);return BT::NodeStatus::SUCCESS;
+      completed_=true;outputError(None);return BT::NodeStatus::SUCCESS;
     }
-    if (!pending_) {send("RELEASE",x.epoch);return waiting("WAIT_RELEASE_RESPONSE");}
+    if (!pending_) {
+      if (!send("RELEASE",x.epoch)) {return BT::NodeStatus::FAILURE;}
+      return waiting("WAIT_RELEASE_RESPONSE");
+    }
     if (future_.wait_for(std::chrono::seconds(0))!=std::future_status::ready) {return waiting("WAIT_RELEASE_RESPONSE");}
-    auto r=future_.get();pending_=false;
+    std::shared_ptr<Service::Response> r;
+    try {r=future_.get();}
+    catch (const std::exception & error) {x.last_exception=error.what();return fail(OwnershipUnknown,"handoff_result_exception");}
+    pending_=false;request_registered_=false;
+    if (!r) {return fail(OwnershipUnknown,"empty_handoff_response");}
     if (!r->accepted || r->epoch!=x.epoch || r->mode!="CONTROLLER") {return fail(OwnershipUnknown,"release_rejected");}
-    x.released=true;x.hold_confirmed=false;outputError(None);return BT::NodeStatus::SUCCESS;
+    x.released=true;x.hold_confirmed=false;x.endMapPhase(phase_token_);
+    completed_=true;outputError(None);return BT::NodeStatus::SUCCESS;
   }
   void onHalted() override {
-    if (release_ && pending_ && inputs_) {
+    if (inputs_) {
       std::lock_guard<std::mutex> l(inputs_->mutex);
-      inputs_->ownership_unknown=true;
-      inputs_->recovery_error=OwnershipUnknown;outputError(OwnershipUnknown);
-      diagnose("halt_during_release",true);
+      if (phase_token_==inputs_->map_phase) {
+        if (release_ && pending_) {
+          inputs_->ownership_unknown=true;
+          inputs_->recovery_error=OwnershipUnknown;outputError(OwnershipUnknown);
+          diagnose("halt_during_release",true);
+        }
+        if (!completed_) {inputs_->endMapPhase(phase_token_);}
+      }
+      cancelPending();
     }
-    cancelPending();
     // Gate owns all zero publication. In particular success cleanup and stale
     // halts never publish or close a released epoch under the next FollowPath.
   }
 private:
+  int timeoutError() const {
+    return pending_ || (!release_ && !acquired_) ? OwnershipUnknown :
+      (inputs_->certificate==Certificate::Blocked?CollisionWaitTimeout:InputHealthTimeout);
+  }
   void outputError(int code) {
     if (config().output_ports.count("error_code_id")) {setOutput("error_code_id",static_cast<std::uint16_t>(code));}
   }
   BT::NodeStatus fail(int code,const char * event) {
-    inputs_->recovery_error=code;
-    if (code==OwnershipUnknown) {inputs_->ownership_unknown=true;}
+    if (phase_token_==inputs_->map_phase) {
+      inputs_->recovery_error=code;
+      if (code==OwnershipUnknown) {inputs_->ownership_unknown=true;}
+    }
     outputError(code);
+    inputs_->endMapPhase(phase_token_);
     cancelPending();diagnose(event,true);
     return BT::NodeStatus::FAILURE;
   }
@@ -461,14 +624,26 @@ private:
       else{RCLCPP_INFO(inputs_->node->get_logger(),"matrix_stop_wait_v1 %s",text.c_str());}
     } catch (...) {++diagnostic_drops_;} // Diagnostics never change the BT result.
   }
-  void send(const std::string & op,std::uint64_t epoch) {
+  bool send(const std::string & op,std::uint64_t epoch) {
     auto req=std::make_shared<Service::Request>();req->run_id=inputs_->run;req->epoch=epoch;req->operation=op;
     static std::atomic<std::uint64_t> count{0};
     req->operation_id=inputs_->run+":"+std::to_string(steady())+":"+std::to_string(++count);
-    auto f=inputs_->client->async_send_request(req);request_id_=f.request_id;future_=f.future.share();pending_=true;
+    pending_=true;request_registered_=false;
+    try {
+      auto f=inputs_->client->async_send_request(req);request_id_=f.request_id;future_=f.future.share();
+      request_registered_=true;return true;
+    } catch (const std::exception & error) {
+      // rcl_send_request can precede a local bookkeeping exception. Lack of
+      // a returned request id never proves that the remote did not receive it.
+      inputs_->last_exception=error.what();fail(OwnershipUnknown,"handoff_send_exception");return false;
+    }
   }
-  void cancelPending() {if (pending_ && inputs_) {inputs_->client->remove_pending_request(request_id_);pending_=false;}}
-  bool release_,pending_=false,acquired_=false,inspected_=false;
+  void cancelPending() {
+    if (pending_ && request_registered_ && inputs_) {inputs_->client->remove_pending_request(request_id_);}
+    pending_=false;request_registered_=false;
+  }
+  bool release_,pending_=false,request_registered_=false,acquired_=false,inspected_=false,completed_=false;
+  std::uint64_t phase_token_=0;
   std::int64_t started_=0,stable_=0,request_id_=0;
   const char * phase_="NOT_STARTED";
   std::int64_t last_diagnostic_=0;
@@ -479,6 +654,37 @@ private:
 class ReleaseNode : public StopNode {
 public:
   ReleaseNode(const std::string & n,const BT::NodeConfig & c):StopNode(n,c,true) {}
+};
+
+// Own map polling across the successful Wait -> planner -> Validate sequence.
+// A completed Wait is no longer RUNNING when a planner is halted or fails.
+class StoppedReplanScope : public BT::DecoratorNode {
+public:
+  using BT::DecoratorNode::DecoratorNode;
+  static BT::PortsList providedPorts() {return {};}
+  BT::NodeStatus tick() override {
+    if (status()==BT::NodeStatus::IDLE) {phase_=0;inputs_.reset();}
+    setStatus(BT::NodeStatus::RUNNING);
+    BT::NodeStatus result;
+    try {result=child_node_->executeTick();}
+    catch (...) {capture();finish();throw;}
+    capture();
+    if (result!=BT::NodeStatus::RUNNING) {finish();resetChild();}
+    return result;
+  }
+  void halt() override {finish();BT::DecoratorNode::halt();}
+private:
+  void capture() {
+    if (phase_) {return;}
+    if (!config().blackboard->get("matrix_stop_inputs",inputs_) || !inputs_) {return;}
+    std::lock_guard<std::mutex> guard(inputs_->mutex);phase_=inputs_->map_phase;
+  }
+  void finish() {
+    if (!inputs_ || !phase_) {return;}
+    std::lock_guard<std::mutex> guard(inputs_->mutex);inputs_->endMapPhase(phase_);
+  }
+  std::shared_ptr<Inputs> inputs_;
+  std::uint64_t phase_=0;
 };
 
 class BeginStoppedReplanAttempt : public BT::SyncActionNode {
@@ -517,6 +723,7 @@ public:
 };
 }
 BT_REGISTER_NODES(factory) {
+  factory.registerNodeType<matrix_recovery_bt::StoppedReplanScope>("StoppedReplanScope");
   factory.registerNodeType<matrix_recovery_bt::BeginStoppedReplanAttempt>("BeginStoppedReplanAttempt");
   factory.registerNodeType<matrix_recovery_bt::WouldAStoppedPlanRecoveryHelp>("WouldAStoppedPlanRecoveryHelp");
   factory.registerNodeType<matrix_recovery_bt::StopNode>("WaitForStoppedAndHealthy");

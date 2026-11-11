@@ -5,7 +5,8 @@ import queue
 import threading
 import time
 
-from mission_state import MissionStore, Hold, remaining_state, check_identity_state
+from mission_state import (MissionStore, Hold, remaining_state, check_identity_state,
+                           mission_guard_state, boot_clock)
 
 
 class StorageWorker:
@@ -13,7 +14,10 @@ class StorageWorker:
         'finish_attempt','record_not_sent','export','import_closed','flush_state_read_timing'))
 
     def __init__(self,path,resource=None,*,factory=MissionStore):
-        self.pump=None;self.busy=False;self._closed=False;self._state=None;self._sink=None
+        self.pump=None;self.busy=False;self._closed=False;self._state=None;self._guard=None;self._sink=None
+        # A live process cannot survive a system reboot. Cache that identity
+        # before ROS starts; decision-time remaining() only samples BOOTTIME.
+        self._boot_id=boot_clock()[0]
         self.timing_drops=0;self._jobs=queue.Queue(maxsize=1);self._timings=queue.Queue(maxsize=256)
         self._owner=threading.get_ident();self._sequence=0;self._ready=Future()
         self._closed_result=Future()
@@ -81,7 +85,10 @@ class StorageWorker:
                     try:future.result(timeout=.002)
                     except TimeoutError:pass
             result,state,error,drops,observation=future.result()
-            self._state=state;self.timing_drops=max(self.timing_drops,drops);self._drain_timing()
+            guard=None if state is None else mission_guard_state(state)
+            # Main-thread publication, without a pump between these assignments.
+            self._state,self._guard=state,guard
+            self.timing_drops=max(self.timing_drops,drops);self._drain_timing()
             if self._sink is not None:
                 try:self._sink(dict(stage='storage_job',success=error is None,**observation))
                 except Exception:self.timing_drops+=1
@@ -105,7 +112,12 @@ class StorageWorker:
     def state(self):
         return copy.deepcopy(self._committed_state())
 
-    def remaining(self):return remaining_state(self._committed_state())
+    def guard_state(self):
+        self._committed_state()
+        return copy.deepcopy(self._guard)
+
+    def remaining(self):return remaining_state(self._committed_state(),boot=self._boot_id,
+        now=time.clock_gettime(time.CLOCK_BOOTTIME))
     def check_identity(self,identity):return check_identity_state(self._committed_state(),identity)
 
     @property

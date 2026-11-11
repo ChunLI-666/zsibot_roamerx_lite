@@ -77,14 +77,14 @@ class Session:
         prefix = [copy.deepcopy(r['visit']) for r in self.store.state()['progress']['accepted_receipts']]
         return OrderedVisits(route, start_index=self.start_index, accepted_visits=prefix, advancing_stop=True)
 
-    def validate_ready(self, ready):
+    def validate_ready(self, ready, *, require_budget=True):
         capability = ready.get('waypoint_contract', {}).get('mission_resume', {})
         if capability.get('schema') != 'matrix.mission.resume_capability.v1' or not ready.get('recovery_runtime', {}).get('verified'):
             raise Hold('Runtime lacks verified measured-stop/mission resume capability')
         expected = {name:digest((HERE/name).read_bytes()) for name in CLIENT_SOURCES}
         if capability.get('client_sources_sha256') != expected:
             raise Hold('Loaded mission client differs from runtime source binding')
-        state=self.store.state()
+        state=(self.store.guard_state() if hasattr(self.store,'guard_state') else self.store.state())
         if capability.get('bt_retries')!=state['policy']['bt_retries']:
             raise Hold('Runtime BT retry limit differs from mission policy')
         actual=ready.get('mission_identity',{})
@@ -92,7 +92,7 @@ class Session:
         check_identity_state(state,actual)
         if ready.get('variant') != state['variant']:
             raise Hold('Runtime variant differs from mission')
-        if remaining_state(state) < 1:
+        if require_budget and remaining_state(state) < 1:
             raise Hold('FAILED_BUDGET: mission deadline expired')
 
     def reserve(self):
@@ -199,7 +199,7 @@ def run_attempt(args, store, output, reconcile=False):
         while time.monotonic()<until:
             rclpy.spin_once(node,timeout_sec=.02)
             try:
-                node.execution_ready()
+                node.execution_ready(phase='settle')
                 ownership=node.latest_ready.get('waypoint_ownership',{})
                 children=(not ownership.get('navigate_to_pose_active') and not ownership.get('follow_waypoints_active')
                     and not ownership.get('follow_path_active') and ownership.get('follow_path_status_publishers_match') is True

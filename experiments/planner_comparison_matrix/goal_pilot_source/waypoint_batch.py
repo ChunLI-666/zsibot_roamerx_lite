@@ -149,6 +149,7 @@ class WaypointPilot(frozen.Pilot):
         self.producer_scan_failure_reads=[]
         self.plan_raw_parse_errors=0;self.plan_raw_last_error=None
         self.runtime_last_pump=None;self.runtime_last_ready_check_ns=None
+        self._stop_sample_previous={};self._stop_callback_resets=0
         super().__init__(args, output)
         # Base opens this handle but all batch events use the asynchronous writer.
         self.events.close()
@@ -177,7 +178,8 @@ class WaypointPilot(frozen.Pilot):
     def remember(self, key, value):
         remembered=super().remember(key,value)
         dwell=getattr(self,'_stop_dwell',None)
-        if dwell is not None and key in ('odom','/cmd_vel_safe','loc_status','pose_valid'):
+        ordered=getattr(self,'ordered',None)
+        if (dwell is not None or ordered is not None) and key in ('odom','/cmd_vel_safe','loc_status','pose_valid'):
             # A short delivered moving sample between health checks must break
             # the stop history even when the last value is zero again. This is
             # invalidation only: no callback can grant stop or refresh an age.
@@ -198,7 +200,9 @@ class WaypointPilot(frozen.Pilot):
                     bad=True
                 self._stop_sample_previous[key]=source
             if bad:
-                dwell.reset();self._stop_callback_resets+=1
+                if dwell is not None:dwell.reset()
+                if ordered is not None:ordered.invalidate_stop()
+                self._stop_callback_resets+=1
         return remembered
 
     def publish_serialized_event(self, line):
@@ -257,7 +261,7 @@ class WaypointPilot(frozen.Pilot):
             raw_quaternion=orientation, raw_pose_values_finite=all(math.isfinite(value) for value in
                                                                [*position.values(), *orientation.values()])))
 
-    def execution_ready(self, require_stopped=False):
+    def execution_ready(self, require_stopped=False, *, phase='active'):
         self.check_interruption()
         entered_unix_ns, entered_steady_ns = time.time_ns(), time.monotonic_ns()
         valid, issues, snapshot = self.input_ready(require_camera=True, require_stopped=require_stopped)
@@ -311,7 +315,7 @@ class WaypointPilot(frozen.Pilot):
                 readiness_stage = 'waypoint_binding'
                 native = waypoint_binding(self.latest_ready, self.native_binding)
                 if getattr(self, 'mission', None) is not None:
-                    self.mission.validate_ready(self.latest_ready)
+                    self.mission.validate_ready(self.latest_ready,require_budget=phase!='settle')
                 readiness_stage, ownership_checked_now_ns = 'validate_ownership', time.time_ns()
                 metadata_deviation = ownership_metadata_lease_deviation(
                     self.latest_ready, ownership_checked_now_ns, self.ownership_metadata_reported_check_ns)
@@ -365,8 +369,11 @@ class WaypointPilot(frozen.Pilot):
                     producer_evidence_ready=candidate
                     producer_evidence_context='failed_original_READY_raw_strict_evidence_only_never_health'
                 except (ValueError,TypeError,KeyError):pass
-        return record_scan_timing_health(self,require_stopped,issues,snapshot,entered_unix_ns,entered_steady_ns,
+        _,issues,_=record_scan_timing_health(self,require_stopped,issues,snapshot,entered_unix_ns,entered_steady_ns,
             producer_evidence_ready,producer_evidence_context)
+        # Full READY/source/mission verification may be slow. All consumers
+        # receive ages sampled after that work, including active/storage waits.
+        return self.decision_ready(issues,require_stopped=require_stopped,phase=phase)
 
     def producer_scan_confirmation_failure(self,issues,snapshot):
         topic=getattr(self.args,'scan_topic','/laser_scan_leveled')
@@ -506,15 +513,20 @@ class WaypointPilot(frozen.Pilot):
                     for key in set(before)|set(self.counts) if self.counts.get(key,0)!=before.get(key,0)})
         return self.stop_last_pump
 
-    def stop_decision_ready(self, prior_issues=()):
+    def decision_ready(self, prior_issues=(), require_stopped=False, *, phase='active'):
         """Re-age original caches and the already-read lease after full validation.
 
         This runs on the same executor thread without spinning, file I/O or a
-        mission-state read. Camera health retains its preflight-only policy.
+        history read. Camera health retains its preflight-only policy.
         """
         entered_unix_ns,entered_steady_ns=time.time_ns(),time.monotonic_ns()
-        _,issues,snapshot=self.input_ready(require_camera=self.goal_sent_ns is None)
+        _,issues,snapshot=self.input_ready(require_camera=self.goal_sent_ns is None,require_stopped=require_stopped)
         issues=list(dict.fromkeys(list(prior_issues)+issues));bounds=None;ready=None
+        if require_stopped:
+            stopped,stop_issues=strict_stopped(snapshot)
+            if not stopped:issues.extend(stop_issues)
+        if phase!='settle' and getattr(self,'mission',None) is not None and self.mission.store.remaining()<1:
+            issues.append('readiness:FAILED_BUDGET: mission deadline expired')
         if self.args.execute:
             ready=getattr(self,'latest_ready',{})
             now=time.time_ns();issued=ready.get('time_ns',0);expiry=ready.get('valid_until_ns',0)
@@ -532,9 +544,18 @@ class WaypointPilot(frozen.Pilot):
                             or max(bounds['header_age_bounds_s'])>.5 or max(bounds['receive_age_bounds_s'])>.5):
                         raise ValueError('scan:producer_observation_outside_simulation_bound')
             except ValueError as error:issues.append('readiness:'+str(error))
-        return record_scan_timing_health(self,False,issues,snapshot,entered_unix_ns,entered_steady_ns,
+        result=record_scan_timing_health(self,require_stopped,list(dict.fromkeys(issues)),snapshot,entered_unix_ns,entered_steady_ns,
             ready if bounds is not None else None,
-            'same_cached_READY_reaged_at_stop_decision' if bounds is not None else None,producer_bounds=bounds)
+            'same_cached_READY_reaged_at_decision' if bounds is not None else None,producer_bounds=bounds)
+        if not result[0]:
+            ordered=getattr(self,'ordered',None)
+            if ordered is not None:ordered.invalidate_stop()
+            dwell=getattr(self,'_stop_dwell',None)
+            if dwell is not None:dwell.reset()
+        return result
+
+    def stop_decision_ready(self, prior_issues=()):
+        return self.decision_ready(prior_issues,phase='settle')
 
     def wait_settled(self, seconds):
         """One full health read per batch, then unchanged advancing-Odom stop."""
@@ -547,13 +568,10 @@ class WaypointPilot(frozen.Pilot):
                 pump=self.pump_stop_inputs(deadline)
                 if time.monotonic_ns()>=deadline:break
                 checked=time.monotonic_ns();cpu=time.thread_time_ns()
-                # One full READY/state validation, then a cheap current-clock
-                # check of the same original caches/lease before stop accrual.
-                healthy,issues,snapshot=self.execution_ready()
+                # The shared interface includes its final current-clock check.
+                healthy,issues,snapshot=self.execution_ready(phase='settle')
                 full_health_finished=time.monotonic_ns()
                 full_odom_age=snapshot.get('last',{}).get('odom',{}).get('header_age_s')
-                current,age_issues,snapshot=self.stop_decision_ready(issues)
-                healthy=healthy and current;issues=list(dict.fromkeys(issues+age_issues))
                 if not healthy:self.invalidate_artifact(issues)
                 finished=time.monotonic_ns();checks+=1
                 qualified=dwell.observe(snapshot,finished,healthy)
@@ -828,8 +846,9 @@ class WaypointPilot(frozen.Pilot):
             if not valid:return dict(classification='invalid_post_intent_preflight_not_sent',issues=issues,snapshot=snapshot)
         request = FollowWaypoints.Goal()
         try:
+            launcher_boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip()
             budget = mission_budget(self.latest_ready,self.args.timeout,time.clock_gettime(time.CLOCK_BOOTTIME),
-                                    Path('/proc/sys/kernel/random/boot_id').read_text().strip())
+                                    launcher_boot_id)
         except ValueError as exc:
             return dict(classification='invalid_recording_deadline_budget_goal_not_sent',reason=str(exc))
         request.number_of_loops, request.goal_index = 0, start_index
@@ -842,17 +861,29 @@ class WaypointPilot(frozen.Pilot):
             pose.pose.orientation.z = math.sin(entry['pose'][2]/2.)
             pose.pose.orientation.w = math.cos(entry['pose'][2]/2.)
             request.poses.append(pose)
-        self.owned_identity = OwnedGoalIdentity(requested_uuid.bytes)
-        self.goal_uuid = UUID(uuid=list(requested_uuid.bytes))
-        self.goal_sent_steady, self.goal_sent_ns = time.monotonic(), time.time_ns()
-        self.emit('goal_send', action_uuid=str(requested_uuid), action_server=ACTION,
+        owned_identity=OwnedGoalIdentity(requested_uuid.bytes)
+        goal_uuid=UUID(uuid=list(requested_uuid.bytes))
+        send_event=dict(action_uuid=str(requested_uuid), action_server=ACTION,
                   number_of_loops=0, goal_index=start_index, requested_route_map=self.route, start_snapshot=snapshot,
                   readiness_manifest=self.latest_ready, readiness_manifest_sha256=self.latest_ready_sha,
                   preregistered_budget=budget,
                   pose_header_stamps_ns=[frozen.stamp_ns(pose.header.stamp) for pose in request.poses])
         self.check_interruption()
+        budget_issues=[]
+        try:
+            mission_budget(self.latest_ready,self.args.timeout,time.clock_gettime(time.CLOCK_BOOTTIME),
+                launcher_boot_id)
+        except ValueError as exc:budget_issues.append('readiness:'+str(exc))
+        valid,issues,snapshot=self.decision_ready(budget_issues,require_stopped=True)
+        if time.monotonic()>=deadline:issues.append('final_dispatch_preflight_deadline')
+        if not valid or issues:
+            return dict(classification='invalid_dispatch_decision_not_sent',issues=issues,snapshot=snapshot)
+        self.owned_identity,self.goal_uuid=owned_identity,goal_uuid
+        self.goal_sent_steady,self.goal_sent_ns=time.monotonic(),time.time_ns()
         if getattr(self,'mission',None) is not None:self.mission.send_invoked=True
         sent = client.send_goal_async(request, goal_uuid=self.goal_uuid, feedback_callback=self.native_feedback)
+        send_event['start_snapshot']=snapshot
+        self.emit('goal_send',**send_event)
         if not self.spin_until(sent.done, 10.):
             return dict(classification='goal_response_timeout_acceptance_unknown')
         self.action_goal_handle = sent.result()
