@@ -215,3 +215,16 @@ TEST(P1StopHold, CallbackContinuityRevocationRetainsHoldAndRestartsBothOriginalD
   EXPECT_EQ(sample(1699999999,2700000000),H::Action::HoldZero);
   EXPECT_EQ(sample(1700000000,2700000000),H::Action::Ready);
 }
+
+
+TEST(P2StopHold, InnerAimIsOnlyAnEntryGateAndDoesNotReplaceOriginalToleranceOrAdvancingDwell) {
+  using Hold=goal_region::TerminalStopHold;using A=Hold::Action;Hold h;
+  EXPECT_EQ(h.observe(1,true,true,true,true,1000000000,2000000000,false),A::Track);
+  EXPECT_FALSE(h.holding());
+  EXPECT_EQ(h.observe(1,true,true,true,true,1050000000,2050000000,true),A::HoldZero);
+  EXPECT_EQ(h.observe(1,true,true,true,true,1100000000,2100000000,false),A::HoldZero);
+  EXPECT_EQ(h.observe(1,true,true,true,true,1399999999,2399999999,false),A::HoldZero);
+  EXPECT_EQ(h.observe(1,true,true,true,true,1400000000,2400000000,false),A::Ready);
+  EXPECT_EQ(h.observe(2,false,true,true,true,1450000000,2450000000,true),A::Track);
+  EXPECT_FALSE(h.holding());
+}

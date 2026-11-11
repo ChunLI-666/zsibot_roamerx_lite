@@ -39,6 +39,13 @@ public:
     resetReentry();
   }
   bool reentryRequired() const {return reentry_;}
+  void invalidateStopContinuity() {resetDwell();last_observation_=0;}
+  // Revoke an uncommitted stop permission without granting a new pivot or
+  // changing any already consumed heading. Only the control thread calls this.
+  void restoreReentryObligation(bool consumed_reentry=false) {
+    if (enabled()&&has_goal_&&(admitted_||reentry_||
+      (consumed_reentry&&admitted_tolerance_>0.))) {reentry_=true;resetReentry();}
+  }
   // Call only AFTER a checked zero has actually been selected for return.
   void checkedZero(std::int64_t odom_stamp,std::int64_t steady_ns) {
     if (reentry_&&!zero_&&odom_stamp>0&&steady_ns>0) {

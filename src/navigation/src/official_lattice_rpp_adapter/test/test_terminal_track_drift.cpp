@@ -160,3 +160,14 @@ TEST(TerminalTrackDrift, CenteredTurnsPreserveOriginalDiscWithoutGrantingOutside
   EXPECT_FALSE(edge.permits(1,.191,0.,.15,true,false));
   EXPECT_FALSE(edge.permits(1,.18,0.,.15,false,false));
 }
+
+
+TEST(P2TrackReentry, RevokedConsumedPermissionRestoresOriginalDwellWithoutInventingUnadmittedDebt) {
+  Guard ordinary(.05);ordinary.setPlan(goal(),1);ordinary.restoreReentryObligation(true);
+  EXPECT_FALSE(ordinary.reentryRequired());ordinary.setPlan(goal(),2);EXPECT_FALSE(ordinary.reentryRequired());
+  Guard g(.05);replan(g);observe(g,0);observe(g,50);ASSERT_EQ(observe(g,350),Reentry::Proceed);
+  ASSERT_FALSE(g.reentryRequired());g.restoreReentryObligation(true);ASSERT_TRUE(g.reentryRequired());
+  EXPECT_FALSE(g.admit(2,.14,0.,.15));EXPECT_EQ(observe(g,400),Reentry::HoldZero);
+  EXPECT_EQ(observe(g,450),Reentry::HoldZero);EXPECT_EQ(observe(g,749),Reentry::HoldZero);
+  EXPECT_EQ(observe(g,750),Reentry::Proceed);ASSERT_TRUE(g.admit(2,.14,0.,.15));
+}

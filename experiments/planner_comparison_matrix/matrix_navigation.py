@@ -409,6 +409,11 @@ def simulation_scan_latency_profile(max_age=.3):
 
 
 def prepare(args):
+    terminal_aim=getattr(args,'terminal_rotation_aim_yaw_tolerance',0.)
+    if terminal_aim not in (0.,.03) or terminal_aim>args.yaw_tolerance:
+        raise ValueError('Terminal aim must be disabled or the explicit .03rad candidate within the original yaw tolerance')
+    if terminal_aim and args.variant!='official':
+        raise ValueError('Terminal inner aim is only an explicit official-Lattice experiment')
     waypoint_binding=waypoint_runtime.artifacts(getattr(args,'waypoint_install',None),
       getattr(args,'waypoint_build_receipt',None),NAV) if args.with_waypoints else None
     scan_profile=simulation_scan_latency_profile(getattr(args,'simulation_scan_max_age_sec',.3))
@@ -503,8 +508,9 @@ def prepare(args):
             entry_xy=min(.05,args.xy_tolerance)
             controller['FollowPath'].update(terminal_goal_binding=True,terminal_global_resolution=.01,
                 terminal_global_extent=20.,initial_goal_region_shortcut=True,
-                initial_goal_region_max_xy_error=entry_xy,terminal_track_xy_drift_limit=.05,
-                terminal_rotation_entry_xy_tolerance=entry_xy)
+                initial_goal_region_max_xy_error=args.xy_tolerance,terminal_track_xy_drift_limit=.05,
+                terminal_rotation_entry_xy_tolerance=entry_xy,terminal_original_region_pivot=True,
+                terminal_rotation_aim_yaw_tolerance=terminal_aim)
             controller['FollowPath']['terminal_stop_before_rotation']=True
             controller['FollowPath']['terminal_early_braking_min_linear_velocity']=.30
             controller['FollowPath']['rpp'].update(lookahead_dist=.75,min_lookahead_dist=.75,max_lookahead_dist=.75,use_velocity_scaled_lookahead_dist=False,rotate_to_heading_angular_vel=.3)
@@ -514,14 +520,23 @@ def prepare(args):
                 full_stop_linear_mps=.03,full_stop_angular_radps=.05,
                 min_approach_linear_mps=rpp['min_approach_linear_velocity'],
                 approach_velocity_scaling_dist_m=rpp['approach_velocity_scaling_dist'],
-                boundary='Only the early-braking speed threshold changes; RPP speed floors and SDK motion threshold are unchanged. SIM and physical acceptance remain unproven.')
+                boundary='Simulation candidate: RPP speed floors and external velocity mapping are unchanged. SIM and physical acceptance remain unproven.')
+            manifest['terminal_zero_aim']=dict(enabled=bool(terminal_aim),entry_yaw_rad=terminal_aim,
+                original_acceptance_yaw_rad=args.yaw_tolerance,default_disabled=True,
+                anchor='Fresh original body pose at the first selected terminal hold zero; not child completion or visit passed.',
+                prior_short_window_raw_zero_tail_max_rad=.040807250,
+                extended_observed_window_max_abs_native_yaw_change_rad=.111090,
+                stopping_envelope_validated=False,
+                evidence='Source17 d8296dd: prior three short intervals are not a tail bound; the final observed zero interval extends about40.64s. Inner aim is an opt-in experiment and has not resolved the tail source.',
+                boundary='No general or physical stopping envelope. No .03+.040807 acceptance-margin claim. Original final yaw and advancing-stop gates remain unchanged.')
             manifest['terminal_track_execution_envelope']=dict(enabled=True,pivot_displacement_limit_m=.05,baseline_original_region_preserved=True,
-                original_goal_outer_m=args.xy_tolerance+.05,original_mandatory_track_only=True,admission_scope='initial_goal_shortcut_after_measured_stop',initial_shortcut_max_xy_error_m=entry_xy,
+                original_goal_outer_m=args.xy_tolerance+.05,original_mandatory_track_only=True,admission_scope='fresh_unstarted_goal_shortcut_after_measured_stop',initial_shortcut_max_xy_error_m=args.xy_tolerance,
                 final_goal_tolerances_unchanged=True,continuous_collision_tube_certified=False,
                 same_goal_replan='checked zero then original-region .3s measured stop before new admission')
             manifest['terminal_rotation_entry']=dict(xy_tolerance_m=entry_xy,
                 original_goal_acceptance_xy_m=args.xy_tolerance,goal_cell_error_subtracted_from_final_RPP_trigger=True,
-                applies_to=['initial_shortcut','ordered_terminal_handoff','final_prefix_RPP_trigger'],
+                applies_to=['ordered_terminal_handoff','final_prefix_RPP_trigger'],
+                original_region_pivots=['fresh_unstarted_initial_opt_in','completed_stopped_small_yaw_correction'],
                 nonterminal_handler_and_RPP_tolerances_unchanged=True,
                 evidence='B33 F013 actual pivots were .12825m and .14915m from the original goal before pure rotation; new inner entry is a simulation candidate, not runtime acceptance')
             manifest['terminal_goal_binding']=dict(enabled=True,global_resolution=.01,global_extent=20.,
@@ -1209,6 +1224,8 @@ def main():
     p.add_argument('--official-install');p.add_argument('--segmented-install')
     p.add_argument('--rotate-threshold',type=float,help='Explicit RPP heading threshold override; otherwise frozen template value')
     p.add_argument('--xy-tolerance',type=float,default=.15);p.add_argument('--yaw-tolerance',type=float,default=.08)
+    p.add_argument('--terminal-rotation-aim-yaw-tolerance',type=float,choices=[0.,.03],default=0.,
+      help='Explicit official-Lattice inner-aim experiment; default disabled, does not change original acceptance or prove a stopping envelope')
     p.add_argument('--build-receipt');p.add_argument('--message-install');p.add_argument('--preflight-timeout',type=float,default=30.);p.add_argument('--run',action='store_true')
     p.add_argument('--lifecycle-install',help='Optional isolated lifecycle executable/core pair, shared by all variants')
     p.add_argument('--lifecycle-build-receipt',help='Exact lifecycle artifact receipt; required with --lifecycle-install')

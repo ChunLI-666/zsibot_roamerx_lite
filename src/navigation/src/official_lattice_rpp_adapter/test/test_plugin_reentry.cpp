@@ -18,6 +18,7 @@
 #include <atomic>
 #include <future>
 #include <limits>
+#include <fstream>
 #include <new>
 #include <rcl/time.h>
 #include "fixtures/b34_terminal_approaches.hpp"
@@ -839,5 +840,91 @@ TEST_F(FastOnlyBraking, CenteredFirstTurnStillNeedsOriginalFullMeasuredStop) {
   EXPECT_DOUBLE_EQ(stopped.twist.linear.x,0.);EXPECT_GT(std::abs(stopped.twist.angular.z),0.);
   auto active=command(.10);
   EXPECT_DOUBLE_EQ(active.twist.linear.x,0.);EXPECT_GT(std::abs(active.twist.angular.z),0.);
+}
+
+
+// P2 software protocol cases use the real plugin and its real delivered DDS
+// callback. They do not replay Source17 or infer a physical stopping envelope.
+class P2DeliveredReentry : public P1DeliveredStop {};
+TEST_F(P2DeliveredReentry, ContinuousFreshReentrySamplesRemainUsableUntilReady) {
+  establishReady();controller_->reset();controller_->setPlan(plan(.02));checker_->reset();
+  ASSERT_TRUE(healthyFor(950ms));ASSERT_TRUE(check());
+  std::ifstream maps("/proc/self/maps");std::string line,mapping;
+  while(std::getline(maps,line))if(line.find("libnav2_regulated_pure_pursuit_controller.so")!=std::string::npos)mapping=line;
+  ASSERT_FALSE(mapping.empty());RecordProperty("actual_rpp_mapping",mapping);
+}
+TEST_F(P2DeliveredReentry, SameTickPulseCannotConsumeReentryAndHealthyOriginalDwellRecovers) {
+  establishReady();controller_->reset();controller_->setPlan(plan(.02));checker_->reset();
+  deliver(message());tick();ASSERT_FALSE(check());
+  healthyFor(275ms,true);
+  const auto until=std::chrono::steady_clock::now()+80ms;
+  while(std::chrono::steady_clock::now()<until){deliver(message());std::this_thread::sleep_for(2ms);}
+  p1_allocation_fixture::Barrier barrier(76u*76u*sizeof(std::uint32_t));const auto input=current_pose_;
+  auto computed=std::async(std::launch::async,[&]{p1_allocation_fixture::TargetThread target;
+    return controller_->computeVelocityCommands(input,geometry_msgs::msg::Twist{},checker_.get());});
+  const bool injected=barrier.wait();const auto before=callbacks_;
+  if(injected){deliver(message(0.,.08));deliver(message());}
+  barrier.release();geometry_msgs::msg::TwistStamped value;ASSERT_NO_THROW(value=computed.get());
+  ASSERT_TRUE(injected);ASSERT_FALSE(p1_allocation_fixture::timed_out);ASSERT_EQ(callbacks_-before,2u);
+  EXPECT_DOUBLE_EQ(value.twist.linear.x,0.);EXPECT_DOUBLE_EQ(value.twist.angular.z,0.);EXPECT_FALSE(check());
+  healthyFor(275ms,true);ASSERT_TRUE(healthyFor(750ms));ASSERT_TRUE(check());
+  RecordProperty("delivered_pulse_and_stop_callbacks",2);
+}
+class P2OriginalPivot : public StoppedTerminal {
+protected:
+  bool initialShortcut() const override {return true;}
+  void configureExtra() override {StoppedTerminal::configureExtra();
+    node_->declare_parameter("FollowPath.terminal_original_region_pivot",true);}
+  void completed() {publisher_->on_activate();controller_->setPlan(plan(.02));checker_->reset();
+    auto value=command(.02);ASSERT_DOUBLE_EQ(value.twist.linear.x,0.);}
+};
+TEST_F(P2OriginalPivot, CompletedOriginalCursorCanStopAtElevenCentimetresAndSixHundredthsYaw) {
+  completed();bool ready=false;
+  for(int i=0;i<12&&!ready;++i){auto value=commandAt(.11,0.,M_PI-.06);
+    EXPECT_DOUBLE_EQ(value.twist.linear.x,0.);EXPECT_DOUBLE_EQ(value.twist.angular.z,0.);
+    auto current=inputAt(.11,0.,M_PI-.06);ready=checker_->isGoalReached(current.pose,pose(0.).pose,geometry_msgs::msg::Twist{});
+    std::this_thread::sleep_for(50ms);}
+  ASSERT_TRUE(ready);RecordProperty("original_xy",.11);RecordProperty("original_yaw_error",.06);
+  auto fresh=plan(.3); // Same original goal, valid new forward-path generation.
+  controller_->setPlan(fresh);checker_->reset();
+  auto current=inputAt(.11,0.,M_PI-.06);EXPECT_FALSE(checker_->isGoalReached(current.pose,pose(0.).pose,geometry_msgs::msg::Twist{}));
+}
+TEST_F(P2OriginalPivot, ZeroAimStillSweepsTheWholeFreshCompleteCursorRotation) {
+  completed();ASSERT_NO_THROW(commandAt(.11,0.,M_PI-.06));
+  unsigned int mx,my;ASSERT_TRUE(map_->getCostmap()->worldToMap(.90,.67,mx,my));
+  map_->getCostmap()->setCost(mx,my,nav2_costmap_2d::LETHAL_OBSTACLE);
+  try{commandAt(.11,0.,M_PI-.06);FAIL()<<"Fresh original-goal sweep crossed a lethal cell";}
+  catch(const nav2_core::NoValidControl & error){EXPECT_NE(std::string(error.what()).find("complete-cursor goal rotation"),std::string::npos)<<error.what();}
+  EXPECT_FALSE(reached(.11));
+}
+class P2UnfinishedPivot : public P2OriginalPivot {
+protected:bool initialShortcut() const override {return false;}
+};
+TEST_F(P2UnfinishedPivot, NearOriginalGoalCannotSkipUnfinishedMandatoryHeadings) {
+  publisher_->on_activate();auto p=plan(.3);p.poses.insert(p.poses.end()-1,pose(0.,M_PI/2.));
+  p.poses.insert(p.poses.end()-1,pose(0.,M_PI)); // Retain original yaw in the executable prefix.
+  controller_->setPlan(p);checker_->reset();auto value=commandAt(.11,0.,M_PI-.06);
+  EXPECT_GT(value.twist.linear.x,0.);auto current=inputAt(.11,0.,M_PI-.06);
+  EXPECT_FALSE(checker_->isGoalReached(current.pose,pose(0.).pose,geometry_msgs::msg::Twist{}));
+}
+class P2InnerAim : public P2OriginalPivot {
+protected:void configureExtra() override {P2OriginalPivot::configureExtra();
+  node_->declare_parameter("FollowPath.terminal_rotation_aim_yaw_tolerance",.03);}
+};
+TEST_F(P2InnerAim, CrossingAimRetainsBrakingDebtUntilAValidStoppedNewPlan) {
+  publisher_->on_activate();const auto original=plan(.11);controller_->setPlan(original);checker_->reset();
+  auto before=commandAt(.11,0.,M_PI-.06);ASSERT_GT(before.twist.angular.z,0.);
+  auto crossed=commandAt(.11,0.,M_PI+.04,0.,0.,.08);
+  ASSERT_DOUBLE_EQ(crossed.twist.linear.x,0.);ASSERT_DOUBLE_EQ(crossed.twist.angular.z,0.);
+  EXPECT_THROW(controller_->setPlan(original),nav2_core::InvalidPath);
+  for(int i=0;i<2;++i){EXPECT_THROW(commandAt(.11,0.,M_PI+.04),nav2_core::NoValidControl);}
+  nav_msgs::msg::Path invalid;EXPECT_ANY_THROW(controller_->setPlan(invalid));
+  EXPECT_ANY_THROW(commandAt(.11,0.,M_PI+.04));
+  ASSERT_NO_THROW(controller_->setPlan(original));checker_->reset();bool rotated=false;
+  for(int i=0;i<20&&!rotated;++i){geometry_msgs::msg::TwistStamped value;
+    ASSERT_NO_THROW(value=commandAt(.11,0.,M_PI+.04));EXPECT_DOUBLE_EQ(value.twist.linear.x,0.);
+    if(value.twist.angular.z!=0.){EXPECT_LT(value.twist.angular.z,0.);rotated=true;}
+    std::this_thread::sleep_for(50ms);}
+  ASSERT_TRUE(rotated);EXPECT_FALSE(reached(.11));
 }
 }  // namespace

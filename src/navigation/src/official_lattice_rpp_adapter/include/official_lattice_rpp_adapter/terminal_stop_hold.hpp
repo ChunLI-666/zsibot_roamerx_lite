@@ -27,7 +27,7 @@ public:
   void invalidateStopContinuity() {resetDwell();}
   bool holding() const {return holding_;}
   Action observe(std::uint64_t generation,bool ordered_complete,bool in_xy,bool in_yaw,
-    bool measured_stopped,std::int64_t odom_stamp,std::int64_t steady_ns) {
+    bool measured_stopped,std::int64_t odom_stamp,std::int64_t steady_ns,bool entry_aim=true) {
     if (generation!=generation_) {reset();generation_=generation;}
     if (observed_&&(steady_ns<last_observation_steady_ns_||
       steady_ns-last_observation_steady_ns_>kTerminalStopDwellNs)) {resetDwell();}
@@ -35,7 +35,7 @@ public:
     if (!ordered_complete) {holding_=false;resetDwell();return Action::Track;}
     if (!in_xy) {holding_=false;resetDwell();return Action::Outside;}
     if (!holding_) {
-      if (!in_yaw) {return Action::Track;}
+      if (!in_yaw||!entry_aim) {return Action::Track;}
       holding_=true;zero_odom_stamp_=odom_stamp;resetDwell();return Action::HoldZero;
     }
     // The entry sample precedes this client's zero command. It cannot certify
