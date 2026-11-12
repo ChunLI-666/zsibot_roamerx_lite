@@ -1,0 +1,51 @@
+{
+  "schema": "readiness_source_freeze.v3",
+  "state": "SOURCE_ONLY_DEFAULT_HOLD_PENDING_INDEPENDENT_REVIEW",
+  "scope": "READ_ONLY_SIM_IMU_ADAPTER_READINESS_ONLY",
+  "base_v2_manifest_sha256": "b6c4478e65a717c914a1043cda5d0b189ef1d0c83330ad4ca55349d0f02cb4f6",
+  "changed_runtime_files": [
+    "readiness_observer.py"
+  ],
+  "runtime_package_sha256": {
+    "readiness_capture.py": "a0675b7645527858f4ff358bc595cdde11fc31e7e086df18246fcbc4983e6414",
+    "readiness_contract.py": "a55ad731c3416d92a5245a48baeab2ddf333b8a89de8e481655246cbeae132f8",
+    "readiness_observer.py": "1fca6a5739abf33d6034bc6099c6206b77d32be7fd12f1763d5eefb3fbad006c",
+    "readiness_validator.py": "962d16fb5ef44a354f51b308026f7d4c92d5a57f1c0ce50955fd05b5f1bf9418",
+    "owned_recorder.py": "0ad0678232e2abe8911e96f7dac30a112a2b38a1510e380bbac7f01bec167515",
+    "imu_converter.py": "2a63456718fc69fb404114932ec62c8886e297fc9d8ab5767c461de13b89dcbb",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+    "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792"
+  },
+  "runtime_bundle_sha256": "9cbc86bb05dca35a7905b6fd0cc95e640b0eab60f8f9662db2c8b389682802f3",
+  "files_sha256": {
+    "READOUT_v3.txt": "24330aa0fc2a700dcd527bde01ebb6d250b502c3c921d220dbd706b00fd7780b",
+    "actual_backlog_audit_v3.json": "0f89b53b5438332553dc6eb866c62bacd139889502da241fa420c56e8e22cd91",
+    "audit_actual_backlog.py": "fc0e9bad33e5114377ff35517c45950c5aa6301624888ce6cb087af1506adc2d",
+    "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792",
+    "base_v2_manifest.json": "b6c4478e65a717c914a1043cda5d0b189ef1d0c83330ad4ca55349d0f02cb4f6",
+    "config.HOLD.json": "074011848f3719c4b6b20491c5ce558ed16409bdae97b3264ce6ccf51eb6a83d",
+    "fake_load_comparison.json": "701a46bd8aec8f7cc4fd8e7af6e4c6282506315bd1c8e9f3397bf90862828fe7",
+    "fixtures_final_v3.log": "e12a4451e3bcbcd24f303cfe8688d212401b3e5f0005c16d3890817cb8206be0",
+    "fixtures_v3.log": "8b3234c62e0fdd3f50c9ed2828a3f7ddfd71f3275d565676f628c88cdada98a3",
+    "helper_evidence_reuse.json": "cfb98f07628f1b76db2a4963228b73abed41159b0f8dd4b94cffc252c5ef6e8f",
+    "imu_converter.py": "2a63456718fc69fb404114932ec62c8886e297fc9d8ab5767c461de13b89dcbb",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "owned_recorder.py": "0ad0678232e2abe8911e96f7dac30a112a2b38a1510e380bbac7f01bec167515",
+    "readiness_capture.py": "a0675b7645527858f4ff358bc595cdde11fc31e7e086df18246fcbc4983e6414",
+    "readiness_contract.py": "a55ad731c3416d92a5245a48baeab2ddf333b8a89de8e481655246cbeae132f8",
+    "readiness_observer.py": "1fca6a5739abf33d6034bc6099c6206b77d32be7fd12f1763d5eefb3fbad006c",
+    "readiness_validator.py": "962d16fb5ef44a354f51b308026f7d4c92d5a57f1c0ce50955fd05b5f1bf9418",
+    "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+    "root_release.HOLD.json": "755100447f5708c7077748f54875d4955b2415148b766ee5e4db19b274f5419b",
+    "root_replacement_evidence.json": "2f92003d68310eb8ad989f9b8f3268006e9e7cdd8f710c491cbe570488fbefa9",
+    "runtime_bundle_v3.tar": "9cbc86bb05dca35a7905b6fd0cc95e640b0eab60f8f9662db2c8b389682802f3",
+    "runtime_inventory_v3.json": "9ccc3613d4b9b2c76a70d5925676354a140e34e6e59624d7b52bea7703d918f5",
+    "sensor_config.json": "38aab54b3a6ca49570feaaa8e983f4f9bc9ee197060066b186478a70f92ea023",
+    "source_delta_v3.diff": "8c55c2e1dcdacb10be96c239564d60cb4b0707934432fa2286adacee491a2ac1",
+    "test_bounded_spin.py": "1bc5cc16ff921fda40e9c9ffcbcc9b1b5929e4ce77fc384f0b74925d333d6db4",
+    "verification_v3.json": "5930a5c733ba944df40e8b4176b6f85fff9aa541a647fbb477583e96fb7ef72b"
+  },
+  "real_runtime_actions": false,
+  "canonical_modified": false
+}

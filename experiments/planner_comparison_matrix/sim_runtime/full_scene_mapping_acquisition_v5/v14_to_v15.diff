@@ -1,0 +1,129 @@
+--- source14/full_scene_mapping.py
++++ source15/full_scene_mapping.py
+@@ -64,6 +64,7 @@
+ 
+ def validate_release(release,route,route_path,oracle_path,output):
+     prearm_requalification_enabled(release)
++    contract.sim_endpoint_from_release(release)
+     if release.get('scope')!=contract.SCOPE or release.get('mode')!=contract.MODE or release.get('allow_execute') is not True:
+         raise contract.Hold('root release absent or not executable')
+     contract.validate_fine_route(release,route)
+@@ -135,10 +136,13 @@
+         self.process=None;self.pidfd=None;self.identity=None;self.output=output;self.command=(0.,0.,0.);self.run_id=run_id;self.close_errors=[]
+         source=HERE/'mapping_lateral_relay.py';self.frozen=output/'mapping_lateral_relay_frozen.py';shutil.copy2(source,self.frozen)
+         shutil.copy2(HERE/'lateral_capability.py',output/'lateral_capability.py')
++        shutil.copy2(HERE/'full_scene_mapping_contract.py',output/'full_scene_mapping_contract.py')
++        self.sim_command_endpoint=contract.sim_endpoint_from_release(contract.read_json(root_release))
++        self.expected_ready='MAPPING_LATERAL_RELAY_RECT_V5_READY '+self.sim_command_endpoint['ipv4']+':'+str(self.sim_command_endpoint['port'])
+         self.fine_forward_profile=lateral_capability.fine_profile_from_release(contract.read_json(root_release))
+         self.admission_path=output/'relay_admission.json'
+         contract.claim_once(self.admission_path,dict(root_release_path=str(root_release.resolve()),root_release_sha256=contract.sha(root_release),
+-            owner_identity=owner_identity,motion_model=model,fine_forward_profile=self.fine_forward_profile))
++            owner_identity=owner_identity,motion_model=model,fine_forward_profile=self.fine_forward_profile,sim_command_endpoint=self.sim_command_endpoint))
+         self.argv=[sys.executable,'-I',str(self.frozen),'--execute','--admission',str(self.admission_path),'--admission-sha256',contract.sha(self.admission_path)]
+         self.source_sha256=contract.sha(self.frozen)
+         self.log=(output/'relay.stderr').open('w')
+@@ -164,7 +168,7 @@
+                 line+=chunk
+                 if len(line)>4096:raise contract.Hold('owned relay readiness line exceeded bound')
+                 if b'\n' in line:
+-                    if line.split(b'\n',1)[0].strip()!=b'MAPPING_LATERAL_RELAY_RECT_V5_READY 127.0.0.1:7447':raise contract.Hold('owned relay did not acknowledge readiness')
++                    if line.split(b'\n',1)[0].strip()!=getattr(self,'expected_ready','MAPPING_LATERAL_RELAY_RECT_V5_READY 127.0.0.1:7447').encode():raise contract.Hold('owned relay did not acknowledge readiness')
+                     break
+             # Immediately retained pidfd binds the Popen child. Wait for the
+             # immutable child's post-exec READY before sampling argv/identity.
+@@ -508,7 +512,7 @@
+           actual_truth_age_cap_sec=contract.truth_age_limit(model),lateral_magnitude=contract.MAX_LATERAL_RAW,
+           scene_identity_basis='root external host attestation; no direct host UE monitoring',controller_pid_namespace=release['controller_pid_namespace'],scene_identity_proof=release['scene_identity_proof'],
+           checked_unix_ns=time.time_ns(),checked_steady_ns=time.monotonic_ns(),boundary='Preflight evidence only; no additional motion permission.'),
+-          prearm_qualification=getattr(getattr(relay,'prearm_qualification',None),'arm_receipt',None))
++          prearm_qualification=getattr(getattr(relay,'prearm_qualification',None),'arm_receipt',None),sim_command_endpoint=getattr(relay,'sim_command_endpoint',None))
+         def rotate_to(target,tolerance=.08,deadline_steady=None,terminal_deadline_steady=None):
+             while True:
+                 if deadline_steady is not None and time.monotonic()>=deadline_steady:raise contract.Hold('bounded heading correction deadline expired')
+--- source14/full_scene_mapping_contract.py
++++ source15/full_scene_mapping_contract.py
+@@ -820,3 +820,35 @@
+         if config is not None and 'fine_forward_mps' in config:fine_command_profile(release,(start,target,policy),config['fine_forward_mps'])
+         start=target
+     return profile
++
++
++SIM_ENDPOINT_SCHEMA='locnav.exact_sim_command_endpoint.v1'
++SIM_UE_ID_KEYS=('pid','starttime_ticks','cmdline_sha256','argv','boot_id')
++
++def sim_endpoint_from_release(release):
++    allow=release.get('allow_sim_host_endpoint',False);value=release.get('sim_command_endpoint')
++    if type(allow) is not bool:raise Hold('SIM endpoint flag must be exact bool')
++    if not allow:
++        if value is not None:raise Hold('nondefault SIM endpoint requires explicit root flag')
++        return dict(schema=SIM_ENDPOINT_SCHEMA,ipv4='127.0.0.1',port=7447,scene_identity_proof_sha256=None,ue_process_identity=None)
++    keys={'schema','ipv4','port','scene_identity_proof_sha256','ue_process_identity'}
++    if (not isinstance(value,dict) or set(value)!=keys or value['schema']!=SIM_ENDPOINT_SCHEMA
++        or value['ipv4']!='192.168.1.219' or type(value['port']) is not int or value['port']!=7447):
++        raise Hold('only exact Root-attested SIM IPv4 192.168.1.219:7447 is supported')
++    scene=release.get('scene_instance_id');proof=release.get('scene_identity_proof',{});identity=value['ue_process_identity'];digest=value['scene_identity_proof_sha256']
++    if (not valid_local_identity(identity) or not isinstance(identity['boot_id'],str) or not identity['boot_id']
++        or not isinstance(scene,dict) or identity!={key:scene.get(key) for key in SIM_UE_ID_KEYS}
++        or not isinstance(digest,str) or len(digest)!=64 or any(ch not in '0123456789abcdef' for ch in digest)
++        or proof.get('mode')!='root_external_host_attestation' or proof.get('evidence_sha256')!=digest
++        or not proof.get('host_pid_namespace') or proof.get('host_pid_namespace')!=scene.get('pid_namespace')):
++        raise Hold('SIM endpoint must bind same Root host-attestation SHA and exact UE5 identity')
++    path=Path(proof.get('evidence_path',''))
++    if not path.is_absolute() or not path.is_file() or sha(path)!=digest or read_json(path)!=scene:
++        raise Hold('SIM endpoint host-attestation file missing/changed or wrong UE scene')
++    return dict(value,ue_process_identity=dict(identity))
++
++
++def sim_endpoint_from_admission(admission,release):
++    expected=sim_endpoint_from_release(release)
++    if admission.get('sim_command_endpoint')!=expected:raise Hold('relay SIM endpoint admission differs from same Root release')
++    return expected
+--- source14/mapping_lateral_relay.py
++++ source15/mapping_lateral_relay.py
+@@ -46,7 +46,9 @@
+         raise ValueError('only exclusive forward+.2/lateral±.4/yaw±.3; no reverse/mixed/micro axes')
+     return dict(version=1,action='walk',forward=f,lateral=l,yaw=y)
+ 
+-def run_loop(sock,stream,ready,clock=time,selector=select.select,parent_live=lambda:True,fine_forward_profile=None):
++def run_loop(sock,stream,ready,clock=time,selector=select.select,parent_live=lambda:True,fine_forward_profile=None,endpoint=('127.0.0.1',7447)):
++    if (type(endpoint) is not tuple or len(endpoint)!=2 or type(endpoint[0]) is not str or type(endpoint[1]) is not int
++        or endpoint not in (('127.0.0.1',7447),('192.168.1.219',7447))):raise ValueError('exact SIM endpoint tuple required')
+     current=ZERO;issued_ns=None;last_valid=None;accepted=0;rejected=0;expired=0;clock_pair=None
+     def clock_check(unix_ns,steady):
+         nonlocal clock_pair
+@@ -72,11 +74,11 @@
+             unix_ns,steady=clock.time_ns(),clock.monotonic();clock_check(unix_ns,steady)
+             if current!=ZERO and (steady-last_valid>=WATCHDOG_SEC or not 0<=unix_ns-issued_ns<PACKET_AGE_NS):
+                 current=ZERO;issued_ns=None;expired+=1
+-            sock.sendto(json.dumps(current,separators=(',',':'),allow_nan=False).encode(),('127.0.0.1',7447))
++            sock.sendto(json.dumps(current,separators=(',',':'),allow_nan=False).encode(),endpoint)
+     finally:
+         # EOF, rejected packet, parent failure and normal SIGINT all retain zero cleanup.
+         try:
+-            for _ in range(5):sock.sendto(json.dumps(ZERO,separators=(',',':')).encode(),('127.0.0.1',7447));clock.sleep(.02)
++            for _ in range(5):sock.sendto(json.dumps(ZERO,separators=(',',':')).encode(),endpoint);clock.sleep(.02)
+         finally:sock.close()
+     return dict(accepted=accepted,rejected=rejected,expired_before_send=expired,stopped_with_zero=True)
+ 
+@@ -98,6 +100,9 @@
+     if marker.get('release_sha256')!=a['root_release_sha256'] or marker.get('output_directory')!=str(path.parent) or marker.get('owner_identity')!=a['owner_identity']:
+         raise ValueError('same once-admitted exact owner missing')
+     if r['sources_sha256']['mapping_lateral_relay.py']!=proof.sha(__file__) or r['sources_sha256']['lateral_capability.py']!=proof.sha(Path(__file__).with_name('lateral_capability.py')):raise ValueError('frozen relay/proof module differs')
++    if r['sources_sha256']['full_scene_mapping_contract.py']!=proof.sha(Path(__file__).with_name('full_scene_mapping_contract.py')):raise ValueError('frozen endpoint contract module differs')
++    import full_scene_mapping_contract as endpoint_contract
++    endpoint_contract.sim_endpoint_from_admission(a,r)
+     admitted=proof.validate_proof(r['lateral_calibration_proof'],r['scene_instance_id'],r['sensor_config_sha256'],r['sensor_adapter_process_identity'])
+     proof.validate_model_evidence(a['motion_model'],admitted)
+     if identity(r['sensor_adapter_process_identity']['pid'])!=r['sensor_adapter_process_identity']:raise ValueError('calibrated adapter changed')
+@@ -113,7 +118,9 @@
+     with os.fdopen(descriptor,'w') as stream:
+         stream.write(json.dumps(dict(admission_sha256=args.admission_sha256,parent=a['owner_identity']))+'\n');stream.flush();os.fsync(stream.fileno())
+     sock=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);sock.settimeout(SOCKET_TIMEOUT_SEC)
+-    result=run_loop(sock,sys.stdin,lambda:print(READY,flush=True),parent_live=lambda:identity(os.getppid())==a['owner_identity'],fine_forward_profile=a.get('fine_forward_profile'))
++    endpoint=(a['sim_command_endpoint']['ipv4'],a['sim_command_endpoint']['port'])
++    ready=READY.rsplit(' ',1)[0]+' '+endpoint[0]+':'+str(endpoint[1])
++    result=run_loop(sock,sys.stdin,lambda:print(ready,flush=True),parent_live=lambda:identity(os.getppid())==a['owner_identity'],fine_forward_profile=a.get('fine_forward_profile'),endpoint=endpoint)
+     print(json.dumps(result),flush=True);return 0
+ 
+ if __name__=='__main__':raise SystemExit(main())

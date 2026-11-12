@@ -1,0 +1,33 @@
+{
+  "schema": "locnav.read_only_sensor_readiness.padding_fix.verification.v2",
+  "state": "PASS_SOURCE_AND_OFFLINE_IMU_CLOSURE_ONLY",
+  "created_utc": "2026-11-06T07:44:01.374451+00:00",
+  "base_v1_manifest_sha256": "6dc228f2c6fe028a0b7169b8c75d81a711f70cfe512a41dc2a3cc04416bf7c6b",
+  "pure_tests": 19,
+  "passed": 19,
+  "failed": 0,
+  "errors": 0,
+  "elapsed_sec": 0.091,
+  "original_static_checks": 29,
+  "delta_preservation_checks": 20,
+  "nonpadding_bitflip_cases": 2568,
+  "padding_value_cases": 768,
+  "nonfinite_field_cases": 111,
+  "closed_bag_pairs": 1374,
+  "all37_numeric_bit_equal_pairs": 1374,
+  "original_callback_gate_accepted_raw": 549,
+  "original_callback_gate_accepted_derived": 1,
+  "actual_10s_readiness_pass": false,
+  "original_runtime_HOLD_preserved": true,
+  "bag_recordTime_never_used_as_callback_receipt_in_final_replay": true,
+  "only_runtime_files_changed": [
+    "imu_converter.py",
+    "readiness_validator.py"
+  ],
+  "unchanged_runtime_files": 7,
+  "source_adapter_changed": false,
+  "ROS_context_Node_recorder_signal_UDP_remote_business_deploy": false,
+  "canonical_changed": false,
+  "codacy": "Unavailable active tool; no dependency install or PASS claimed",
+  "root_release_pending": true
+}

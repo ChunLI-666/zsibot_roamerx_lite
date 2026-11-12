@@ -1,0 +1,22 @@
+{
+  "state": "SOURCE_CANDIDATE_ROOT_POLICY_SELECTION_PENDING",
+  "root_approved": false,
+  "executable": false,
+  "scope": "MAPPING_ACQUISITION_LATERAL_RECT_V5_ONLY",
+  "fine_forward_profile_requirements": {
+    "allow_fine_forward_profile": false,
+    "fine_forward_subcapability": null,
+    "selected_fine_forward_mps": null
+  },
+  "allow_prearm_imu_gap_requalification": false,
+  "forward_terminal_example": {
+    "kind": "coarse_stop_then_fine_v1",
+    "coarse_stop_remaining_m": 0.1,
+    "max_corrections": 2,
+    "max_extra_work_sec": 20.0,
+    "fine_pulse_ticks": 1,
+    "max_fine_pulses": 32
+  },
+  "runtime_capability_approved": false,
+  "boundary": "Illustrative policy only; no Root release/UUID/current identity generated. Root may select strictprearmTrue in a separately reviewed privatecase."
+}

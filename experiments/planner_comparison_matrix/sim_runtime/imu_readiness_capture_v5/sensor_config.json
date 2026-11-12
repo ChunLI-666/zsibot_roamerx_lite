@@ -1,0 +1,116 @@
+{
+  "robot": {
+    "mujoco_model": "/mnt/data/matrix_v1.1.2_migration_20261030/runtime/MATRiX_v1.1.2/UeSim/Content/model/xgb/xgb.xml",
+    "scene_model": "",
+    "weapon": "",
+    "network_mode": "standalone",
+    "sensor_sync_mode": false,
+    "inside_mc": true,
+    "zenoh_router": "tcp/0.0.0.0:7447",
+    "position": {
+      "x": 0,
+      "y": 0,
+      "z": 1
+    },
+    "state_port": "mujoco/state",
+    "cmd_port": "mujoco/cmd",
+    "mujoco_running": false,
+    "main_body": "base_link",
+    "sensors": {
+      "lidar": {
+        "sensor_type": "mid360",
+        "max_distance": 100,
+        "ignore_mounting_actor": true,
+        "topic": "/front_lidar",
+        "frequency": 10,
+        "position": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.1
+        },
+        "rotation": {
+          "roll": 0,
+          "pitch": 0,
+          "yaw": 0
+        },
+        "draw_points": false,
+        "random_scan": false,
+        "simulate_motion_distortion": false,
+        "sensor_attach": "base_link",
+        "enabled": true,
+        "frame_id": "map",
+        "backend": "gpu"
+      },
+      "Odom": {
+        "sensor_type": "odom",
+        "ignore_mounting_actor": true,
+        "topic": "/odom",
+        "position": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "rotation": {
+          "roll": 0,
+          "pitch": 0,
+          "yaw": 0
+        },
+        "sensor_attach": "base_link",
+        "frequency": 100,
+        "enabled": true,
+        "frame_id": "map",
+        "child_frame_id": "base_link"
+      },
+      "IMU": {
+        "sensor_type": "imu",
+        "ignore_mounting_actor": true,
+        "topic": "/front_lidar/imu",
+        "position": {
+          "x": 0,
+          "y": 0,
+          "z": 0.1
+        },
+        "rotation": {
+          "roll": 0,
+          "pitch": 0,
+          "yaw": 0
+        },
+        "sensor_attach": "base_link",
+        "frequency": 500,
+        "enabled": true,
+        "frame_id": "map"
+      },
+      "front_camera": {
+        "sensor_type": "rgb",
+        "topic": "/front_camera/image/compressed",
+        "frequency": 10,
+        "position": {
+          "x": 0.23267769901697655,
+          "y": -0.006945681845837595,
+          "z": 0.018852131458191312
+        },
+        "rotation": {
+          "roll": 0.420813874840376,
+          "pitch": 14.044919362685386,
+          "yaw": 0.807541686378946
+        },
+        "height": 360,
+        "width": 640,
+        "fov": 114.88842284367725,
+        "fx": 204.30079597650698,
+        "fy": 203.68628463392142,
+        "cx": 312.1242975431862,
+        "cy": 174.40334879842837,
+        "K1": 0,
+        "K2": 0,
+        "K3": 0,
+        "P1": 0,
+        "P2": 0,
+        "sensor_attach": "base_link",
+        "enabled": true,
+        "ignore_mounting_actor": true,
+        "frame_id": "map"
+      }
+    }
+  }
+}

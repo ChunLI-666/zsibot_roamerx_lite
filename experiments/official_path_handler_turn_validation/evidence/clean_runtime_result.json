@@ -1,0 +1,4 @@
+{
+  "returncode": 0,
+  "env_policy": "env-i base PATH HOME LANG + official Jazzy setup only"
+}

@@ -1,0 +1,9 @@
+test_default_HOLD_never_opens_pidfd_or_starts (test_replace_plan.Tests.test_default_HOLD_never_opens_pidfd_or_starts) ... ok
+test_hash_has_no_file_digest_dependency (test_replace_plan.Tests.test_hash_has_no_file_digest_dependency) ... ok
+test_hold_templates_cannot_execute (test_replace_plan.Tests.test_hold_templates_cannot_execute) ... ok
+test_mock_lifecycle_once_order_and_failures (test_replace_plan.Tests.test_mock_lifecycle_once_order_and_failures) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.030s
+
+OK

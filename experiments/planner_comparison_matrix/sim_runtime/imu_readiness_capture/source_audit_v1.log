@@ -1,0 +1,53 @@
+{
+  "state": "PASS",
+  "checks": {
+    "owned_stat_birth_AST_exact": true,
+    "owned_child_AST_exact": true,
+    "owned_interrupt_AST_exact": true,
+    "contract_sha_AST_exact": true,
+    "contract_read_AST_exact": true,
+    "contract_finite_AST_exact": true,
+    "contract_wrap_AST_exact": true,
+    "contract_rpy_AST_exact": true,
+    "contract_claim_AST_exact": true,
+    "contract_host_proof_AST_exact": true,
+    "contract_StableStop_AST_exact": true,
+    "original_imu_converter_function_AST_exact": true,
+    "exact_bytes_recording_deadline.py": true,
+    "exact_bytes_bag_summary.py": true,
+    "exact_bytes_imu_gate.py": true,
+    "exact_bytes_sensor_config.json": true,
+    "exact_nine_runtime_source_hashes": true,
+    "HOLD_case_release_graph_binding": true,
+    "fixed_discovery3_data10_launcher45_fallback60": true,
+    "no_application_publishers_clients_actions_sockets": true,
+    "standard_ROS_message_imports_only": true,
+    "no_callback_publisher_gid_attribute_assumption": true,
+    "versioned_primary_callback_dict_has_no_gid": true,
+    "sole_owned_role_recorder": true,
+    "only_parent_signal_target_owned_recorder": true,
+    "arm_ACK_magic_before_observer": true,
+    "shutdown_signal_closed_audit_order": true,
+    "never_motion_authority": true,
+    "actual_installed_rclpy7.1.12": true
+  },
+  "check_count": 29,
+  "installed_primary_API_files": {
+    "/opt/ros/jazzy/share/rclpy/package.xml": {
+      "sha256": "6367e8f5f30e81867b246a8750ee900d7276f1f52253ba5140c188e360e6cb0f"
+    },
+    "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/subscription.py": {
+      "sha256": "b21a0f4ef3bd60583b569d912ab60a20377ba7b0f3213af43d29403382630ef9"
+    },
+    "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py": {
+      "sha256": "46f052cf43e1fa1040af235f3508a0a8c00d98a2ab59b8dcaed9aceb3921a452"
+    },
+    "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/topic_endpoint_info.py": {
+      "sha256": "d4271d3d6fc8fecd74e96e61e2651cfbdb04a95572280af04364dce4fa20b6e9"
+    }
+  },
+  "primary_reference": "https://github.com/ros2/rclpy/blob/7.1.12/rclpy/src/rclpy/subscription.cpp#L182",
+  "primary_sha256": "1721f066d8953fc640e2807b12bfc6152737cbb238eaaab04b29e87ea2bc93f9",
+  "no_ROS_Node_runtime_probe": true,
+  "per_message_GID_not_available_in_this_API": true
+}

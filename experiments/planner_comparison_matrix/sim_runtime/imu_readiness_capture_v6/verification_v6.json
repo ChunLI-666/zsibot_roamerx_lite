@@ -1,0 +1,25 @@
+{
+  "state": "PASS_SOURCE_ONLY_PENDING_REVIEW",
+  "pure_fixtures": 47,
+  "changed_runtime_files": [
+    "readiness_validator.py",
+    "readiness_capture.py"
+  ],
+  "unchanged_runtime_files": [
+    "readiness_contract.py",
+    "readiness_observer.py",
+    "owned_recorder.py",
+    "imu_converter.py",
+    "imu_gate.py",
+    "recording_deadline.py",
+    "bag_summary.py"
+  ],
+  "actual_new_readiness_pass": false,
+  "no_runtime_actions": true,
+  "discovery_sec": 3,
+  "core_sec": 10,
+  "max_watch_gap_ms": 100,
+  "max_age_ms": 300,
+  "launcher_sec": 45,
+  "recorder_fallback_sec": 60
+}

@@ -11,6 +11,7 @@
 #include "livox_ros_driver2/msg/custom_msg.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "robots_dog_msgs/msg/livox_bridge_debug.hpp"
+#include "sensor_msgs/msg/imu.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "sensor_msgs/msg/point_cloud2.hpp"
 #include "sensor_msgs/point_cloud2_iterator.hpp"
@@ -34,6 +35,22 @@ public:
     max_sensor_age_sec_ = declare_parameter("max_sensor_age_sec", 0.3);
     target_frame_ = declare_parameter("target_frame", "base_link");
     scan_time_ = declare_parameter("scan_time", 0.1);
+    stabilize_with_imu_ = declare_parameter("stabilize_with_imu", false);
+    const bool publish_static_tf = declare_parameter("publish_static_tf", true);
+    const std::string imu_topic = declare_parameter("imu_topic", "/livox/imu");
+    const double imu_max_stamp_delta_sec = declare_parameter("imu_max_stamp_delta_sec", 0.03);
+    const double imu_max_stamp_delta_ns = imu_max_stamp_delta_sec * 1.0e9;
+    if (!std::isfinite(imu_max_stamp_delta_ns) || imu_max_stamp_delta_ns < 1.0 ||
+      imu_max_stamp_delta_ns >= static_cast<double>(std::numeric_limits<std::int64_t>::max()))
+    {
+      throw std::invalid_argument("imu_max_stamp_delta_sec must be finite and representable in positive ns");
+    }
+    imu_max_stamp_delta_ns_ = static_cast<std::int64_t>(std::llround(imu_max_stamp_delta_ns));
+    const auto imu_queue_size = declare_parameter<std::int64_t>("imu_queue_size", 2048);
+    if (imu_queue_size < 1 || imu_queue_size > 16384) {
+      throw std::invalid_argument("imu_queue_size must be in [1, 16384]");
+    }
+    imu_orientations_ = ImuOrientationBuffer(static_cast<std::size_t>(imu_queue_size));
 
     const double lidar_x = declare_parameter("lidar_x", 0.0);
     const double lidar_y = declare_parameter("lidar_y", 0.0);
@@ -76,29 +93,44 @@ public:
     }
 
     const auto qos = rclcpp::QoS(rclcpp::KeepLast(qos_depth_)).best_effort().durability_volatile();
+    auto input_qos = qos;
+    const bool input_reliable = declare_parameter("sensor_input_reliable", false);
+    if (input_reliable) {input_qos.reliable();}
+    if (stabilize_with_imu_) {
+      auto imu_qos = input_qos;
+      imu_qos.keep_last(imu_orientations_.capacity());
+      imu_sub_ = create_subscription<sensor_msgs::msg::Imu>(
+        imu_topic, imu_qos, std::bind(&LivoxScanProjector::onImu, this, std::placeholders::_1));
+    }
     scan_pub_ = create_publisher<sensor_msgs::msg::LaserScan>(output_topic, qos);
     debug_pub_ = create_publisher<robots_dog_msgs::msg::LivoxBridgeDebug>(debug_topic, qos);
     if (input_type == "livox_custom") {
       livox_sub_ = create_subscription<livox_ros_driver2::msg::CustomMsg>(
-        input_topic, qos,
+        input_topic, input_qos,
         std::bind(&LivoxScanProjector::onLivox, this, std::placeholders::_1));
     } else if (input_type == "pointcloud2") {
       pointcloud_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
-        input_topic, qos,
+        input_topic, input_qos,
         std::bind(&LivoxScanProjector::onPointCloud2, this, std::placeholders::_1));
     } else {
       throw std::invalid_argument("input_type must be 'livox_custom' or 'pointcloud2'");
     }
 
-    static_tf_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this);
-    publishStaticTransform(lidar_x, lidar_y, lidar_z, -lidar_roll, -lidar_pitch, -lidar_yaw);
+    if (publish_static_tf) {
+      static_tf_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this);
+      publishStaticTransform(lidar_x, lidar_y, lidar_z, -lidar_roll, -lidar_pitch, -lidar_yaw);
+    }
 
     RCLCPP_INFO(
       get_logger(),
-      "Direct scan projection (%s): %s -> %s, frame=%s, bins=%zu, height=[%.2f, %.2f]",
+      "Direct scan projection (%s): %s -> %s, frame=%s, bins=%zu, height=[%.2f, %.2f], input=%s",
       input_type.c_str(), input_topic.c_str(), output_topic.c_str(), target_frame_.c_str(),
       scanBinCount(config_),
-      config_.min_height, config_.max_height);
+      config_.min_height, config_.max_height, input_reliable ? "reliable" : "best_effort");
+    RCLCPP_INFO(
+      get_logger(), "IMU stabilization=%s, imu=%s, max sample delta=%.6fs, static TF=%s",
+      stabilize_with_imu_ ? "enabled (requires R_I_L=I)" : "disabled",
+      imu_topic.c_str(), imu_max_stamp_delta_sec, publish_static_tf ? "enabled" : "disabled");
   }
 
 private:
@@ -155,6 +187,23 @@ private:
       });
   }
 
+  void onImu(const sensor_msgs::msg::Imu::SharedPtr msg)
+  {
+    ImuOrientationSample sample;
+    if (msg->header.stamp.sec >= 0 && msg->header.stamp.nanosec < 1000000000U) {
+      sample.stamp_ns = static_cast<std::int64_t>(msg->header.stamp.sec) * 1000000000LL +
+        static_cast<std::int64_t>(msg->header.stamp.nanosec);
+    }
+    sample.xyzw = {
+      msg->orientation.x, msg->orientation.y, msg->orientation.z, msg->orientation.w};
+    sample.orientation_covariance_0 = msg->orientation_covariance[0];
+    if (!imu_orientations_.add(sample)) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 2000, "Rejected original IMU orientation: %s",
+        imu_orientations_.lastRejection().c_str());
+    }
+  }
+
   void onPointCloud2(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
   {
     projectMessage(
@@ -187,6 +236,14 @@ private:
     debug.input_points = input_points;
     debug.subscriber_qos_depth = static_cast<std::uint32_t>(qos_depth_);
 
+    if (stabilize_with_imu_ &&
+      (header.stamp.sec < 0 || header.stamp.nanosec >= 1000000000U))
+    {
+      debug.dropped_input = true;
+      debug.drop_reason = "cloud_stamp_invalid";
+      finishAndPublishDebug(callback_start, debug);
+      return;
+    }
     const rclcpp::Time input_stamp(header.stamp, get_clock()->get_clock_type());
     if (input_stamp.nanoseconds() > 0) {
       debug.input_age_sec = (callback_now - input_stamp).seconds();
@@ -203,11 +260,23 @@ private:
       return;
     }
 
+    const auto projection = projectionConfigForFrame(
+      config_, stabilize_with_imu_, imu_orientations_, input_stamp.nanoseconds(),
+      imu_max_stamp_delta_ns_);
+    if (!projection.ready) {
+      debug.dropped_input = true;
+      debug.drop_reason = projection.drop_reason;
+      finishAndPublishDebug(callback_start, debug);
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 2000, "Dropping scan without matched IMU: %s",
+        projection.drop_reason.c_str());
+      return;
+    }
     const auto scan_start = std::chrono::steady_clock::now();
-    auto ranges = makeEmptyScan(config_);
+    auto ranges = makeEmptyScan(projection.config);
     ScanProjectionStats stats;
     try {
-      project_points(config_, ranges, stats);
+      project_points(projection.config, ranges, stats);
     } catch (const std::runtime_error & error) {
       debug.dropped_input = true;
       debug.drop_reason = std::string("invalid_pointcloud_fields: ") + error.what();
@@ -255,9 +324,13 @@ private:
   double max_sensor_age_sec_{0.3};
   double scan_time_{0.1};
   std::string target_frame_;
+  bool stabilize_with_imu_{false};
+  std::int64_t imu_max_stamp_delta_ns_{30000000};
+  ImuOrientationBuffer imu_orientations_;
   std::uint64_t callback_sequence_{0};
   std::size_t qos_depth_{1};
   rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr livox_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_sub_;
   rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr scan_pub_;
   rclcpp::Publisher<robots_dog_msgs::msg::LivoxBridgeDebug>::SharedPtr debug_pub_;

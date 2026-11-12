@@ -1,0 +1,10 @@
+{
+  "latest_api_probe": {
+    "returncode": 0,
+    "output": "{\"controller_compute_arguments\":5,\"goal_checker_arguments\":4,\"goal_tolerance_arguments\":3,\"xy_reached_method\":1,\"new_path_received\":1,\"installed_followpath_has_handler_id\":0}\n"
+  },
+  "rpp_contract_probe": {
+    "returncode": 2,
+    "output": "{\"mid_rotation_global_goal_branch\":0,\"mid_rotation_zero_xy_carrot_branch\":0,\"final_rotation_branch\":1,\"rotation_linear_command\":0,\"rotation_angular_command\":0.1}\n"
+  }
+}

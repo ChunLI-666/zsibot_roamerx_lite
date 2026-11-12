@@ -1,0 +1,162 @@
+--- v4r2/lateral_contract.py
++++ v5/lateral_contract.py
+@@ -135,6 +135,7 @@
+     return proof
+ 
+ def validate(case,release,case_path,output):
++    camera_stale_lease_retry_enabled(case,release)
+     if case.get('scope')!=SCOPE or case.get('executable') is not True or release.get('scope')!=SCOPE or release.get('allow_execute') is not True:raise Hold('ROOT_HOLD: no executable diagnostic release')
+     rid=release.get('release_id','')
+     if len(rid)!=32 or any(x not in '0123456789abcdef' for x in rid):raise Hold('unique release UUID required')
+@@ -179,6 +180,35 @@
+     for topic in TOPICS:
+         s=samples.get(topic)
+         if not s or not -.05<=(now_ns-s['stamp_ns'])/1e9<=.3 or not 0<=(steady_ns-s['received_steady_ns'])/1e9<=.3 or not s['payload_valid']:raise Hold('stale/future/missing/empty original sensor: '+topic)
++    return checked_live_gt(samples,anchor)
++
++
++CAMERA_RETRY_FLAG='allow_camera_stale_lease_retry_v1'
++CAMERA_RETRY_SCHEMA='locnav.camera_stale_lease_retry.v1'
++CAMERA_TOPICS=('/front_camera/image/compressed','/camera/front/image/compressed','/camera/front/camera_info')
++
++def camera_stale_lease_retry_enabled(case,release):
++    a=case.get(CAMERA_RETRY_FLAG,False);b=release.get(CAMERA_RETRY_FLAG,False)
++    if type(a) is not bool or type(b) is not bool or a!=b:raise Hold('camera stale lease retry requires matching strictbool case/Root authorization')
++    return a
++
++def camera_stale_lease_details(samples,anchor,now_ns,steady_ns):
++    """Eligibility only. Never rewrites stamps or accepts a stale sample."""
++    stale={}
++    for topic in TOPICS:
++        item=samples.get(topic)
++        if (not isinstance(item,dict) or item.get('payload_valid') is not True
++            or type(item.get('stamp_ns')) is not int or type(item.get('received_steady_ns')) is not int):return None
++        header_age=(now_ns-item['stamp_ns'])/1e9;receipt_age=(steady_ns-item['received_steady_ns'])/1e9
++        if header_age<-.05 or receipt_age<0:return None
++        if header_age>.3 or receipt_age>.3:
++            if topic not in CAMERA_TOPICS:return None
++            stale[topic]=dict(header_age_sec=header_age,receipt_age_sec=receipt_age)
++    if not stale:return None
++    checked_live_gt(samples,anchor)  # All original GTframe/standing/speed/excursion checks,even when camera loop failed first.
++    return stale
++
++def checked_live_gt(samples,anchor):
+     gt=samples['/odom'];p=gt['position'];roll,pitch,yaw=rpy(gt['quaternion'])
+     if gt['frame']!='map' or gt['child']!='BASE_LINK' or not finite([*p,*gt['linear'],*gt['angular']]) or p[2]<=.2 or abs(roll)>.25 or abs(pitch)>.25:raise Hold('GT frame/standing/attitude abnormal')
+     speed=max(math.sqrt(sum(v*v for v in gt['linear'])),gt.get('position_speed_mps',0.))
+@@ -187,6 +217,7 @@
+         dx,dy=body_xy(p[0]-anchor[0],p[1]-anchor[1],anchor[2])
+         if abs(dx)>.1 or abs(dy)>.8 or abs(wrap(yaw-anchor[2]))>.08:raise Hold('lateral/cross/yaw excursion limit')
+     return gt,(roll,pitch,yaw)
++
+ 
+ class StableStop:
+     def __init__(self):self.start=None;self.stamp=None;self.origin=None
+--- v4r2/semantic_tool_timed.py
++++ v5/semantic_tool_timed.py
+@@ -84,7 +84,7 @@
+     return row
+ 
+ 
+-def prove_parent(case, release, ready, output, contract, deadline, clock=time):
++def _prove_parent_once(case, release, ready, output, contract, deadline, clock=time):
+     contract.host_proof(release, case, now_ns=clock.time_ns())
+     for role in ('parent_identity', 'recorder_identity', 'helper_identity'):
+         identity = ready[role]
+@@ -101,7 +101,64 @@
+         raise CanaryHold('insufficient capped recorder time')
+ 
+ 
+-def run_probe(sign, duration_sec, socket_factory, prove, stream, clock=time, signal_api=signal, target=TARGET):
++CAMERA_RETRY_NS=30_000_000
++CAMERA_RETRY_POLL_NS=1_000_000
++CAMERA_RETRY_MAX_READS=32
++CAMERA_RETRY_MAX_EVENTS=4096
++
++def prove_parent(case,release,ready,output,contract,deadline,clock=time,retry_events=None,active_deadline_steady_ns=None):
++    if not contract.camera_stale_lease_retry_enabled(case,release):
++        return _prove_parent_once(case,release,ready,output,contract,deadline,clock)
++    events=[] if retry_events is None else retry_events
++    started=None;retry_end=None;attempt=0;last_error=None;lease=None
++    def record(event,**fields):
++        if len(events)>=CAMERA_RETRY_MAX_EVENTS:raise CanaryHold('bounded camera snapshot retry evidence limit exceeded')
++        # Memory only while active. Result is persisted after original fivezeros+socketclose.
++        snapshot=None if lease is None else json.loads(json.dumps(lease,allow_nan=False))
++        events.append(dict(event=event,schema=contract.CAMERA_RETRY_SCHEMA,attempt=attempt,
++            now_unix_ns=clock.time_ns(),now_steady_ns=clock.monotonic_ns(),retry_started_steady_ns=started,
++            retry_deadline_steady_ns=retry_end,active_deadline_steady_ns=active_deadline_steady_ns,
++            lease_snapshot=snapshot,**fields))
++    while True:
++        nowsteady=clock.monotonic_ns()
++        if active_deadline_steady_ns is not None and nowsteady>=active_deadline_steady_ns:
++            record('camera_snapshot_proof_failed',reason='active_deadline');raise CanaryHold('active deadline reached during camera snapshot proof')
++        if started is not None and(nowsteady>=retry_end or attempt>=CAMERA_RETRY_MAX_READS):
++            record('camera_snapshot_retry_timeout',reason='fixed30ms_or32reads');raise last_error
++        attempt+=1
++        try:
++            contract.host_proof(release,case,now_ns=clock.time_ns())
++            for role in ('parent_identity','recorder_identity','helper_identity'):
++                identity=ready[role]
++                if deadline.process_identity(identity['pid'])!=identity:raise CanaryHold('bound parent/recorder/helper identity changed: '+role)
++            lease=contract.read(output/'observation_lease.json');now,steady=clock.time_ns(),clock.monotonic_ns()
++            if(lease.get('release_id')!=release['release_id']or lease.get('parent_identity')!=ready['parent_identity']
++                or not 0<=(steady-lease['written_steady_ns'])/1e9<=.15
++                or not isinstance(lease.get('anchor'),list)or len(lease['anchor'])!=3):raise CanaryHold('fresh matching parent lease <=150ms required')
++            if clock.clock_gettime(time.CLOCK_BOOTTIME)>=ready['deadline_boottime_sec']-10.:raise CanaryHold('insufficient capped recorder time')
++            if active_deadline_steady_ns is not None and steady>=active_deadline_steady_ns:raise CanaryHold('active deadline reached during camera snapshot proof')
++            if started is not None and steady>=retry_end:raise CanaryHold('fixed30ms camera snapshot retry expired during fullproof')
++            try:contract.check_live(lease['samples'],lease['anchor'],now,steady)
++            except contract.Hold as original:
++                details=contract.camera_stale_lease_details(lease['samples'],lease['anchor'],now,steady)
++                if details is None:raise
++                if started is None:started=steady;retry_end=started+CAMERA_RETRY_NS
++                last_error=original;record('camera_stale_snapshot_retry_wait',stale_camera_details=details,error=str(original))
++                limit=retry_end if active_deadline_steady_ns is None else min(retry_end,active_deadline_steady_ns)
++                remaining=limit-clock.monotonic_ns()
++                if remaining<=0:raise
++                clock.sleep(min(CAMERA_RETRY_POLL_NS,remaining)/1e9)
++                continue
++            if started is not None:record('camera_snapshot_retry_snapshot_guard_passed')
++            final_steady=clock.monotonic_ns()
++            if started is not None and final_steady>=retry_end:raise CanaryHold('fixed30ms camera snapshot retry expired after fullproof/evidence')
++            if active_deadline_steady_ns is not None and final_steady>=active_deadline_steady_ns:raise CanaryHold('active deadline reached after camera snapshot fullproof/evidence')
++            return
++        except BaseException as exc:
++            record('camera_snapshot_proof_failed',error_type=type(exc).__name__,error=str(exc));raise
++
++
++def run_probe(sign, duration_sec, socket_factory, prove, stream, clock=time, signal_api=signal, target=TARGET, proof_with_deadline=None):
+     """One socket. All clocks/sockets/proofs/signals can be replaced by pure fakes."""
+     frame(sign)
+     target=selected_target(target)
+@@ -139,7 +196,8 @@
+                 clock.sleep((min(due, end) - now) / 1e9)
+             if clock.monotonic_ns() >= end:
+                 break
+-            prove()
++            if proof_with_deadline is None:prove()
++            else:proof_with_deadline(end)
+             result['per_motion_proof_checks'] += 1
+             if clock.monotonic_ns() >= end:
+                 break  # A slow proof never permits a late nonzero send.
+@@ -218,7 +276,9 @@
+         raise CanaryHold('bound complete recorder readiness missing')
+     if not (output/f'probe_{args.probe_index}.planned.json').is_file():
+         raise CanaryHold('parent probe plan absent')
+-    prove = lambda: prove_parent(case, release, ready, output, contract, deadline)
++    retry_enabled=contract.camera_stale_lease_retry_enabled(case,release);retry_events=[]
++    prove=lambda:prove_parent(case,release,ready,output,contract,deadline,retry_events=retry_events)
++    prove_active=lambda end:prove_parent(case,release,ready,output,contract,deadline,retry_events=retry_events,active_deadline_steady_ns=end)
+     prove()
+     contract.claim(output/f'probe_{args.probe_index}.tool_once.json', dict(release_id=release['release_id'],
+         probe=args.probe_index, identity=deadline.process_identity(__import__('os').getpid()), claimed_unix_ns=time.time_ns(),
+@@ -227,7 +287,8 @@
+         import socket
+         return socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+     with (output/f'probe_{args.probe_index}_send.jsonl').open('x') as stream:
+-        result = run_probe(case['probes'][args.probe_index], case['duration_sec'], socket_factory, prove, stream,target=target)
++        result = run_probe(case['probes'][args.probe_index],case['duration_sec'],socket_factory,prove,stream,target=target,proof_with_deadline=prove_active if retry_enabled else None)
++    if retry_enabled:result.update(camera_stale_lease_retry_schema=contract.CAMERA_RETRY_SCHEMA,camera_stale_lease_retry_events=retry_events)
+     contract.claim(output/f'probe_{args.probe_index}.backend_result.json', result)
+     print(json.dumps(result, allow_nan=False))
+     return 0 if result['completed'] else 2

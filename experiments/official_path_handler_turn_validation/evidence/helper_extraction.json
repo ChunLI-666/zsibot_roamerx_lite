@@ -1,0 +1,5 @@
+{
+  "source": "upstream/nav2_util/src/path_utils.cpp",
+  "exact_function_span_sha256": "36011341154327dae722604ce573709d91307c27fe3971494bc458b16419445b",
+  "transformation": "unchanged complete findFirstPathConstraint/removePosesAfterFirstConstraint definitions; omit unrelated path-distance/TF helpers"
+}

@@ -1,0 +1,155 @@
+--- frozen_sustained_v3/lateral_once.py
++++ bounded_amplitude_v4/lateral_once.py
+@@ -1,5 +1,5 @@
+ #!/usr/bin/python3
+-"""ROOT_HOLD by default. Two conditional sustained4s lateral probes in one raw MCAP."""
++"""ROOT_HOLD by default. Two conditional bounded-amplitude sustained lateral probes in one raw MCAP."""
+ import argparse
+ import hashlib
+ import json
+@@ -137,7 +137,7 @@
+         gt_stopped_after_neutral_send_sec_interval=[(stop_start-neutral['send_after_unix_ns'])/1e9,(stop_start-neutral['send_before_unix_ns'])/1e9] if stop_start and neutral and motion_ok else None,
+         timing_basis='Original GT header deltas and midpoint original body yaw. Send syscall interval is not simulator actuation time.',
+         stop_definition='linear3Dnorm<=.03m/s, angular3Dnorm<=.05rad/s, stable position/yaw and advancing original GT >=.3s',
+-        hard_plant_guarantee=False,scope='Only these two fixed four-second probes; no general motion model inferred.')
++        hard_plant_guarantee=False,scope='Only this bounded-amplitude/duration pair; no general motion model inferred.')
+ 
+ 
+ def sustained_classification(history,trace_path,sign,legacy,cutoff_stamp_ns):
+--- frozen_sustained_v3/lateral_contract.py
++++ bounded_amplitude_v4/lateral_contract.py
+@@ -7,13 +7,14 @@
+ import time
+ 
+ HERE=Path(__file__).resolve().parent
+-SCOPE='MAPPING_SEMANTIC_LATERAL_SUSTAINED_CALIBRATION_ONLY'
++SCOPE='MAPPING_SEMANTIC_LATERAL_BOUNDED_AMPLITUDE_SUSTAINED_CALIBRATION_ONLY'
+ TOOL_FILENAME='semantic_tool_timed.py'
+ HELPER_SHA='e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c'
+ PACKAGE=('lateral_once.py','lateral_contract.py',TOOL_FILENAME,'host_preflight.py',
+          'calibration_observer.py','imu_gate.py','recording_deadline.py','bag_summary.py')
+ TOPICS=('/odom','/front_lidar','/front_lidar/imu','/front_camera/image/compressed',
+         '/camera/front/image/compressed','/camera/front/camera_info')
++ALLOWED_MAGNITUDES=(.2,.4,.6)
+ 
+ class Hold(ValueError):pass
+ 
+@@ -47,6 +48,13 @@
+ 
+ def package_hashes():return {name:sha(HERE/name) for name in PACKAGE}
+ 
++def probe_parameters(case):
++    magnitude,duration=case.get('magnitude'),case.get('duration_sec')
++    if (type(magnitude) not in (int,float) or not math.isfinite(magnitude) or magnitude not in ALLOWED_MAGNITUDES
++        or type(duration) not in (int,float) or not math.isfinite(duration) or not 1.5<=duration<=4.
++        or case.get('probes')!=[magnitude,-magnitude]):raise Hold('only paired magnitude0.2/0.4/0.6 and finite duration1.5..4s')
++    return magnitude,duration
++
+ def host_proof(release,case,now_ns=None):
+     item=release['host_preflight'];path=Path(item['path'])
+     if item.get('mode')!='root_external_host_attestation' or not path.is_absolute() or sha(path)!=item.get('sha256'):raise Hold('external host proof hash/path differs')
+@@ -74,7 +82,8 @@
+         or release.get('controller_pid_namespace')!=os.readlink('/proc/self/ns/pid')):raise Hold('same-host/container identity differs')
+     if not release.get('root_unique_velocity_owner_approved') or not release.get('root_static_patch_and_engineering_stop_reserve_approved'):raise Hold('root unique-owner/patch engineering approval missing')
+     if not case.get('root_patch_approved') or not case.get('coordinate_verified_by_root'):raise Hold('patch/coordinate root audit pending')
+-    if case.get('probes')!=[.2,-.2] or any(case.get(k)!=v for k,v in [('max_runtime_sec',60.),('duration_sec',4.),('between_sec',3.),('tail_sec',5.),('body_half_m',.74),('padding_m',.15),('cell_guard_m',.05),('lateral_abort_m',.8),('forward_drift_abort_m',.1),('yaw_abort_rad',.08),('speed_abort_mps',1.),('stop_reserve_m',1.)]):raise Hold('fixed once-probe case was changed')
++    probe_parameters(case)
++    if any(case.get(k)!=v for k,v in [('max_runtime_sec',60.),('between_sec',3.),('tail_sec',5.),('body_half_m',.74),('padding_m',.15),('cell_guard_m',.05),('lateral_abort_m',.8),('forward_drift_abort_m',.1),('yaw_abort_rad',.08),('speed_abort_mps',1.),('stop_reserve_m',1.)]):raise Hold('fixed once-probe bounds were changed')
+     if case['scene_instance_id']['pid']!=1172665 or case['scene_instance_id']['starttime_ticks']!=9427026:raise Hold('this case is only for the frozen new UE instance')
+     if any(os.environ.get(k)!=v for k,v in case['expected_environment'].items()):raise Hold('ROS source environment differs')
+     for key in ['sensor_config_artifact','coordinate_evidence_artifact']:
+@@ -130,7 +139,7 @@
+     def ready(self):return self.start is not None and self.stamp-self.start[0]>=300_000_000 and time.monotonic_ns()-self.start[1]>=300_000_000
+ 
+ def permitted_payload(command,sign):
+-    if (type(sign) not in (int,float) or not math.isfinite(sign) or sign not in (.2,-.2)
++    if (type(sign) not in (int,float) or not math.isfinite(sign) or abs(sign) not in ALLOWED_MAGNITUDES
+         or not isinstance(command,dict) or set(command)!={'version','action','forward','lateral','yaw'}
+         or type(command['version']) is not int or command['version']!=1 or command['action']!='walk'
+         or not finite([command['forward'],command['lateral'],command['yaw']])
+--- frozen_sustained_v3/semantic_tool_timed.py
++++ bounded_amplitude_v4/semantic_tool_timed.py
+@@ -12,9 +12,11 @@
+ import signal
+ import time
+ 
+-SCOPE = 'MAPPING_SEMANTIC_LATERAL_SUSTAINED_CALIBRATION_ONLY'
++SCOPE = 'MAPPING_SEMANTIC_LATERAL_BOUNDED_AMPLITUDE_SUSTAINED_CALIBRATION_ONLY'
+ TARGET = ('127.0.0.1', 7447)
+ PERIOD_NS = 50_000_000
++ALLOWED_MAGNITUDES = (.2, .4, .6)
++MIN_ACTIVE_NS = 1_500_000_000
+ MAX_ACTIVE_NS = 4_000_000_000
+ MAX_MOTION_PACKETS = 80
+ FINAL_ZERO_PACKETS = 5
+@@ -32,8 +34,8 @@
+ 
+ 
+ def frame(sign, neutral=False):
+-    if type(sign) not in (int, float) or not math.isfinite(sign) or sign not in (.2, -.2):
+-        raise CanaryHold('only one selected semantic lateral sign +/-0.2')
++    if type(sign) not in (int, float) or not math.isfinite(sign) or abs(sign) not in ALLOWED_MAGNITUDES:
++        raise CanaryHold('only one selected signed semantic magnitude from0.2/0.4/0.6')
+     return dict(version=1, action='walk', forward=0., lateral=0. if neutral else sign, yaw=0.)
+ 
+ 
+@@ -93,8 +95,8 @@
+ def run_probe(sign, duration_sec, socket_factory, prove, stream, clock=time, signal_api=signal):
+     """One socket. All clocks/sockets/proofs/signals can be replaced by pure fakes."""
+     frame(sign)
+-    if type(duration_sec) not in (int, float) or not math.isfinite(duration_sec) or not 0 < duration_sec <= MAX_ACTIVE_NS/1e9:
+-        raise CanaryHold('active duration must be finite in (0,4] seconds')
++    if type(duration_sec) not in (int, float) or not math.isfinite(duration_sec) or not MIN_ACTIVE_NS/1e9 <= duration_sec <= MAX_ACTIVE_NS/1e9:
++        raise CanaryHold('active duration must be finite in [1.5,4] seconds')
+     duration_ns = round(duration_sec*1e9)
+     if duration_ns <= 0:
+         raise CanaryHold('active duration below nanosecond resolution')
+@@ -195,10 +197,9 @@
+         raise CanaryHold('semantic canary scope required')
+     contract.validate(case, release, args.case, output)
+     contract.patch_check(case)  # Original .89 body +1m engineering stop reserve, no new geometry.
+-    if (case.get('probes') != [.2, -.2] or type(case.get('duration_sec')) not in (int, float)
+-            or not math.isfinite(case['duration_sec']) or case['duration_sec'] != 4.
+-            or case.get('max_runtime_sec') != 60.):
+-        raise CanaryHold('only the reviewed two-sign fixed4s/60s-recorder case')
++    contract.probe_parameters(case)  # Exact paired sign/magnitude/duration case binding.
++    if case.get('max_runtime_sec') != 60.:
++        raise CanaryHold('only the reviewed bounded-amplitude paired case/60s-recorder')
+     ready = contract.read(args.ready)
+     if (args.ready != output/'recorder_ready.json' or contract.sha(args.ready) != args.ready_sha256
+             or ready.get('release_id') != release['release_id'] or ready.get('mcap_magic_verified') is not True
+--- frozen_sustained_v3/case.HOLD.json
++++ bounded_amplitude_v4/case.HOLD.json
+@@ -1,13 +1,13 @@
+ {
+   "schema_version": 1,
+-  "scope": "MAPPING_SEMANTIC_LATERAL_SUSTAINED_CALIBRATION_ONLY",
++  "scope": "MAPPING_SEMANTIC_LATERAL_BOUNDED_AMPLITUDE_SUSTAINED_CALIBRATION_ONLY",
+   "executable": false,
+   "max_runtime_sec": 60.0,
+   "probes": [
+-    0.2,
+-    -0.2
++    0.4,
++    -0.4
+   ],
+-  "duration_sec": 4.0,
++  "duration_sec": 1.5,
+   "between_sec": 3.0,
+   "tail_sec": 5.0,
+   "oracle_path": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_combined_v1/acquisition_oracle.npz",
+@@ -88,9 +88,10 @@
+   },
+   "container_id": "b5ebab492d5dbc3994fd859605d24e0bcba2f11ea094e7c7e59e07d5be2dc468",
+   "root_preparation_notes": [
+-    "Source-only sustained4s revision. No executable root release supplied.",
+-    "Fixed[+0.2,-0.2],each4s; correct signed net settledY>.05m and final active1s medianVy>.03m/s required before negative plan.",
+-    "Original sensor/source/coordinate/current patch/stop-reserve proof still requires root refresh; no mapping capability acceptance."
++    "SOURCE ONLY bounded-amplitude sustained calibration v4;no root release supplied.",
++    "Allowed magnitude enum0.2/0.4/0.6;exact case probes[mag,-mag];finite duration1.5..4s. DefaultHOLD candidate0.4x1.5s.",
++    "Original sensor/source/coordinate/patch/stop-reserve proof requires root refresh. Metrics/negative dependency unchanged;no mapping capability or speed assumption."
+   ],
+-  "sensor_adapter_transition_actual_verified": false
++  "sensor_adapter_transition_actual_verified": false,
++  "magnitude": 0.4
+ }

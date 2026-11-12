@@ -1,0 +1,14 @@
+<library path="official_lattice_rpp_adapter">
+  <class name="official_lattice_rpp_adapter::FeasibleGoalChecker" type="official_lattice_rpp_adapter::FeasibleGoalChecker" base_class_type="nav2_core::GoalChecker">
+    <description>Jazzy original-goal checking gated by current ordered path completion.</description>
+  </class>
+  <class name="official_lattice_rpp_adapter::FeasibleRPP" type="official_lattice_rpp_adapter::FeasibleRPP" base_class_type="nav2_core::Controller">
+    <description>Official path constraints with installed Jazzy RPP and filled body sweeps.</description>
+  </class>
+  <class name="official_lattice_rpp_adapter::CheckedLattice" type="official_lattice_rpp_adapter::CheckedLattice" base_class_type="nav2_core::GlobalPlanner">
+    <description>Installed official Smac Lattice, exact goal orientation and filled body path validation.</description>
+  </class>
+  <class name="official_lattice_rpp_adapter::CheckedHybrid" type="official_lattice_rpp_adapter::CheckedHybrid" base_class_type="nav2_core::GlobalPlanner">
+    <description>Official DUBIN Hybrid control group with the same filled path checks and exact final goal protection.</description>
+  </class>
+</library>

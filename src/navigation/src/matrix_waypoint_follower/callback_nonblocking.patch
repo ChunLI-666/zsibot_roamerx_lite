@@ -1,0 +1,16 @@
+--- a/src/waypoint_follower.cpp
++++ b/src/waypoint_follower.cpp
+@@ -16,0 +17 @@
++#include <chrono>
+@@ -413 +414,10 @@
+-  if (result.goal_id != future_goal_handle_.get()->get_goal_id()) {
++  // This callback shares the only executor that can fulfill the new goal future.
++  // rclcpp_action sets that future before make_result_aware() sends GetResult;
++  // a result arriving while it is pending therefore belongs to an older goal.
++  if (!future_goal_handle_.valid() ||
++    future_goal_handle_.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
++  {
++    return;
++  }
++  const auto goal_handle = future_goal_handle_.get();
++  if (!goal_handle || result.goal_id != goal_handle->get_goal_id()) {

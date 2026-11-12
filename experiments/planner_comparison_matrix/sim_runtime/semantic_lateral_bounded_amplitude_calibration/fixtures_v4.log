@@ -1,0 +1,65 @@
+test_backend_every_enum_sign_and_short_case_remain_bounded (test_parameters_v4.ParameterCases.test_backend_every_enum_sign_and_short_case_remain_bounded) ... ok
+test_case_requires_exact_plus_minus_selected_pair (test_parameters_v4.ParameterCases.test_case_requires_exact_plus_minus_selected_pair) ... ok
+test_default_candidate_is_HOLD_point4_for1point5_with_all_original_bounds (test_parameters_v4.ParameterCases.test_default_candidate_is_HOLD_point4_for1point5_with_all_original_bounds) ... ok
+test_only_allowed_finite_magnitude_duration_pairs (test_parameters_v4.ParameterCases.test_only_allowed_finite_magnitude_duration_pairs) ... ok
+test_parameterized_parent_binds_actual_case_sign_and_duration (test_parameters_v4.ParameterCases.test_parameterized_parent_binds_actual_case_sign_and_duration) ... /home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_bounded_amplitude_v4/lateral_once.py:246: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/tmp7nmait72/run/bag/fixture.mcap'>
+  magic=[str(p) for p in (output/'bag').glob('*.mcap') if p.open('rb').read(8)==bag_summary.MAGIC]
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_bounded_amplitude_v4/lateral_once.py:246: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/tmpt_e3zldb/run/bag/fixture.mcap'>
+  magic=[str(p) for p in (output/'bag').glob('*.mcap') if p.open('rb').read(8)==bag_summary.MAGIC]
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_payload_can_only_use_selected_sign_or_neutral_no_mixed_axis (test_parameters_v4.ParameterCases.test_payload_can_only_use_selected_sign_or_neutral_no_mixed_axis) ... ok
+test_fixed4s80_motion_and5_zero_each_sign (test_sustained_backend.SustainedBackend.test_fixed4s80_motion_and5_zero_each_sign) ... ok
+test_internal_duration_cap4_and_no_invalid_socket (test_sustained_backend.SustainedBackend.test_internal_duration_cap4_and_no_invalid_socket) ... ok
+test_proof_failure_stops_and_always_neutral (test_sustained_backend.SustainedBackend.test_proof_failure_stops_and_always_neutral) ... ok
+test_send_crossing4s_is_explicit_failure_and_cleanup (test_sustained_backend.SustainedBackend.test_send_crossing4s_is_explicit_failure_and_cleanup) ... ok
+test_sigint_and_repeated_cleanup_signal_cannot_skip_neutral (test_sustained_backend.SustainedBackend.test_sigint_and_repeated_cleanup_signal_cannot_skip_neutral) ... ok
+test_slow_proof_cannot_make_catchup_bursts (test_sustained_backend.SustainedBackend.test_slow_proof_cannot_make_catchup_bursts) ... ok
+test_slow_proof_never_starts_nonzero_past4s (test_sustained_backend.SustainedBackend.test_slow_proof_never_starts_nonzero_past4s) ... ok
+test_acceptance_IO_failure_holds_but_does_not_skip_recorder_close (test_sustained_parent.CombinedFixtures.test_acceptance_IO_failure_holds_but_does_not_skip_recorder_close) ... /home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_bounded_amplitude_v4/lateral_once.py:246: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/tmpp_mq207g/run/bag/fixture.mcap'>
+  magic=[str(p) for p in (output/'bag').glob('*.mcap') if p.open('rb').read(8)==bag_summary.MAGIC]
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_default_parent_and_case_remain_hold_without_business (test_sustained_parent.CombinedFixtures.test_default_parent_and_case_remain_hold_without_business) ... ok
+test_fixed_semantic_metrics_correct_both_signs_and_stop (test_sustained_parent.CombinedFixtures.test_fixed_semantic_metrics_correct_both_signs_and_stop) ... ok
+test_host_forbidden_includes_backend_but_not_sensor_adapter (test_sustained_parent.CombinedFixtures.test_host_forbidden_includes_backend_but_not_sensor_adapter) ... ok
+test_imported_observer_rejects_old_IMU_without_refresh_or_scope_mix (test_sustained_parent.CombinedFixtures.test_imported_observer_rejects_old_IMU_without_refresh_or_scope_mix) ... ok
+test_metrics_direction_zero_and_stop_gaps_remain_failures (test_sustained_parent.CombinedFixtures.test_metrics_direction_zero_and_stop_gaps_remain_failures) ... ok
+test_metrics_reject_illegal_semantics_and_unsuccessful_send (test_sustained_parent.CombinedFixtures.test_metrics_reject_illegal_semantics_and_unsuccessful_send) ... ok
+test_parent_no_response_does_not_plan_or_launch_negative (test_sustained_parent.CombinedFixtures.test_parent_no_response_does_not_plan_or_launch_negative) ... /home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_bounded_amplitude_v4/lateral_once.py:246: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/tmpf1lftmvs/run/bag/fixture.mcap'>
+  magic=[str(p) for p in (output/'bag').glob('*.mcap') if p.open('rb').read(8)==bag_summary.MAGIC]
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_parent_rebound_or_zero_final_velocity_never_plans_negative (test_sustained_parent.CombinedFixtures.test_parent_rebound_or_zero_final_velocity_never_plans_negative) ... /home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_bounded_amplitude_v4/lateral_once.py:246: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/tmprbsuz5n5/run/bag/fixture.mcap'>
+  magic=[str(p) for p in (output/'bag').glob('*.mcap') if p.open('rb').read(8)==bag_summary.MAGIC]
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_bounded_amplitude_v4/lateral_once.py:246: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/tmpypeygfjt/run/bag/fixture.mcap'>
+  magic=[str(p) for p in (output/'bag').glob('*.mcap') if p.open('rb').read(8)==bag_summary.MAGIC]
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_bounded_amplitude_v4/lateral_once.py:246: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/tmp2ysliii8/run/bag/fixture.mcap'>
+  magic=[str(p) for p in (output/'bag').glob('*.mcap') if p.open('rb').read(8)==bag_summary.MAGIC]
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_parent_success_measures_positive_before_negative_and_no_duplicate_results (test_sustained_parent.CombinedFixtures.test_parent_success_measures_positive_before_negative_and_no_duplicate_results) ... /home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_bounded_amplitude_v4/lateral_once.py:246: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/tmpz07eks9a/run/bag/fixture.mcap'>
+  magic=[str(p) for p in (output/'bag').glob('*.mcap') if p.open('rb').read(8)==bag_summary.MAGIC]
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_parent_wrong_direction_missing_stop_or_illegal_packet_never_negative (test_sustained_parent.CombinedFixtures.test_parent_wrong_direction_missing_stop_or_illegal_packet_never_negative) ... /home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_bounded_amplitude_v4/lateral_once.py:246: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/tmp7hg8k5gn/run/bag/fixture.mcap'>
+  magic=[str(p) for p in (output/'bag').glob('*.mcap') if p.open('rb').read(8)==bag_summary.MAGIC]
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_bounded_amplitude_v4/lateral_once.py:246: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/tmphcky7mdr/run/bag/fixture.mcap'>
+  magic=[str(p) for p in (output/'bag').glob('*.mcap') if p.open('rb').read(8)==bag_summary.MAGIC]
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_semantic_lateral_bounded_amplitude_v4/lateral_once.py:246: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/tmpv14depte/run/bag/fixture.mcap'>
+  magic=[str(p) for p in (output/'bag').glob('*.mcap') if p.open('rb').read(8)==bag_summary.MAGIC]
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_real_original_patch_stop_and_age_guards_preserved (test_sustained_parent.CombinedFixtures.test_real_original_patch_stop_and_age_guards_preserved) ... ok
+test_sustained_original_GT_both_signs_complete_window_and_freeze (test_sustained_parent.CombinedFixtures.test_sustained_original_GT_both_signs_complete_window_and_freeze) ... ok
+test_sustained_tail_gap_missing_anchor_and_unmeasured_stop_fail (test_sustained_parent.CombinedFixtures.test_sustained_tail_gap_missing_anchor_and_unmeasured_stop_fail) ... ok
+
+----------------------------------------------------------------------
+Ran 27 tests in 0.643s
+
+OK

@@ -1,0 +1,20 @@
+{
+  "argv": [
+    "nice",
+    "-n",
+    "15",
+    "taskset",
+    "-c",
+    "14,15",
+    "cmake",
+    "--build",
+    "/home/charles/project/colcon_ws/analysis_outputs/upstream_nav2_interface_isolated_20261031/build",
+    "-j1"
+  ],
+  "cpu_affinity": [
+    14,
+    15
+  ],
+  "max_jobs": 1,
+  "scope": "local isolated native component build"
+}

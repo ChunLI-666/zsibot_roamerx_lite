@@ -89,14 +89,15 @@ def preplay_list_nodes_type():
     return ListNodes
 
 
-def preplay_component_names():
-    return ['/map_server', '/controller_server', '/planner_server', '/behavior_server',
+def preplay_component_names(arm_runtime=False):
+    names = ['/map_server', '/controller_server', '/planner_server', '/behavior_server',
             '/velocity_smoother', '/bt_navigator', '/waypoint_follower',
             '/lifecycle_manager_navigation']
+    return [name for name in names if not (arm_runtime and name == '/waypoint_follower')]
 
 
-def preplay_component_response_matches(names, ids):
-    expected = preplay_component_names()
+def preplay_component_response_matches(names, ids, arm_runtime=False):
+    expected = preplay_component_names(arm_runtime)
     return (len(names) == len(ids) == len(expected) and
             all(type(name) is str for name in names) and set(names) == set(expected) and
             all(type(value) is int and 0 < value < 2**64 for value in ids) and
@@ -191,9 +192,11 @@ class Monitor(Node):
         try:
             self._lifecycle_shutdown_client = self.create_client(
                 ManageLifecycleNodes, '/lifecycle_manager_navigation/manage_nodes')
+            arm_runtime = bool(getattr(getattr(self, 'args', None), 'arm_runtime', False))
             self._cleanup_state_clients = {name: self.create_client(GetState, '/' + name + '/get_state')
                 for name in ('map_server', 'controller_server', 'smoother_server', 'planner_server',
-                             'behavior_server', 'velocity_smoother', 'bt_navigator', 'waypoint_follower')}
+                             'behavior_server', 'velocity_smoother', 'bt_navigator', 'waypoint_follower')
+                if not (arm_runtime and name == 'waypoint_follower')}
             self._cleanup_diagnostic_record('lifecycle_diagnostics_prepared', dict(
                 service='/lifecycle_manager_navigation/manage_nodes',
                 state_services=sorted(self._cleanup_state_clients),
@@ -442,7 +445,8 @@ class Monitor(Node):
             component_container=dict(node_name='navigo_container', node_namespace='/',
                 service='/navigo_container/_container/list_nodes',
                 service_type='composition_interfaces/srv/ListNodes',
-                expected_full_node_names=preplay_component_names(), request_count=0,
+                expected_full_node_names=preplay_component_names(
+                    getattr(self.args, 'arm_runtime', False)), request_count=0,
                 request_minimum_interval_ns=100000000, request_rate_limit_hz=10,
                 request_timeout_ns=2000000000, request_timeout_count=0,
                 last_request_timeout_monotonic_ns=None,
@@ -527,7 +531,8 @@ class Monitor(Node):
                             unique_ids=list(response.unique_ids),
                             response_monotonic_ns=time.monotonic_ns())
                         component['matches'] = preplay_component_response_matches(
-                            component['full_node_names'], component['unique_ids'])
+                            component['full_node_names'], component['unique_ids'],
+                            getattr(self.args, 'arm_runtime', False))
                     elif now_ns - pending_started_ns >= component['request_timeout_ns']:
                         # Read-only query only: retire its local sequence before
                         # retry. A late response cannot satisfy the fresh query.
@@ -769,6 +774,8 @@ class Monitor(Node):
             raise AssertionError('Standard lifecycle shutdown returned failure')
         names = ('map_server', 'controller_server', 'smoother_server', 'planner_server',
                  'behavior_server', 'velocity_smoother', 'bt_navigator', 'waypoint_follower')
+        if getattr(getattr(self, 'args', None), 'arm_runtime', False):
+            names = tuple(name for name in names if name != 'waypoint_follower')
         pending, final = {}, set()
         clients = {name: self.create_client(GetState, '/' + name + '/get_state') for name in names}
         def finalized():

@@ -1,0 +1,36 @@
+-- Found ament_cmake: 2.5.6 (/opt/ros/jazzy/share/ament_cmake/cmake)
+-- Found rclcpp: 28.1.22 (/opt/ros/jazzy/share/rclcpp/cmake)
+-- Found rosidl_generator_c: 4.6.9 (/opt/ros/jazzy/share/rosidl_generator_c/cmake)
+-- Found rosidl_generator_cpp: 4.6.9 (/opt/ros/jazzy/share/rosidl_generator_cpp/cmake)
+-- Using all available rosidl_typesupport_c: rosidl_typesupport_fastrtps_c;rosidl_typesupport_introspection_c
+-- Using all available rosidl_typesupport_cpp: rosidl_typesupport_fastrtps_cpp;rosidl_typesupport_introspection_cpp
+-- Found rmw_implementation_cmake: 7.3.3 (/opt/ros/jazzy/share/rmw_implementation_cmake/cmake)
+-- Found rmw_fastrtps_cpp: 8.4.4 (/opt/ros/jazzy/share/rmw_fastrtps_cpp/cmake)
+-- Using RMW implementation 'rmw_fastrtps_cpp' as default
+-- Found rclcpp_lifecycle: 28.1.22 (/opt/ros/jazzy/share/rclcpp_lifecycle/cmake)
+-- Found rclcpp_action: 28.1.22 (/opt/ros/jazzy/share/rclcpp_action/cmake)
+-- Found nav2_costmap_2d: 1.3.13 (/opt/ros/jazzy/share/nav2_costmap_2d/cmake)
+-- Found eigen3_cmake_module: 0.3.1 (/opt/ros/jazzy/share/eigen3_cmake_module/cmake)
+-- Ensuring Eigen3 include directory is part of orocos-kdl CMake target
+-- Found nav2_core: 1.3.13 (/opt/ros/jazzy/share/nav2_core/cmake)
+-- Configuring done (1.2s)
+-- Generating done (0.3s)
+-- Build files have been written to: /home/charles/project/colcon_ws/analysis_outputs/upstream_nav2_interface_isolated_20261031/build
+[ 60%] Built target corrected_path_probe
+[ 80%] Building CXX object CMakeFiles/complete_rotation_tests.dir/harness/complete_rotation_tests.cpp.o
+[100%] Linking CXX executable complete_rotation_tests
+[100%] Built target complete_rotation_tests
+[ 60%] Built target upstream_path_probe
+[ 80%] Building CXX object CMakeFiles/native_path_probe.dir/harness/native_path_probe.cpp.o
+[100%] Linking CXX executable native_path_probe
+[100%] Built target native_path_probe
+Internal ctest changing into directory: /home/charles/project/colcon_ws/analysis_outputs/upstream_nav2_interface_isolated_20261031/build
+Test project /home/charles/project/colcon_ws/analysis_outputs/upstream_nav2_interface_isolated_20261031/build
+    Start 1: exact_upstream_native_path_semantics
+1/2 Test #1: exact_upstream_native_path_semantics ...   Passed    0.02 sec
+    Start 2: complete_rotation_constraints
+2/2 Test #2: complete_rotation_constraints ..........   Passed    0.00 sec
+
+100% tests passed, 0 tests failed out of 2
+
+Total Test time (real) =   0.03 sec

@@ -1,0 +1,532 @@
+# Matrix planner comparison
+
+This launcher starts only navigation, the existing safety gate and full MCAP
+recording against an already running Matrix sensor bridge and native Lightning
+localization. It never publishes replacement TF/odometry, sends goals, or starts
+an SDK owner. Use the isolated domain 185 network environment. An independent
+goal pilot sends each explicitly recorded Action.
+
+Select `official`, `segmented`, or the auxiliary `hybrid` control with `--variant`.
+Supply `--map`, `--footprint`, `--padding`, `--output`, the appropriate explicit
+`--official-install` or `--segmented-install`, `--build-receipt`, and a custom-message
+`--message-install` prefix. Preparation
+is the default; `--run` starts the stack. The build receipt must bind selected
+sources to a full local commit and list installation artifact SHA256 values.
+Every listed artifact, including the segmented executable, is checked before
+launch. The actual loaded Nav2 libraries and runtime parameters are also saved.
+The message prefix is copied and applied only to the recorder process. Its
+CustomMsg, projection debug, build metadata and Lightning debug types must load,
+and recorder subscriptions must be present before READY. Do not substitute an
+old full navigation overlay. A bag without these interfaces is incomplete even
+when its raw sensors and front camera are available.
+
+Every new `--run` arms an independent, detached recording deadline before ROS
+setup or runtime children. `--max-runtime-sec` defaults to 600 and accepts only
+finite values in `(0, 7200]`; startup time counts from the launcher's Linux process
+start, using `CLOCK_BOOTTIME`, independently of agent/SSH lifetime or ROS time.
+Arming must acknowledge successfully or startup fails. The frozen helper runs
+with Python's isolated import path, no terminal, no inherited stdio pipes and no
+ROS dependency. Linux `pidfd_open` and `pidfd_send_signal` support is required.
+It binds the PID, process start ticks, complete command line hash, boot ID,
+unique run ID and output directory before sending one launcher SIGINT through
+the retained pidfd. Identity changes fail closed without a signal. PID reuse
+cannot redirect the signal. Before each owned executable, a dormant stdlib-only
+wrapper self-registers its PID, role and run/launch identity and waits for the
+watchdog's retained-pidfd acknowledgement. It then uses exec with the same PID;
+the watchdog verifies the final full argv against the frozen command plan,
+including a direct ELF-interpreter shebang expansion. Unsupported ambiguous
+shebangs fail closed. The launcher waits for that final identity acknowledgement
+before continuing. Even if the parent freezes or exits immediately after Popen,
+the real executable cannot run unregistered. An unacknowledged wrapper exits
+without exec when its watchdog exits or the fixed deadline passes. The child's
+initial environment binds the run ID, output directory, role and launch token.
+Source services are excluded; the independent watchdog uses a minimal PATH/LANG
+environment while owned targets retain their supplied ROS/DDS environment.
+
+`recording_deadline.json` records the fixed deadline and launcher identity;
+`recording_deadline_armed.json` records the helper identity; the separate
+`recording_deadline_events.jsonl` records arming, deadline/reason, signal or
+identity rejection. On entry to the existing shutdown path, the launcher
+atomically writes a `shutdown_started` stage to `recording_deadline_shutdown.json`
+and records each closure stage in `events.jsonl`; this leaves the deadline armed.
+Only after all owned processes have exited does it write `recording_closed`,
+before MCAP decoding/hashing. The helper verifies retained child pidfds are
+closed before disarming. Command producers still stop before the smoother/gate
+zero tail and recorder. If no confirmed closure appears within 15 seconds of
+the deadline SIGINT, or the launcher exits while owned children remain alive,
+the independent helper applies the same order: exact registered command
+producers receive SIGINT, a 1 second zero tail elapses, remaining navigation
+children receive SIGINT, another 0.5 seconds elapses, and the recorder receives
+SIGINT. Each child identity and initial run binding is rechecked immediately
+before its one fallback signal. `recording_deadline_children.json` and
+`recording_deadline_children_armed.json` audit registration and acknowledgement;
+per-role plan and self-registration JSON files bind wrapper and final argv;
+fallback phases/results are in the helper event log. It waits up to 30 seconds
+for child exit and reports any remaining child without escalation. These are
+normal SIGINT requests, not a hard bound under kernel hangs or disk faults.
+Long post-closure hashing receives no further deadline signals. Existing
+recordings, build receipts and running launchers are not modified.
+Run the non-ROS process checks with
+`python3 experiments/planner_comparison_matrix/test_recording_deadline.py`.
+
+For a frozen deployment without `.git`, pass `--source-snapshot <JSON>`. Build
+the deployment from the retained canonical commit (for example with `git archive`),
+then generate the manifest from the exact exported bytes. No linked worktree or
+second Git checkout is needed. The manifest has this versioned shape:
+
+```json
+{
+  "schema_version": 1,
+  "origin": {
+    "kind": "canonical_checkout_snapshot",
+    "canonical_repository": "/absolute/original/canonical/repository",
+    "commit": "<40 lowercase hex characters>",
+    "branch": "<observed canonical branch>",
+    "status": "<exact git status --short output; empty when clean>"
+  },
+  "files_sha256": {
+    "experiments/planner_comparison_matrix/matrix_navigation.py": "<SHA256>",
+    "experiments/planner_comparison_matrix/static_layer_snapshot.py": "<SHA256>",
+    "experiments/planner_comparison_matrix/recording_deadline.py": "<SHA256>",
+    "experiments/planner_comparison_matrix/run_matrix_navigation.sh": "<SHA256>",
+    "experiments/planner_comparison_matrix/matrix_profile.yaml": "<SHA256>",
+    "src/navigation/src/robot_navigo/scripts/nav_safety_gate.py": "<SHA256>"
+  }
+}
+```
+
+Replace every placeholder with the captured value. Include the selected
+`--template` file if it differs from `matrix_profile.yaml`. Every listed file,
+including additional entries, must have its lowercase SHA256 checked against a
+normalized path relative to the deployed navigation root. Missing required
+entries, duplicate JSON keys, malformed origin/schema/hash values, `..`, absolute
+paths, external templates and symlinks escaping that root are rejected before
+creating the run directory. The source manifest is copied unchanged into the run
+and recorded with its digest and origin. Before runtime setup, its copied bytes
+must still match that recorded digest and its source hashes are checked again.
+`source_repository_observation` is null
+because the deployment does not inspect Git. Its recorded canonical commit is
+an origin observation, not an assertion that the deployed host has that checkout
+or that the selected binaries were built there. The independent build receipt
+and full artifact checks remain required. Omitting this option preserves the
+existing canonical Git observation. Domain 185 also supports a verified same-host
+loopback environment; transport selection does not change source timestamps or
+freshness limits.
+
+The fresh map retains 1 cm geometry and its mapping evidence uses 5 cm cells.
+Navigation uses a 20 m rolling global costmap and 6 m local costmap at 1 cm.
+Both publish full raw master costmaps; the recorder includes hidden topics,
+actions, front camera and calibration, original sensors, commands, TF and diagnostics.
+The launcher's two raw master costmap evidence subscriptions request reliable,
+transient-local delivery with depth 1 to match the retained publisher samples.
+Sensor subscriptions, the 6 s costmap evidence check, and freshness limits stay unchanged.
+Each of the four complete frozen static-layer diagnostic topics is captured once
+as its original CDR under `/experiment/static_layer_snapshot/...`, with a sidecar
+hash and reliable delivery acknowledgement. The original `/map` and master
+costmaps remain fully recorded. After closure, the MCAP must contain exactly one
+message per snapshot alias with the original CDR hash. A map reload requires a new run. The old all-topic
+v2 recording contained about 113 GB of uncompressed CDR, 92% from repeated complete
+static-layer copies; that recording remains intact. The revised policy removes
+those repeated subscriptions, and its exact exclusions are saved in each manifest.
+The launcher writes a 0.5 s readiness lease and continuously revokes it for stale
+odom/TF/scan/camera or invalid localization. The pilot must additionally check
+current inputs immediately before each goal. Runtime command guards remain active
+even if the observer exits.
+Use a local DDS initial-peer range sufficient for all participants (the validated
+November 5 environment uses 64). For the verified local fragmented CustomMsg loss,
+the projector supports `sensor_input_reliable:=true`; its original default remains
+false. This changes neither sampling stamps nor the 0.3 s stale-input rejection.
+
+`matrix_profile.yaml` is an explicit open-area dynamic profile, separate from the
+strict ideal-plant reference in `profile_template.yaml`. Before goal experiments,
+Matrix native forward input 0.20 (nominal policy vx 0.4) measured about 0.441 m/s;
+smaller inputs could remain stationary. Native yaw 0.30 measured about 0.2 rad/s.
+Therefore the profile requests nominal vx 0.4, rotation 0.3, and does not silently
+boost low commands downstream. Angular acceleration 6 permits a 0.3 policy step
+at 20 Hz, within the tested input step amplitude; this is not a measured body
+acceleration claim. The default final/phase XY tolerance is 0.15 m and yaw is
+0.08 rad, applied identically to both schemes. Measured zero-command stopping
+displacement was about 0.056 m; this sample is not a guaranteed bound. Each case
+must still report exact settled original-goal error.
+
+For the November 5 open-area runs, the conservative footprint is a square with
+vertices at x/y = +/-0.74 m, plus 0.15 m padding. A triangle-inequality bound over
+all model meshes and joint translations gives radius <=0.732237 m independently
+of joint rotation. This deliberately conservative envelope does not establish
+narrow-door capability. No result here establishes physical robot acceptance.
+
+Keep every attempted run, including startup failures, network outages and
+controller rejections. An Action success alone is insufficient: verify the
+original goal after stopping, ordered turns, collision checks, camera continuity,
+MCAP readability and concrete code/config/map identities.
+
+For an authorized native multi-waypoint experiment, prepare/run with
+`--with-waypoints`. The default single-goal profile is unchanged. The option adds
+the installed Jazzy 1.3.13 `nav2_waypoint_follower/waypoint_follower` lifecycle
+server and activates it with the existing nodes. Its effective parameters are
+read back: `stop_on_failure=true`, `loop_rate=20`, and the native
+`WaitAtWaypoint` task pauses for 1000 ms at every reached point. The new server is
+an exact owned deadline role and stops with the command producers before the
+smoother/gate zero tail. Its executable, core/plugin DSOs, package version and
+Action/message definitions are hashed separately from the unchanged selected
+planner/controller build receipt. The READY lease binds these identities and
+the independent batch client source hashes. Include `waypoint_batch.py`,
+`waypoint_contract.py`, the unchanged `pilot_scan_timing.py` and
+`message_info_contract.py` in a frozen source deployment manifest.
+
+The independent `goal_pilot_source/waypoint_batch.py` defaults to observation.
+Its authorized `--execute --ready <lease> --route <route.json> --output <new-dir>`
+submits exactly one native `FollowWaypoints` request with `goal_index=0` and
+`number_of_loops=0`. Internally the official server sends one `NavigateToPose`
+per leg, preserving the existing single-goal BT and terminal-goal binding.
+This is sequential native waypoint execution; it does not plan one concatenated
+global route. It stops on a failed leg without automatic retries or skipped
+points. Its route contract is:
+
+```json
+{
+  "schema_version": 1,
+  "frame_id": "map",
+  "executable": true,
+  "mission_budget_sec": 300,
+  "waypoints": [
+    {"id": "first", "pose": [1.0, 1.0, 0.0], "require_stopped": true},
+    {"id": "turn180", "pose": [1.0, 1.0, 3.141592653589793], "require_stopped": true, "tags": ["in_place_180"]}
+  ]
+}
+```
+
+The coordinates above illustrate the schema and are not an approved scene
+route. An executable route needs 2–256 unique IDs and finite poses, including
+each original heading. Repeated XY with a different heading remains a distinct
+ordered point. Each adjacent leg and the first goal from the final live start
+must be shorter than 8 m; this necessary check does not prove that the complete
+path and padded body stay inside the current rolling costmap or mapped free
+space. A route may cover the full map through successive local windows.
+`executable=false` design documents are rejected. The preregistered mission
+budget must be finite and in `(0,3300]` seconds; an explicit client `--timeout`
+must equal it. Before sending, the client checks the launcher's fixed
+`CLOCK_BOOTTIME` deadline and same boot ID, requiring the full budget plus
+30 seconds for stopping/closure. Stop observation is bounded to `[.3,8]` seconds
+so an override cannot consume that reserve. The launcher retains its default 600-second
+deadline and explicit maximum 7200 seconds. Choose a sufficient explicit
+launcher deadline before starting a long experiment.
+
+The batch client inherits the unchanged a63b observer's 13 explicit
+subscriptions, sensor QoS, map/odom frame checks, original `.3s` old/`.05s`
+future input limits, JPEG/Info checks and `.5s` READY lease. It requires 10
+continuous healthy, measured-and-commanded-stopped seconds after Action
+discovery within a total preflight budget no greater than 40 seconds. It never
+uses GT odometry for navigation. Native feedback selects the expected index;
+each point independently requires fresh `/lightning/pose` within `.15m/.08rad`
+and a continuous `.3s` measured stop from `/odom/current_pose` and commanded stop
+from `/cmd_vel_safe`. A feedback advance before this proof cancels this client's
+own batch. Original map poses, per-point entry/arrival/pass times, phase,
+sampling/receive ages, observed motion and all missed-waypoint results are
+retained. `/plan` endpoint matching and feedback-to-plan receipt latency remain
+explicit geometric/time inferences, not planner CPU/search durations.
+
+The launcher separately watches the Jazzy Action graph, native Action status
+and child feedback without adding to the client's 13 sensor/evidence
+subscriptions. READY requires exactly the native follower as the only
+`NavigateToPose` client and the expected unique servers/status publishers; an
+already active goal prevents initial READY. It continuously revokes READY when
+this ownership changes. Native statuses are event-driven, not periodic health
+heartbeats. Observed child UUIDs/feedback are recorded through the launcher
+lease and full hidden-topic MCAP; parent/child association has no direct UUID
+field and remains contextual under exclusive ownership.
+
+Cancellation has a specific upstream boundary: this client targets only its
+own nonzero `FollowWaypoints` UUID, including a missing goal response. The
+official 1.3.13 server internally calls `async_cancel_all_goals()` on its
+`NavigateToPose` endpoint. This experiment therefore supports exclusive domain
+185 ownership only; it is unsuitable for a shared navigation server. The
+upstream server also refreshes each child goal's intent stamp at dispatch;
+original route intent and sensor sample stamps stay separately recorded.
+Every possibly sent goal reaches own-UUID cancellation and an independent stop
+observation in `finally`, including goal-response timeout and runtime exceptions.
+The new client handles SIGINT/SIGTERM as flags and keeps its ROS context alive
+until this cleanup finishes. A missing stop observation remains explicitly false.
+Measured and commanded stop velocities must all be finite; the unchanged a63b
+observer is not edited.
+The safe-command velocity components must also be present and finite during
+motion; this check applies no stop-speed threshold while navigating.
+The new client also preserves raw native pose XYZ/quaternion values and rejects
+nonfinite components before trusting a projected yaw. It performs no quaternion
+normalization or coordinate conversion; legal missing scan-range values retain
+their existing interpretation.
+
+Long-route scan MessageInfo and state evidence use a bounded 4096-record
+nonblocking queue and a dedicated low-frequency writer. Safety callbacks do no
+JSON serialization or file I/O. The original first-invalid snapshot and ring of
+50 samples are retained; the old 2048-sample trace cap does not apply to this
+new client. Queue overflow, writer failure or an incomplete drain is a permanent
+evidence gap and makes the final attempt invalid. Instrumentation failure does
+not replace the own-UUID cancellation/finally path. Nonfinite numeric observations
+are encoded only during writer/final persistence as a
+`{"nonfinite_float":"NaN"}` (or `+Infinity`/`-Infinity`) object, preserving their
+location without changing the original safety caches or first-invalid references.
+Run the additional offline
+checks with `python3 experiments/planner_comparison_matrix/test_native_waypoints.py`.
+
+### Full-map Lattice search candidate (2026-11-07)
+
+The Matrix profile explicitly sets `GridBased.cost_penalty: 1.0` for all three
+runtime variants. The prior profile omitted this parameter and used the
+installed Jazzy 1.3.13 default of 2.0. On the frozen published costmap preceding
+B3's N001 failure, the official Lattice reached the 1,000,000-iteration cap
+in about 1.55 seconds with 2.0; changing only this soft-cost weight to 1.0
+returned a path in about 226 milliseconds. Every returned pose and connecting
+sweep passed the existing filled, padded rectangular body check. This is an
+offline candidate, not full-route navigation acceptance or an A/B winner.
+
+The map, 1 cm grid, primitive file, 2 second planning budget, iteration cap,
+footprint, padding and original goal stay fixed. The selected planner binary
+retains its separate build receipt; a configuration commit does not rebuild it.
+The fixture, typed effective parameters, original and candidate outputs,
+source analysis and independent review are under
+`analysis_outputs/planner_comparison_20261105/` in
+`native_B3_planner_frozen_costmap_benchmark_solmax_v1` and
+`native_B3_lattice_parameter_candidates_solmax_v1`. The published costmap and
+nearest Native pose sample are the available offline fixture, not an exact
+recording of the planner's internal locked map or TF lookup.
+
+### Separate recording and mission budgets (2026-11-07)
+
+The optional recording deadline now accepts up to 7200 seconds; its default
+remains 600 seconds. Select enough recording time for setup, the independently
+bounded route and final stop/closure. B4 sent no goal because its fixed 3600
+second window had only 3267.6 seconds left before dispatch, below the unchanged
+3300 second mission plus 30 second reserve. Keep B4 as a zero-goal preparation
+case, not a planner failure. The next full-route recording explicitly requests
+7200 seconds, while its route still has a 3300 second execution budget.
+
+This changes only the recording supervisor's finite upper limit. The absolute
+CLOCK_BOOTTIME deadline, retained-pidfd ownership, stop order, default timeout,
+planning budget, sensor-age checks and measured stop requirements are unchanged.
+Inputs have their own deadline and must remain available throughout each case.
+
+The official B Matrix profile now explicitly uses `cost_penalty: 0.2`. On the
+separate frozen B3 and B7 published costmaps this retains a positive soft cost
+preference and more search margin than 1.0, including B7 start-yaw perturbations
+of +/-0.08 rad. The original 2 s/1,000,000-iteration limits, body footprint and
+filled sweep checks remain unchanged. Published maps and nearest recorded Native
+poses are offline proxies, not the unrecorded planner-lock inputs; these results
+do not establish full-route or live timing acceptance.
+
+Ownership metadata uses the existing READY 500 ms lease. Its older 300 ms
+boundary is still recorded once per observation as metadata latency evidence;
+sensor, TF, command and independent stopped-visit checks retain their contracts.
+The official Matrix variant derives its frozen lattice file by changing only
+the metadata motion model to `omni`, selecting the installed official SE2
+heuristic. All forward/rotate primitive arrays remain unchanged; analytic
+connectors remain disabled. The original and derived file hashes are recorded.
+
+Official/Hybrid Matrix runs explicitly enable failure-only planner snapshots.
+The wrapper copies the actual locked grid and request, then writes a numbered
+snapshot after releasing its locks if planning or output validation fails.
+Search wall time, thread CPU and original cancel-check counts are separate from
+capture and write overhead. Actual base iteration counts remain unknown.
+
+### Initial Pose-goal region (official variant only)
+
+The official Matrix Pose-goal profile explicitly enables
+`FollowPath.initial_goal_region_shortcut`; the controller plugin defaults it to
+false. After fresh TF/odometry and current filled-body checks, the first control
+cycle of each plan may select a complete collision-checked shortest rotation at
+the actual body origin when the body already lies inside the original goal XY
+region. Dense signed heading checkpoints retain the selected half-turn direction.
+The same original goal, live geometry checks, original tolerances, ordered
+terminal cursor and command/body sweeps govern completion. The independent
+waypoint client still requires a measured and commanded stop.
+
+That one opportunity is consumed even if the body is outside the region or the
+rotation is blocked; normal ordered prefix execution then proceeds. Cancellation
+and reset clear the opportunity. This opt-in defines Pose-goal semantics: it may
+replace an entire unstarted prefix when its destination region is already
+occupied by the actual body. Use ordered-prefix semantics for tasks that require
+executing an arbitrary supplied FollowPath loop or every intermediate constraint.
+
+Recorded B3 N000 was already within 8.94 cm of its original goal (15 cm XY
+tolerance); its path required 3.424 radians of rotation for an original yaw
+difference of 0.141 radians. The new option targets that extra motion. Pure
+geometry/state tests and builds are reported separately from actual Matrix
+closed-loop acceptance, which still requires full-route recordings.
+
+官方实验可用 `FollowPath.terminal_track_xy_drift_limit`，插件默认 0，official Matrix profile 显式选择 0.05 m。它只作用于已在原目标区域内、实测停止后的初始原地旋转：冻结实际中心，原 mandatory heading 尚未完成时允许最多 5 cm 累计位移，且距离原目标不超过原 XY 容差加 5 cm。正常平移到点的制动过程沿用原逻辑；末个 heading 完成当 tick、纠偏旋转及最终验收仍使用原 XY/yaw/停稳标准。同目标重新规划须先完成经过碰撞检查的零指令与原区域内双时基连续 0.3 s 停稳，不能逐 plan 重锚累计漂移。完整机身、剩余旋转和命令 sweep 检查保持；该参数是观测执行边界，不是连续 XY 不确定性 tube 的碰撞证明，也不是仿真或实机验收通过。
+
+区域内的原许可优先保留：5 cm pivot 限制只用于原目标区域外、mandatory 未完成时的额外执行许可，不再拒绝仍在原区域内的居中转向。官方 Matrix 对照 profile 使用固定 0.75 m lookahead 与 0.3 rad/s 名义转向命令；RPP 原始输出先校验，再将角速度限制至同一显式 0.3 上限，随后做 filled command sweep，发布完全相同的受限命令。此顺序避免对一条高曲率轨迹做检查、却在下游裁成另一条轨迹；速度平滑及机体实际响应的瞬态仍须录包验证。
+
+B13 将初始 Pose-goal 快捷旋转的准入收紧到距原目标中心 0.05 m 内，参数为
+`FollowPath.initial_goal_region_max_xy_error`。插件兼容默认值为 0.25 m，仍与原
+XY 容差取较小值；只有 official Matrix profile 显式选择 0.05 m。B25 从距中心
+约 0.128 m 的停止位置起转，原始 Native 样本显示约 0.052 m 位移后触发执行
+边界，故仅“已经在 0.15 m 目标区域内”不足以保证转向余量。准入之外继续执行
+原规划路径，不跳过路径约束，也不修改目标或最终验收容差。这个内圈是实验
+余量选择，不能证明仿真或实机的漂移上界；完整路线结果仍须单独记录。
+
+批量测试客户端的原首段请求上限仍为 8 m。显式仿真选项
+`--simulation-first-leg-max-distance-m 8.5` 只在既有仿真模式且生效 global
+window 至少为 20 m 时放行；各原路线相邻段仍须小于 8 m。它用于原目标失败
+后实际起点的有限偏差，完整机身、地图边界与碰撞可行性仍由规划服务检查。
+首段实测距离、请求上限及原始 pose 时间戳独立记录；TF/停稳/最终目标容差不变。
+
+`--health-tf-latest-only` 为显式仿真下的只读 launcher 健康监听器选择动态 TF
+BEST_EFFORT/KEEP_LAST/depth1；默认仍为 tf2 自带配置，静态 TF 配置不变。
+B27 录包在拒绝前已收到约 102 ms 时间龄的连续 Native TF，但 launcher 报告
+自身缓存超限。这个候选减少监听旧队列，并逐次记录 callback/DDS 时间、原 TF
+stamp 与 lookup 实际结果，供区分接收和消费延迟。Native TF 发布、控制器、
+原 300 ms 判断和导航取消条件均保持，首次错误不会被延后或改判为健康。
+
+### B28 frozen-input profile correction (2026-11-09)
+
+The B16 official Matrix candidate used `GridBased.cost_penalty: 1.0` and
+`FollowPath.initial_goal_region_max_xy_error: 0.10`. Segmented and Hybrid
+profiles retain their existing values. These are configuration changes; the
+B13 C++ build and its complete filled-body, path and command checks are retained.
+
+B28's F016 search returned 9,319 poses in 33 ms, but the filled output check
+rejected its rotation near (-11.875, 12.953). Replaying the exact locked grid,
+request and primitives reproduced 97 blocked poses and 98 blocked intervals.
+Weight 0.5 still failed; weight 1.0 passed in 142 ms and also passed the older
+B7 frozen fixture with the current omni heuristic in 219 ms. The 2 s planning
+budget, original map, footprint, padding and collision rejection stay fixed.
+The fixture and measured outputs are in `native_B28_exact_planner_replay_root_v1`
+under the comparison analysis directory. These offline checks do not establish
+full-route timing or navigation acceptance.
+
+B28 also reached F010 with 7.68 cm XY error, inside the original 15 cm goal
+region but outside the prior 5 cm shortcut admission. F011 then followed an
+ordered path that turned left about 245 degrees instead of a short right turn.
+The new 10 cm admission permits the existing checked, initially stopped
+actual-origin rotation in that case. It leaves 5 cm to the original goal disc
+at the standard 15 cm XY tolerance. This arithmetic margin is not a bound on
+actual drift: the original live execution guard and filled sweeps still apply,
+and final XY/yaw/stop tolerances remain unchanged. Signed turn direction and
+actual pivot displacement require new closed-loop evidence.
+
+### B17 initial stopped rotation in the original goal region (2026-11-09)
+
+The current official profile keeps cost weight 1.0 and uses a 0.15 m maximum
+initial rotation admission, still clipped to the original goal XY tolerance.
+B29 stopped at F010 with 0.110061 m error: that passed the original 0.15 m
+goal contract but missed B16's additional 0.10 m admission. F011 again executed
+a roughly 246 degree left turn instead of a short right turn.
+
+The initially stopped Pose-goal shortcut may now use the existing completely
+checked shortest actual-origin rotation throughout the standard original goal
+disc. It remains a single unstarted-plan opportunity; active ordered path
+constraints cannot be skipped. Measured stopping, original goal binding,
+remaining-heading and command/body sweeps, final XY/yaw tolerances and the
+existing outside-disc execution permission are unchanged. This does not prove
+a pivot-drift bound. In particular the older B25 start at about 0.128 m can be
+admitted again and can still fail its unchanged live execution guard. New signed
+motion, pivot displacement and complete-route results must be recorded.
+# B18: normal path recovery after terminal-region escape
+
+The optional official adapter distinguishes a valid observation outside the
+original goal disc from invalid reentry evidence. After a fresh compatible plan,
+the ordinary checked path may drive back toward the original goal. This does not
+renew terminal drift permission: initial shortcuts and terminal handoff remain
+disabled until a checked zero and the existing stopped .3 second dual-clock
+reentry dwell complete. An excursion clears the old checked-zero proof.
+
+An already active terminal rotation still fails when it loses its allowed
+execution region. Original goal tolerance, fixed-pivot rescue, TF/odometry guards,
+ordered constraints and filled body/path/command sweeps retain their thresholds.
+The actual-plugin regression loads the real adapter DSO through public Jazzy
+interfaces; the prior B13 DSO rejects its ordinary recovery command. Synthetic
+inputs exercise recovery, collision rejection, no premature completion and final
+stop dwell. They do not reproduce B30's exact controller request or certify a
+simulation route or physical robot. Tests use the official Jazzy library path to
+avoid mixing the fork costmap ABI from an inherited workspace environment.
+## B19: approach the goal center before terminal rotation
+
+B33's last target began its two terminal rotations at .12825 m and .14915 m
+from the original goal. The latter left less than 1 mm radial headroom inside
+the .15 m goal region before the simulator's observed body motion during turns.
+The official Matrix candidate now requires .05 m position error before an
+initial goal-region rotation or an ordered terminal handoff. RPP's final-prefix
+endpoint trigger subtracts the retained goal-cell error from this inner radius,
+so ordinary approach can continue until the original goal center is close.
+
+`terminal_rotation_entry_xy_tolerance` is an explicit controller opt-in; zero
+keeps the previous behavior. The original .15 m/.08 rad final goal checker,
+continuous .3 second measured stop, terminal execution envelope and filled body
+checks retain their original meanings. Nonterminal handler anchors, completion
+length and RPP endpoint tolerances keep the B33 settings. The existing handler
+recognizes an ending rotation run as the final prefix, so no new cursor or
+handler state is added.
+
+Public plugin tests distinguish the old installed DSO's early turn/zero command
+from an ordinary approach, exercise approach-to-turn within the same plan,
+retain original-region stopped acceptance, and reject a filled collision.
+Separate nonzero goal-cell fixtures cover the new final trigger and the default
+zero option's previous handoff behavior. These software checks do not establish
+full-route simulation or physical acceptance.
+
+## B20: stop the measured body before terminal rotation
+
+The official Matrix profile enables `terminal_stop_before_rotation`; its
+default is false. B34 entered the .05 m center while measured body translation
+was still about .65/.56 m/s. The new gate requires the existing full measured
+stop (.03 m/s and .05 rad/s), then rechecks the .05 m center and all remaining
+filled rotation/command sweeps at one fresh actual pose before the first
+nonzero terminal angular command. Ordinary RPP path alignment retains its
+previous behavior. An admitted rotation keeps the original .15 m execution
+region and final .15 m/.08 rad goal plus .3 second checked stop.
+
+Only an ordered last TRACK can begin braking in the original .15 m window.
+Checked zero commands continue until measured stopping; a stop outside the
+center requests a fresh ordinary path instead of holding zero forever. A
+compatible same-goal plan cannot discard the pending brake or mandatory cursor.
+No smoother, speed, SDK or collision thresholds change. Public DSO fixtures
+include both cached B34 terminal approaches with a separate fixture clock;
+these checks do not prove sufficient physical stopping distance or route success.
+
+## B21: distinguish early braking from the mandatory measured stop
+
+B35 stopped outside the center twice and requested a fresh original-goal path;
+its last recorded goal error was about .11565 m without the intended turn.
+The official SIM candidate now sets
+`terminal_early_braking_min_linear_velocity` to .30 m/s. Its default .03 m/s
+retains B20. This parameter affects only the planar measured-speed test for
+early braking on the ordered last TRACK inside the original .15 m window.
+
+The first nonzero terminal angular command still requires the original full
+measured stop (.03 m/s and .05 rad/s), a fresh .05 m center check and all filled
+sweeps. The .15 m/.08 rad final goal and checked .3 second stop are unchanged.
+Desired, regulated-minimum and approach-minimum linear speeds remain .4 m/s;
+the actual RPP approach scaling distance remains .3 m. SDK mapping and its
+motion threshold are unchanged. The separate default-off and Hybrid behaviors
+are retained. Low measured speed can permit an ordinary .4 m/s forward command;
+this software result proves neither simulator response nor physical low-speed
+motion. New closed-loop evidence is required before claiming the repeated
+short-stop failure is resolved.
+
+## Durable mission checkpoints and terminal cause (2026-11-10)
+
+The opt-in mission CLI binds the first same-UUID terminal cause to its unchanged
+raw result file and SHA. A later reconciliation file supplies its own stop and
+child-quiescence observation; it does not replace the original cancellation
+cause or clear strict timing failures. Missing, modified or conflicting evidence
+holds the mission. Explicit operator cancellation remains canceled.
+
+For executing mission operations, one storage thread creates, uses and closes
+SQLite and retains the original owner locks. FULL/DELETE, transaction commits,
+file fsync and directory fsync remain required. The main ROS executor continues
+input processing and exact-UUID cancellation while these checkpoints finish.
+Critical visit transitions use a bounded ordered queue; failures retain an
+uncertain attempt rather than claiming a completed checkpoint.
+
+After durable SEND_INTENT and both exports, the same operation re-establishes
+the original stable preflight inside its original deadline, checks fresh inputs,
+identity, stop, first-leg distance and remaining budget, then sends at most once
+with the already reserved UUID. Exiting before invoking send_goal_async permits
+only a current-owner NOT_SENT_AFTER_INTENT record with null native status and no
+budget refund. A new process never automatically dispatches an uncertain intent
+or reuses a proven-not-sent reservation. The new mission_storage.py module is
+included in launcher required sources, capability SHA and CLI source copies.
+
+These are software contracts for isolated experiments. They do not migrate old
+A16/B38 live databases or establish route, simulator or physical acceptance.

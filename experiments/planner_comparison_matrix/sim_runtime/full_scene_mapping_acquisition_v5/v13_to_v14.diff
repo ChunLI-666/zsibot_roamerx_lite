@@ -1,0 +1,58 @@
+--- source13/full_scene_mapping.py
++++ source14/full_scene_mapping.py
+@@ -687,18 +687,18 @@
+             if pulse_ticks is not None:
+                 if pulse_count>=config['max_fine_pulses']:raise contract.Hold('total fine pulse budget exhausted')
+                 pulse_count+=1;issued_ticks=0;reached_during_pulse=False
+-                emit('fine_pulse_started',index=pulse_count,max_ticks=pulse_ticks,correction=corrections,truth=truth,
++                emit('fine_pulse_started',pulse_index=pulse_count,max_ticks=pulse_ticks,correction=corrections,truth=truth,
+                     original_start=start,original_goal=target,deadline_steady=deadline)
+                 for burst_tick in range(pulse_ticks):
+                     budget();issued_truth,issued_yaw=tick(contract.MAX_VX,0.,bridge=bridge,terminal_deadline_steady=deadline);issued_ticks+=1
+-                    emit('fine_pulse_issued',index=pulse_count,tick_index=issued_ticks,max_ticks=pulse_ticks,correction=corrections,
++                    emit('fine_pulse_issued',pulse_index=pulse_count,tick_index=issued_ticks,max_ticks=pulse_ticks,correction=corrections,
+                         truth=issued_truth,original_start=start,original_goal=target,deadline_steady=deadline,
+                         applied_forward_policy_mps=contract.MAX_VX,semantic_forward=contract.MAX_VX/2.,
+                         basis='guarded parent tick returned; childUDP or actuation not asserted')
+                     budget();truth,yaw=health()[:2];remaining,endpoint,pose=state(truth,yaw)
+                     if endpoint['reached']:reached_during_pulse=True;break
+                 # This measured stop is mandatory before another positive pulse.
+-                truth,yaw=stop('fine_pulse_stopped',index=pulse_count,issued_ticks=issued_ticks,max_ticks=pulse_ticks,original_goal=target,fine_pulse_count=pulse_count);remaining,endpoint,pose=state(truth,yaw)
++                truth,yaw=stop('fine_pulse_stopped',pulse_index=pulse_count,issued_ticks=issued_ticks,max_ticks=pulse_ticks,original_goal=target,fine_pulse_count=pulse_count);remaining,endpoint,pose=state(truth,yaw)
+                 if reached_during_pulse and not endpoint['reached']:
+                     if corrections>=config['max_corrections']:raise contract.Hold('forward terminal correction count exhausted after pulse stop')
+                     corrections+=1
+--- source13/test_fine_pulses_v13.py
++++ source14/test_fine_pulses_v13.py
+@@ -57,11 +57,11 @@
+             f=PulsePlant(ticks=ticks,cost=.05);f.run()
+             issued=[v for n,v in f.events if n=='fine_pulse_issued'];stopped=[v for n,v in f.events if n=='fine_pulse_stopped']
+             counts={}
+-            for v in issued:counts[v['index']]=counts.get(v['index'],0)+1
++            for v in issued:counts[v['pulse_index']]=counts.get(v['pulse_index'],0)+1
+             self.assertTrue(counts);self.assertTrue(all(1<=v<=ticks for v in counts.values()));self.assertEqual(len(stopped),len(counts))
+             self.assertEqual([v['issued_ticks'] for v in stopped],list(counts.values()))
+             self.assertTrue(all(p['forward']==.2 and p['lateral']==p['yaw']==0. and 'primitive_phase' not in p for p in f.packets))
+-            self.assertEqual([v['index'] for v in stopped],list(range(1,len(stopped)+1)))
++            self.assertEqual([v['pulse_index'] for v in stopped],list(range(1,len(stopped)+1)))
+     def test_failed_measured_stop_blocks_every_next_positive(self):
+         f=PulsePlant(ticks=1,cost=.05);f.block_stop=True
+         with self.assertRaisesRegex(c.Hold,'actual stable'):f.run()
+@@ -69,7 +69,7 @@
+     def test_shared_pulse_count_and_existing_correction_limit_not_renewed(self):
+         f=PulsePlant(ticks=1,limit=2,steps=[.28,.28,.28],stops=[.2,.274,.274,.274],cost=.05)
+         with self.assertRaisesRegex(c.Hold,'pulse budget'):f.run()
+-        self.assertEqual(len(f.packets),2);self.assertEqual([v['index'] for n,v in f.events if n=='fine_pulse_started'],[1,2])
++        self.assertEqual(len(f.packets),2);self.assertEqual([v['pulse_index'] for n,v in f.events if n=='fine_pulse_started'],[1,2])
+         f=PulsePlant(ticks=1,limit=32,steps=[.28,.28,.28],stops=[.2,.274,.274,.274],cost=.05)
+         with self.assertRaisesRegex(c.Hold,'correction count'):f.run()
+         self.assertEqual(len(f.packets),3)
+@@ -80,7 +80,7 @@
+         f=PulsePlant(ticks=3,steps=[.34],cost=.05)
+         with self.assertRaisesRegex(c.Hold,'overshoot'):f.run()
+         self.assertEqual(len(f.packets),1);self.assertEqual(f.packets[0]['forward'],.2)
+-        self.assertFalse(any(n=='fine_pulse_started' and v['index']>1 for n,v in f.events))
++        self.assertFalse(any(n=='fine_pulse_started' and v['pulse_index']>1 for n,v in f.events))
+     def test_actual_tick_armed_deadline_and_original_issued_anchor(self):
+         for before_arm in [True,False]:
+             ns,unused,rows=tick_fixture();q=o.PrearmImuQualification(lambda:dict(command=[0.,0.,0.],request=[0.,0.,0.],latest_inputs={}),ns['time'])

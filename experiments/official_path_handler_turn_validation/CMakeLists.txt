@@ -1,0 +1,83 @@
+cmake_minimum_required(VERSION 3.16)
+project(upstream_path_interface_probe)
+set(CMAKE_CXX_STANDARD 17)
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(rclcpp_lifecycle REQUIRED)
+find_package(rclcpp_action REQUIRED)
+find_package(nav2_costmap_2d REQUIRED)
+find_package(nav2_util REQUIRED)
+find_package(nav2_core REQUIRED)
+find_package(nav2_map_server REQUIRED)
+find_package(pluginlib REQUIRED)
+find_package(angles REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
+add_library(upstream_path_probe STATIC
+  upstream/nav2_controller/plugins/feasible_path_handler.cpp
+  harness/upstream_constraint_functions.cpp)
+target_include_directories(upstream_path_probe BEFORE PUBLIC
+  compat
+  upstream/nav2_controller/include
+  upstream/nav2_core/include
+  upstream/nav2_util/include)
+ament_target_dependencies(upstream_path_probe
+  rclcpp rclcpp_lifecycle nav2_costmap_2d nav2_util nav2_core pluginlib angles tf2_geometry_msgs)
+add_executable(native_path_probe harness/native_path_probe.cpp)
+target_link_libraries(native_path_probe upstream_path_probe)
+enable_testing()
+add_test(NAME exact_upstream_native_path_semantics COMMAND native_path_probe)
+add_executable(installed_api_probe harness/api_probe.cpp)
+ament_target_dependencies(installed_api_probe nav2_core nav2_costmap_2d nav2_util)
+add_executable(new_api_probe harness/api_probe.cpp)
+target_include_directories(new_api_probe BEFORE PRIVATE compat upstream/nav2_core/include)
+ament_target_dependencies(new_api_probe nav2_core nav2_costmap_2d nav2_util)
+add_library(latest_path_probe STATIC
+  latest_source/nav2_controller/plugins/feasible_path_handler.cpp
+  latest_source/nav2_controller/plugins/simple_goal_checker.cpp
+  harness/upstream_constraint_functions.cpp)
+target_include_directories(latest_path_probe BEFORE PUBLIC
+  fixture_costmap compat latest_source/nav2_controller/include
+  latest_source/nav2_core/include upstream/nav2_util/include)
+ament_target_dependencies(latest_path_probe
+  rclcpp rclcpp_lifecycle nav2_costmap_2d nav2_util nav2_core pluginlib angles tf2_geometry_msgs)
+add_executable(latest_sequence_probe harness/sequence_probe.cpp)
+target_link_libraries(latest_sequence_probe latest_path_probe)
+add_executable(latest_api_probe harness/api_probe.cpp)
+target_include_directories(latest_api_probe BEFORE PRIVATE compat latest_source/nav2_core/include)
+ament_target_dependencies(latest_api_probe nav2_core nav2_costmap_2d nav2_util)
+add_executable(rpp_contract_probe harness/rpp_contract_probe.cpp harness/upstream_rpp_decisions.cpp)
+target_link_libraries(rpp_contract_probe latest_path_probe)
+add_library(official_rpp_backport STATIC
+  upstream/nav2_regulated_pure_pursuit_controller/src/regulated_pure_pursuit_controller.cpp
+  upstream/nav2_regulated_pure_pursuit_controller/src/parameter_handler.cpp
+  upstream/nav2_regulated_pure_pursuit_controller/src/collision_checker.cpp
+  upstream/nav2_controller/plugins/simple_goal_checker.cpp
+  upstream/nav2_util/src/controller_utils.cpp
+  harness/upstream_path_transform.cpp)
+target_include_directories(official_rpp_backport BEFORE PUBLIC
+  compat upstream/nav2_controller/include upstream/nav2_core/include
+  upstream/nav2_util/include upstream/nav2_regulated_pure_pursuit_controller/include)
+ament_target_dependencies(official_rpp_backport
+  rclcpp rclcpp_lifecycle nav2_costmap_2d nav2_util nav2_core pluginlib angles tf2_geometry_msgs)
+add_executable(official_runtime_probe harness/official_runtime_probe.cpp)
+target_link_libraries(official_runtime_probe official_rpp_backport upstream_path_probe)
+ament_target_dependencies(official_runtime_probe rclcpp_action)
+add_library(corrected_path_probe STATIC
+  upstream/nav2_controller/plugins/feasible_path_handler.cpp
+  backport/complete_rotation_constraints.cpp)
+target_include_directories(corrected_path_probe BEFORE PUBLIC
+  compat upstream/nav2_controller/include upstream/nav2_core/include upstream/nav2_util/include)
+ament_target_dependencies(corrected_path_probe
+  rclcpp rclcpp_lifecycle nav2_costmap_2d nav2_util nav2_core pluginlib angles tf2_geometry_msgs)
+add_executable(official_runtime_corrected_probe harness/official_runtime_probe.cpp)
+target_link_libraries(official_runtime_corrected_probe official_rpp_backport corrected_path_probe)
+ament_target_dependencies(official_runtime_corrected_probe rclcpp_action)
+add_executable(complete_rotation_tests harness/complete_rotation_tests.cpp)
+target_link_libraries(complete_rotation_tests corrected_path_probe)
+add_test(NAME complete_rotation_constraints COMMAND complete_rotation_tests)
+add_executable(global_planner_probe harness/global_planner_probe.cpp)
+ament_target_dependencies(global_planner_probe rclcpp rclcpp_lifecycle nav2_core nav2_costmap_2d
+  nav2_util nav2_map_server pluginlib angles tf2_geometry_msgs)
+add_executable(planner_controller_probe harness/planner_controller_probe.cpp)
+target_link_libraries(planner_controller_probe official_rpp_backport corrected_path_probe)
+ament_target_dependencies(planner_controller_probe rclcpp_action nav2_map_server)

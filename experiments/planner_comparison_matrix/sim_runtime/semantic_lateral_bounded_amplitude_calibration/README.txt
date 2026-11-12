@@ -1,0 +1,6 @@
+SOURCE ONLY / DEFAULT HOLD: bounded-amplitude sustained calibration v4
+Newscope MAPPING_SEMANTIC_LATERAL_BOUNDED_AMPLITUDE_SUSTAINED_CALIBRATION_ONLY. case.magnitude strictly enum{0.2,0.4,0.6};case.probes exactly[mag,-mag];finite duration_sec in[1.5,4]. DefaultHOLD0.4x1.5s;no root release supplied.
+Backend only selected signed magnitude or semantic zero;forward/yaw strictly0,no axes/extra fields. Up to80nonzero packets,max4s,20Hz target,no catchup,per-packet proof/150ms parent lease and5neutral finally unchanged. Parent child budget remains6s.
+Sustained classification and entire parent behavior unchangedv3: complete final active1s median signed original-GT bodyVy>.03 AND net measured-stop signedY>.05;post-between positive recheck before negative plan,negative final5s-tail recheck;closedpositive not contaminated by laterGT.
+Observer/helpers and all.3fresh/.8lateral/.1cross/.08yaw/1mps/1mstopreserve/60s recorder bounds unchanged. No assumed command-to-speed relation or adaptive behavior.
+27purecases: reused21plus6parameter/case/payload/newdefault tests;fake trajectories are not plant evidence. Prior1s and0.2x4s failures preserved,not reclassified. No ROS/UDP/process/release/commit action. Codacy tool unavailable.

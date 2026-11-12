@@ -1,0 +1,52 @@
+[
+  {
+    "path": "nav2_regulated_pure_pursuit_controller/include/nav2_regulated_pure_pursuit_controller/regulated_pure_pursuit_controller.hpp",
+    "git_blob_sha": "3fa50258c74366b3d33041eab11fffd9acc54eae",
+    "url": "https://github.com/ros-navigation/navigation2/blob/f3406e246cda1e7c28052409a098313fbc1761fe/nav2_regulated_pure_pursuit_controller/include/nav2_regulated_pure_pursuit_controller/regulated_pure_pursuit_controller.hpp"
+  },
+  {
+    "path": "nav2_regulated_pure_pursuit_controller/include/nav2_regulated_pure_pursuit_controller/parameter_handler.hpp",
+    "git_blob_sha": "190216ffd7618e9f1870556341fd60aebfce23cc",
+    "url": "https://github.com/ros-navigation/navigation2/blob/f3406e246cda1e7c28052409a098313fbc1761fe/nav2_regulated_pure_pursuit_controller/include/nav2_regulated_pure_pursuit_controller/parameter_handler.hpp"
+  },
+  {
+    "path": "nav2_regulated_pure_pursuit_controller/src/parameter_handler.cpp",
+    "git_blob_sha": "94aab6d5dcf0de9d32e0d7fc8c74b2eeb828f2d8",
+    "url": "https://github.com/ros-navigation/navigation2/blob/f3406e246cda1e7c28052409a098313fbc1761fe/nav2_regulated_pure_pursuit_controller/src/parameter_handler.cpp"
+  },
+  {
+    "path": "nav2_regulated_pure_pursuit_controller/include/nav2_regulated_pure_pursuit_controller/collision_checker.hpp",
+    "git_blob_sha": "4b835ecf345459d57497493246c1e6aee80f4d1d",
+    "url": "https://github.com/ros-navigation/navigation2/blob/f3406e246cda1e7c28052409a098313fbc1761fe/nav2_regulated_pure_pursuit_controller/include/nav2_regulated_pure_pursuit_controller/collision_checker.hpp"
+  },
+  {
+    "path": "nav2_regulated_pure_pursuit_controller/src/collision_checker.cpp",
+    "git_blob_sha": "8340bb5a1ce8550c59a016e056a4f2a5d5351cc4",
+    "url": "https://github.com/ros-navigation/navigation2/blob/f3406e246cda1e7c28052409a098313fbc1761fe/nav2_regulated_pure_pursuit_controller/src/collision_checker.cpp"
+  },
+  {
+    "path": "nav2_regulated_pure_pursuit_controller/include/nav2_regulated_pure_pursuit_controller/regulation_functions.hpp",
+    "git_blob_sha": "37e99d076a59b878faa857b6c229c7eba093dbfc",
+    "url": "https://github.com/ros-navigation/navigation2/blob/f3406e246cda1e7c28052409a098313fbc1761fe/nav2_regulated_pure_pursuit_controller/include/nav2_regulated_pure_pursuit_controller/regulation_functions.hpp"
+  },
+  {
+    "path": "nav2_util/include/nav2_util/controller_utils.hpp",
+    "git_blob_sha": "be8c88c001311ad27e0d75c4f759699b2fb3bb4f",
+    "url": "https://github.com/ros-navigation/navigation2/blob/f3406e246cda1e7c28052409a098313fbc1761fe/nav2_util/include/nav2_util/controller_utils.hpp"
+  },
+  {
+    "path": "nav2_util/src/controller_utils.cpp",
+    "git_blob_sha": "c15d3009ba058aa52bede112c7ed83d638f94b7c",
+    "url": "https://github.com/ros-navigation/navigation2/blob/f3406e246cda1e7c28052409a098313fbc1761fe/nav2_util/src/controller_utils.cpp"
+  },
+  {
+    "path": "nav2_util/include/nav2_util/parameter_handler.hpp",
+    "git_blob_sha": "12683104817aaf11da38a9e0ae8128216731ff86",
+    "url": "https://github.com/ros-navigation/navigation2/blob/f3406e246cda1e7c28052409a098313fbc1761fe/nav2_util/include/nav2_util/parameter_handler.hpp"
+  },
+  {
+    "path": "nav2_controller/include/nav2_controller/plugins/simple_goal_checker.hpp",
+    "git_blob_sha": "826391992f5735b1a5710d2b2e7791dfee3325e8",
+    "url": "https://github.com/ros-navigation/navigation2/blob/f3406e246cda1e7c28052409a098313fbc1761fe/nav2_controller/include/nav2_controller/plugins/simple_goal_checker.hpp"
+  }
+]

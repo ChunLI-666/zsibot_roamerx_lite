@@ -1,0 +1,823 @@
+"""Transactional mission authority. No ROS imports and no motion side effects."""
+from contextlib import contextmanager
+import copy
+import fcntl
+import hashlib
+import json
+import math
+import os
+from pathlib import Path
+import sqlite3
+import resource
+import time
+import uuid
+
+from waypoint_contract import validate_route, strict_stopped, angular_difference, evidence_json
+
+
+class Hold(RuntimeError):
+    pass
+
+
+def encoded(value):
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False)
+
+
+def digest(value):
+    return hashlib.sha256(value if isinstance(value, bytes) else encoded(value).encode()).hexdigest()
+
+
+def atomic_json(path, value):
+    path = Path(path)
+    temporary = path.with_name(path.name+'.'+str(uuid.uuid4())+'.tmp')
+    with temporary.open('x') as stream:
+        stream.write(encoded(value)+'\n'); stream.flush(); os.fsync(stream.fileno())
+    os.replace(temporary, path)
+    descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def boot_clock():
+    return Path('/proc/sys/kernel/random/boot_id').read_text().strip(), time.clock_gettime(time.CLOCK_BOOTTIME)
+
+
+IDENTITY_KEYS = ('map_contract_sha256', 'footprint_sha256', 'acceptance_policy_sha256')
+
+
+def validate_identity(identity):
+    for key in (*IDENTITY_KEYS, 'effective_config_sha256'):
+        value = identity.get(key)
+        if not isinstance(value, str) or len(value) != 64 or any(c not in '0123456789abcdef' for c in value):
+            raise ValueError('Missing SHA256 identity: '+key)
+    if identity.get('variant') not in ('official', 'segmented'):
+        raise ValueError('Mission requires official or segmented identity')
+    value = identity.get('source_sha', '')
+    if len(value) != 40 or any(c not in '0123456789abcdef' for c in value):
+        raise ValueError('Full source commit required')
+
+
+def check_identity_state(state,identity):
+    validate_identity(identity)
+    for key in (*IDENTITY_KEYS,'variant','source_sha','effective_config_sha256'):
+        if identity.get(key)!=state['identity'].get(key):raise Hold('IDENTITY_MISMATCH:'+key)
+
+
+def remaining_state(state, *, boot=None, now=None):
+    if boot is None or now is None:boot,now=boot_clock()
+    budget=state['budgets']
+    if budget['deadline_boottime_sec'] is None:return budget['remaining_sec']
+    if boot!=budget['deadline_boot_id']:raise Hold('CLOCK_UNTRUSTED: mission boot changed')
+    return max(0.,budget['deadline_boottime_sec']-now)
+
+
+def mission_guard_state(state):
+    """One committed revision's bounded validation view; no route/history copy."""
+    return dict(revision=state['revision'],variant=state['variant'],
+        identity={key:state['identity'].get(key) for key in
+            (*IDENTITY_KEYS,'variant','source_sha','effective_config_sha256')},
+        policy=dict(bt_retries=state['policy']['bt_retries']),
+        budgets={key:state['budgets'][key] for key in
+            ('deadline_boottime_sec','deadline_boot_id','remaining_sec')},
+        progress=dict(next_index=state['progress']['next_index']))
+
+
+def new_retry_control():
+    return dict(schema='matrix.mission.retry_control.v1',fingerprint=None,fingerprint_sha256=None,
+        consecutive_failures=0,paused=False,last_counted_attempt_id=None,review_permit=None,reviews=[])
+
+
+def record_retry_failure(state,attempt,cause):
+    control=state.setdefault('retry_control',new_retry_control())
+    if state['lifecycle'].startswith('COMPLETED'):
+        control.update(consecutive_failures=0,paused=False,review_permit=None)
+        return
+    if state['lifecycle'] not in ('RECOVERABLE_FAILURE','PAUSED_INPUT_HEALTH'):return
+    if not all(attempt.get(key) for key in ('terminal_confirmed','children_quiescent','stopped')):return
+    if not attempt.get('retry_failure_counted'):
+        fingerprint=dict(index=state['progress']['next_index'],identity_epoch_id=state['identity_epoch_id'],
+            source_sha=state['identity']['source_sha'],effective_config_sha256=state['identity']['effective_config_sha256'],
+            reason=state['hold_reason'],native_error_code=cause.get('error_code'),
+            missed_codes=sorted({item['error_code'] for item in cause.get('missed_waypoints') or []}))
+        signature=digest(fingerprint)
+        count=control['consecutive_failures']+1 if signature==control.get('fingerprint_sha256') else 1
+        control.update(fingerprint=fingerprint,fingerprint_sha256=signature,consecutive_failures=count,
+            paused=count>=2,last_counted_attempt_id=attempt['attempt_id'],review_permit=None)
+        attempt.update(retry_failure_counted=True,retry_failure_fingerprint_sha256=signature)
+    if control['paused']:
+        state['lifecycle']='NEEDS_TASK_DECISION';state['hold_reason']='REPEATED_FAILURE_REVIEW_REQUIRED'
+
+
+def dispatch_budget_exhaustion(state):
+    """Prospective reservation policy shared by the store and its workflow."""
+    policy,budget=state['policy'],state['budgets'];index=state['progress']['next_index']
+    parents=budget['mission_dispatches_reserved'];counts=budget['per_index_reserved']
+    per_index_parents=budget['per_index_parent_dispatches']
+    if (any(type(policy.get(k)) is not int for k in ('max_parent_dispatches','max_attempts_per_index','bt_retries'))
+            or not 1<=policy['max_parent_dispatches']<=10 or not 1<=policy['max_attempts_per_index']<=6
+            or policy['bt_retries'] not in (0,1) or policy.get('max_parent_dispatches_per_index',3)!=3
+            or type(parents) is not int or parents<0 or type(index) is not int
+            or not isinstance(counts,list) or not isinstance(per_index_parents,list)
+            or len(counts)!=len(state['route']) or len(per_index_parents)!=len(counts) or not 0<=index<len(counts)
+            or any(type(v) is not int or v<0 for v in counts+per_index_parents)):
+        raise Hold('Invalid prospective dispatch budget')
+    slots=1+policy['bt_retries']
+    child_exhausted=[i for i in range(index,len(counts)) if counts[i]+slots>policy['max_attempts_per_index']]
+    parent_exhausted=[i for i in range(index,len(counts)) if per_index_parents[i]>=3]
+    global_exhausted=parents>=policy['max_parent_dispatches']
+    if not global_exhausted and not child_exhausted and not parent_exhausted:return None
+    return dict(global_parent_exhausted=global_exhausted,mission_dispatches_reserved=parents,
+        max_parent_dispatches=policy['max_parent_dispatches'],next_index=index,child_slots_needed=slots,
+        max_attempts_per_index=policy['max_attempts_per_index'],max_parent_dispatches_per_index=3,
+        exhausted_suffix_indices=child_exhausted,exhausted_parent_suffix_indices=parent_exhausted,
+        per_index_reserved=list(counts),per_index_parent_dispatches=list(per_index_parents))
+
+
+def validate_visit(route, index, visit, legacy=False):
+    if visit.get('index') != index or visit.get('id') != route[index]['id'] or visit.get('original_goal_map') != route[index]['pose']:
+        raise Hold('Visit identity does not match exact original index')
+    passed = visit.get('passed') or {}
+    snapshot = passed.get('snapshot', {})
+    pose = snapshot.get('last', {}).get('pose', {})
+    goal = route[index]['pose']
+    if (pose.get('frame_id') != 'map' or not all(math.isfinite(pose.get(k, math.nan)) for k in ('x','y','yaw'))
+            or pose.get('receive_age_s', math.inf) > .3 or not -.05 <= pose.get('header_age_s', math.inf) <= .3
+            or math.hypot(pose['x']-goal[0], pose['y']-goal[1]) > .15
+            or abs(angular_difference(pose['yaw'], goal[2])) > .08
+            or passed.get('continuous_stopped_s', 0) < .3 or not strict_stopped(snapshot)[0]):
+        raise Hold('Original geometry/fresh measured stopped visit not proven')
+    if not legacy and not passed.get('advancing_odom_dwell'):
+        raise Hold('New visit lacks post-zero advancing original Odom dwell')
+
+
+def failure_decision(result, terminal, quiescent, stopped, *, operator_cancel=False):
+    """Executed by finish_attempt and consumed by the real CLI retry loop."""
+    if not terminal:return 'HOLD','UNKNOWN_DISPATCH'
+    if not quiescent or not stopped:return 'HOLD','CHILD_OR_STOP_UNPROVEN'
+    reason=result.get('cancel_reason') or ''
+    if operator_cancel or result.get('stop_signals') or reason in ('scheduled_cancel','pilot_interrupted'):
+        return 'CANCELED','OPERATOR_CANCEL'
+    codes={v.get('error_code') for v in result.get('missed_waypoints') or []}
+    # Project uint16 results from matrix_recovery_bt/recovery_errors.hpp. Never
+    # generalize error 0 or an unknown RELEASE into a safe automatic replan.
+    if 60003 in codes:return 'HOLD','RECOVERY_OWNERSHIP_RECONCILIATION_REQUIRED'
+    if 60004 in codes:return 'NEEDS_TASK_DECISION','INVALID_RECOVERY_PLAN_CONTRACT'
+    if reason.startswith('input_became_invalid:') or codes & {102,202,60002}:
+        return 'PAUSED_INPUT_HEALTH','FRESH_STABLE_HEALTH_REQUIRED'
+    if codes & {203,204,208}:
+        return 'NEEDS_TASK_DECISION','NO_FEASIBLE_ORIGINAL_GOAL_PATH'
+    if codes & {101,201}:return 'NEEDS_TASK_DECISION','INVALID_RUNTIME_CONFIGURATION'
+    if codes & {205,206,60005}:return 'RECOVERABLE_FAILURE','BOUNDED_OBSTACLE_WAIT'
+    if codes & {104,105,106,107,207,60001}:return 'RECOVERABLE_FAILURE','BOUNDED_ORIGINAL_GOAL_REPLAN'
+    if result.get('status')==5:return 'HOLD','UNKNOWN_CANCEL_CAUSE'
+    return 'NEEDS_TASK_DECISION','UNCLASSIFIED_TERMINAL_OR_INDEPENDENT_EVIDENCE_FAILURE'
+
+
+def valid_stop_continuity(stop,counter):
+    if (type(counter) is not int or counter<0 or stop.get('observed') is not True
+            or stop.get('strict_stop_issues')!=[] or not strict_stopped(stop.get('snapshot') or {})[0]):return False
+    observation=stop.get('callback_observation') or {}
+    if (observation.get('schema')!='matrix.stop_callback_observation.v1' or observation.get('settled') is not True
+            or type(observation.get('callback_invalidations')) is not int
+            or observation['callback_invalidations']!=counter):return False
+    dwell=observation.get('advancing_odom_dwell') or {}
+    fields=('zero_stamp','first_stamp','last_stamp','first_steady','last_steady')
+    if any(type(dwell.get(k)) is not int or dwell[k]<=0 for k in fields):return False
+    times=[observation.get(k) for k in ('started_steady_ns','finished_steady_ns','deadline_steady_ns')]
+    if any(type(v) is not int or v<=0 for v in times):return False
+    return (dwell['zero_stamp']<dwell['first_stamp']<=dwell['last_stamp']
+        and dwell['last_stamp']-dwell['first_stamp']>=300_000_000
+        and times[0]<=dwell['first_steady']<=dwell['last_steady']<=times[1]<=times[2]
+        and dwell['last_steady']-dwell['first_steady']>=300_000_000
+        and dwell['last_stamp']<=(stop.get('snapshot') or {}).get('last',{}).get('odom',{}).get('stamp_ns',0))
+
+
+def final_yaw_residual(state,attempt,original,current):
+    """Recognize one narrow task-level failure without rewriting native status."""
+    try:
+        if (state.get('cancel_intent') or attempt.get('operator_cancel_evidence')
+                or not all(attempt.get(k) for k in ('terminal_confirmed','children_quiescent','stopped'))
+                or original.get('functional_status')!='FAIL' or terminal_fields(original)['status']!=4
+                or original.get('error_code')!=0 or original.get('missed_waypoints')!=[]
+                or original.get('cancel_reason') or original.get('stop_signals')
+                or original.get('settled_measured_and_commanded_stop') is not True
+                or original.get('settled_within_original_tolerance') is not False
+                or original.get('evidence_writer',{}).get('evidence_complete') is not True
+                or current.get('evidence_writer',{}).get('evidence_complete') is not True):return None
+        index=len(state['route'])-1;goal=state['route'][index]['pose']
+        if state['progress']['next_index']!=index:return None
+        proof=original['final_goal_validation'];observation=current['current_final_goal_observation']
+        if (proof.get('schema')!='matrix.mission.final_goal_validation.v1'
+                or observation.get('schema')!='matrix.mission.current_final_goal.v1'):return None
+        for item in (proof,observation):
+            if (item.get('action_uuid')!=attempt['parent_action_uuid']
+                    or item.get('identity_epoch_id')!=state['identity_epoch_id']
+                    or item.get('original_index')!=index or item.get('original_goal_map')!=goal):return None
+        keys={'execution_healthy','not_cancelled','native_success','ordered_complete','measured_stop',
+            'stop_continuity_current','final_pose_fresh','final_xy_within','final_yaw_within'}
+        predicates=proof['predicates']
+        if (set(predicates)!=keys or predicates['final_yaw_within'] is not False
+                or any(predicates[k] is not True for k in keys-{'final_yaw_within'})):return None
+        original_stop=original.get('owned_goal_shutdown',{}).get('stop') or {}
+        if (not valid_stop_continuity(original_stop,proof.get('stop_callback_invalidations'))
+                or not strict_stopped(original['final_snapshot'])[0]):return None
+        ordered=original['ordered']
+        if ordered.get('all_visited') is not True or ordered.get('violation') is not None:return None
+        candidate=state['candidates'][str(index)];native_visit=ordered['visits'][index]
+        witnesses=[]
+        for visit in (candidate,native_visit):
+            validate_visit(state['route'],index,visit)
+            entered=visit['entered']
+            if (not isinstance(entered,dict) or not entered
+                    or any(type(entered.get(k)) is not int or entered[k]<=0 for k in ('steady_ns','unix_ns'))):return None
+            witnesses.append({key:visit[key] for key in ('index','id','original_goal_map','entered','passed')})
+        # Trajectory statistics continue after a historical pass. Only its
+        # immutable identity, feedback entry and complete stop proof authorize it.
+        if digest(witnesses[0])!=digest(witnesses[1]):return None
+        stop=current.get('owned_goal_shutdown',{}).get('stop') or {}
+        if (not valid_stop_continuity(stop,observation.get('stop_callback_invalidations'))
+                or observation.get('healthy') is not True or observation.get('issues')!=[]
+                or observation.get('stop_continuity_current') is not True
+                or not strict_stopped(observation['snapshot'])[0]):return None
+        errors=[]
+        for snapshot in (original['final_snapshot'],observation['snapshot']):
+            pose=snapshot['last']['pose']
+            if (pose.get('frame_id')!='map' or not all(type(pose.get(k)) in (int,float) and math.isfinite(pose[k]) for k in ('x','y','yaw'))
+                    or pose.get('raw_pose_values_finite') is not True
+                    or not all(type(pose.get(group,{}).get(k)) in (int,float) and math.isfinite(pose[group][k])
+                        for group,fields in (('raw_position',('x','y','z')),('raw_quaternion',('x','y','z','w'))) for k in fields)
+                    or not 0<=pose.get('receive_age_s',math.inf)<=.3
+                    or not -.05<=pose.get('header_age_s',math.inf)<=.3):return None
+            xy=math.hypot(pose['x']-goal[0],pose['y']-goal[1]);yaw=abs(angular_difference(pose['yaw'],goal[2]))
+            if not (xy<=.15 and .08<yaw<=2*.08):return None
+            errors.append(dict(xy_m=xy,yaw_rad=yaw,pose=copy.deepcopy(pose)))
+        return dict(reason='FINAL_GOAL_RESIDUAL_ERROR',axis='yaw',original_index=index,original_goal_map=goal,
+            xy_limit_m=.15,yaw_limit_rad=.08,correction_envelope_yaw_rad=2*.08,
+            original_error=errors[0],current_error=errors[1])
+    except (KeyError,TypeError,ValueError,IndexError,AttributeError,Hold):
+        return None
+
+
+def terminal_fields(result):
+    value={key:result.get(key) for key in ('status','error_code','missed_waypoints')}
+    value['error_msg']=result.get('error_msg') or ''
+    # Reconcile's native GetResult adapter exposes absolute index/code, while
+    # the original observer additionally records the goal pose. Keep that pose
+    # in the immutable raw authority, not in the shared comparison projection.
+    if isinstance(value['missed_waypoints'],list):
+        value['missed_waypoints']=[{key:item.get(key) for key in ('index','error_code')}
+            for item in value['missed_waypoints']]
+    return value
+
+
+def terminal_authority(state, attempt, current, history):
+    """Return the original raw result, never a result merged with a later stop."""
+    authority=attempt.get('terminal_authority');selected=None;previous_finished=None;operator_evidence=None
+    binding={key:attempt.get(key) for key in ('attempt_id','parent_action_uuid','identity_epoch_id')}
+    if authority and authority.get('binding')!=binding:
+        raise Hold('Terminal cause attempt/epoch binding differs')
+    for item in history:
+        try:
+            raw=Path(item['path']).read_bytes();observed=json.loads(raw)
+        except (OSError,ValueError,TypeError) as error:
+            raise Hold('Historical terminal evidence unavailable') from error
+        if digest(raw)!=item['sha256'] or observed.get('action_uuid')!=attempt['parent_action_uuid']:
+            raise Hold('Historical terminal evidence hash/UUID differs')
+        if observed.get('route_sha256') not in (None,state['identity']['route_raw_sha256']):
+            raise Hold('Historical terminal route differs')
+        if operator_evidence is None and (observed.get('operator_cancel_requested') or observed.get('stop_signals')
+                or observed.get('cancel_reason') in ('scheduled_cancel','pilot_interrupted')):
+            operator_evidence=copy.deepcopy(item)
+        finished=observed.get('finished_ns')
+        if finished is not None:
+            if type(finished) is not int or (previous_finished is not None and finished<previous_finished):
+                raise Hold('Terminal observation time regressed')
+            previous_finished=finished
+        if observed.get('status') in (4,5,6):
+            if selected is None:selected=(item,observed)
+            elif terminal_fields(observed)!=terminal_fields(selected[1]):
+                raise Hold('Conflicting native terminal observations')
+    if attempt.get('operator_cancel_evidence') not in (None,operator_evidence):
+        raise Hold('Operator cancellation evidence differs')
+    if operator_evidence is not None:attempt['operator_cancel_evidence']=operator_evidence
+    if selected is None:
+        if authority:raise Hold('Bound terminal authority is absent from history')
+        return current
+    item,original=selected
+    record=dict(schema='matrix.mission.terminal_authority.v1',binding=binding,
+        evidence=copy.deepcopy(item),native=terminal_fields(original),
+        cancel_reason=original.get('cancel_reason'),stop_signals=original.get('stop_signals') or [])
+    if authority and authority!=record:raise Hold('Immutable terminal cause differs')
+    if current.get('status') not in (4,5,6) or terminal_fields(current)!=record['native']:
+        raise Hold('Latest observation cannot replace a confirmed terminal result')
+    attempt['terminal_authority']=record
+    return original
+
+
+class MissionStore:
+    """One mission per local SQLite DB, with DB and shared robot/domain locks."""
+    def __init__(self, path, resource=None):
+        self.path = Path(path).resolve()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.locks = []
+        self.timing_sink=None
+        self.timing_drops=0
+        self.state_read_timing={}
+        self.process_token=str(uuid.uuid4())
+        try:
+            # Caller supplies a stable resource lock shared across A/B missions.
+            for lock in ([Path(resource)] if resource else [])+[self.path.with_suffix('.lock')]:
+                lock.parent.mkdir(parents=True, exist_ok=True)
+                stream = lock.open('a+')
+                self.locks.append(stream)
+                fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self.db = sqlite3.connect(self.path, isolation_level=None, timeout=0)
+            self.db.execute('PRAGMA synchronous=FULL')
+            self.db.execute('PRAGMA journal_mode=DELETE')
+            self.db.executescript('''
+                CREATE TABLE IF NOT EXISTS mission (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, state TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY, revision INTEGER NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS operations (request_id TEXT PRIMARY KEY, arguments_sha256 TEXT NOT NULL, result TEXT);
+                CREATE TABLE IF NOT EXISTS continuations (authorization_id TEXT PRIMARY KEY, authorization_sha256 TEXT NOT NULL, receipt TEXT NOT NULL);
+            ''')
+        except BaseException:
+            self.close(); raise
+
+    def close(self):
+        if hasattr(self, 'db'):
+            self.db.close(); del self.db
+        for stream in self.locks:
+            stream.close()
+        self.locks = []
+
+    @staticmethod
+    def inspect(path):
+        db = sqlite3.connect(Path(path).resolve().as_uri()+'?mode=ro', uri=True)
+        try:
+            row = db.execute('SELECT state FROM mission WHERE id=1').fetchone()
+            if row is None:
+                raise Hold('Mission has not been created')
+            return json.loads(row[0])
+        finally:
+            db.close()
+
+    def state(self):
+        observed=self.timing_sink is not None
+        if observed:start=time.monotonic_ns();cpu=time.thread_time_ns()
+        row = self.db.execute('SELECT state FROM mission WHERE id=1').fetchone()
+        if observed:selected=time.monotonic_ns();selected_cpu=time.thread_time_ns()
+        if row is None:
+            raise Hold('Mission has not been created')
+        state=json.loads(row[0])
+        if observed:
+            ended=time.monotonic_ns();ended_cpu=time.thread_time_ns()
+            for phase,wall,used in [('select',selected-start,selected_cpu-cpu),
+                                   ('json_decode',ended-selected,ended_cpu-selected_cpu)]:
+                item=self.state_read_timing.setdefault(phase,dict(count=0,total_wall_ns=0,max_wall_ns=0,
+                    total_thread_cpu_ns=0,max_thread_cpu_ns=0,first_steady_ns=start,last_steady_ns=ended))
+                item.update(count=item['count']+1,total_wall_ns=item['total_wall_ns']+wall,
+                    max_wall_ns=max(item['max_wall_ns'],wall),total_thread_cpu_ns=item['total_thread_cpu_ns']+used,
+                    max_thread_cpu_ns=max(item['max_thread_cpu_ns'],used),last_steady_ns=ended)
+        return state
+
+    def flush_state_read_timing(self,checkpoint):
+        if self.timing_sink is None or not self.state_read_timing:return
+        sample=dict(stage='state_reads:aggregate',checkpoint=checkpoint,success=True,
+            phases=self.state_read_timing,emitted_unix_ns=time.time_ns(),
+            boundary='Caller-thread SELECT/fetch and JSON decode, aggregated in memory; no per-read event or fsync')
+        self.state_read_timing={}
+        try:self.timing_sink(sample)
+        except Exception:self.timing_drops+=1
+
+    @contextmanager
+    def timing(self,stage):
+        """Observe caller blocking; never weaken durability or change transaction outcome."""
+        sink=self.timing_sink
+        if sink is None:
+            yield;return
+        start=time.monotonic_ns();unix=time.time_ns();cpu=time.thread_time_ns()
+        usage=resource.getrusage(resource.RUSAGE_THREAD);success=False
+        try:
+            yield;success=True
+        finally:
+            end=time.monotonic_ns();after=resource.getrusage(resource.RUSAGE_THREAD)
+            sample=dict(stage=stage,started_unix_ns=unix,finished_unix_ns=time.time_ns(),
+                started_steady_ns=start,finished_steady_ns=end,wall_ns=end-start,
+                thread_cpu_ns=time.thread_time_ns()-cpu,success=success,
+                thread_inblock_delta=after.ru_inblock-usage.ru_inblock,thread_oublock_delta=after.ru_oublock-usage.ru_oublock,
+                voluntary_context_switches=after.ru_nvcsw-usage.ru_nvcsw,
+                involuntary_context_switches=after.ru_nivcsw-usage.ru_nivcsw,
+                io_boundary='getrusage thread block-operation counters; not bytes or proof of device latency')
+            try:sink(sample)
+            except Exception:self.timing_drops+=1
+            if stage.endswith(':commit') or stage.startswith('export_result:'):
+                self.flush_state_read_timing(stage)
+
+    def create(self, route_raw, identity, policy, mission_id=None):
+        validate_identity(identity)
+        document = json.loads(route_raw); route = validate_route(document)
+        if policy.get('mission_budget_sec') != document['mission_budget_sec']:
+            raise ValueError('Policy must preserve the exact route mission budget')
+        if any(type(policy.get(k)) is not int for k in ('max_parent_dispatches','max_attempts_per_index','bt_retries')) or policy.get('max_parent_dispatches') not in range(1, 11) or policy.get('max_attempts_per_index') not in range(1, 7):
+            raise ValueError('Finite limits required (parent dispatches<=10, child attempts per index<=6)')
+        if policy.get('bt_retries') not in (0, 1):
+            raise ValueError('Only zero or one native BT retry is supported')
+        if policy.get('max_parent_dispatches_per_index',3)!=3:
+            raise ValueError('Per-index parent dispatch cap must remain three')
+        ident = dict(identity, route_raw_sha256=digest(route_raw), route_semantic_sha256=digest(route))
+        boot, now = boot_clock()
+        state = dict(schema='matrix.mission.state.v1', mission_id=str(uuid.UUID(mission_id)) if mission_id else str(uuid.uuid4()),
+            revision=0, identity_epoch_id=str(uuid.uuid4()), identity=ident, variant=identity['variant'],
+            lifecycle='NEW', hold_reason=None, route=route, route_size=len(route), policy=policy,
+            progress=dict(accepted_prefix_count=0,next_index=0,active_index=None,last_failed_index=None,accepted_receipts=[]),
+            current_target=route[0], attempt=None, attempts=[], candidates={},retry_control=new_retry_control(),cancel_intent=None,
+            final_goal_correction=None,
+            budgets=dict(mission_dispatches_reserved=0,per_index_reserved=[0]*len(route),
+                per_index_parent_dispatches=[0]*len(route),reservation_unit='child_attempt_including_native_BT_retries',
+                deadline_boot_id=None,deadline_boottime_sec=None,remaining_sec=policy['mission_budget_sec']),
+            result_flags=dict(operational_complete=False,recovery_used=False,single_run_complete=False,
+                strict_timing_status='NOT_EVALUATED',simulation_acceptance=False,physical_acceptance=False),
+            stop=dict(state='UNPROVEN'), evidence={}, updated=dict(unix_ns=time.time_ns(),boot_id=boot,boottime_sec=now))
+        self.db.execute('INSERT INTO mission VALUES (1,0,?)', (encoded(state),))
+        return state
+
+    @contextmanager
+    def transaction(self, kind, expected=None, before_commit=None):
+        with self.timing(kind+':begin'):self.db.execute('BEGIN IMMEDIATE')
+        try:
+            state = self.state()
+            if expected is not None and expected != state['revision']:
+                raise Hold('STALE_REVISION')
+            yield state
+            state['revision'] += 1
+            boot, now = boot_clock()
+            state['updated'] = dict(unix_ns=time.time_ns(),boot_id=boot,boottime_sec=now)
+            if state['budgets']['deadline_boot_id']==boot and state['budgets']['deadline_boottime_sec'] is not None:
+                state['budgets']['remaining_sec']=max(0.,state['budgets']['deadline_boottime_sec']-now)
+            with self.timing(kind+':encode_and_write'):
+                self.db.execute('UPDATE mission SET revision=?,state=? WHERE id=1', (state['revision'],encoded(state)))
+                self.db.execute('INSERT INTO events(revision,kind,payload) VALUES (?,?,?)',
+                    (state['revision'],kind,encoded(dict(attempt_id=(state.get('attempt') or {}).get('attempt_id'),
+                                                      progress=state['progress']['accepted_prefix_count'],time_ns=time.time_ns()))))
+            if before_commit is not None:before_commit(state)
+            with self.timing(kind+':commit'):self.db.execute('COMMIT')
+        except BaseException:
+            self.db.execute('ROLLBACK'); raise
+
+    def operation(self, request_id, arguments):
+        request_id = str(uuid.UUID(request_id)); sha = digest(arguments)
+        row = self.db.execute('SELECT arguments_sha256,result FROM operations WHERE request_id=?',(request_id,)).fetchone()
+        if row:
+            if row[0] != sha:
+                raise Hold('Operation id reused with different arguments')
+            return json.loads(row[1]) if row[1] else dict(operation_outcome='HELD',reason='operation interrupted; reconcile, never redispatch')
+        self.db.execute('INSERT INTO operations VALUES (?,?,NULL)',(request_id,sha))
+        return None
+
+    def finish_operation(self, request_id, result):
+        self.db.execute('UPDATE operations SET result=? WHERE request_id=?',(encoded(result),request_id))
+
+    def check_identity(self, identity):
+        check_identity_state(self.state(),identity)
+
+    def authorize_continuation(self, authorization, authorization_sha256, ready_path):
+        """One atomic, idempotent authority change; never sends or reserves a goal."""
+        from mission_continuation import apply_authorization
+        key=authorization['authorization_id']
+        row=self.db.execute('SELECT authorization_sha256,receipt FROM continuations WHERE authorization_id=?',(key,)).fetchone()
+        if row:
+            if row[0]!=authorization_sha256:raise Hold('Continuation authorization id reused with different bytes')
+            return json.loads(row[1])
+        receipt={}
+        def persist(state):
+            if state['budgets']['remaining_sec']<=0:raise Hold('FAILED_BUDGET at continuation commit')
+            receipt.update(after_revision=state['revision'],after_state_sha256=digest(state),state=copy.deepcopy(state))
+            self.db.execute('INSERT INTO continuations VALUES (?,?,?)',(key,authorization_sha256,encoded(receipt)))
+        with self.transaction('CONTINUATION_AUTHORIZED',authorization['expected_revision'],before_commit=persist) as state:
+            receipt.update(schema='matrix.mission.continuation_receipt.v1',authorization_id=key,
+                authorization_sha256=authorization_sha256,before_revision=state['revision'],before_state_sha256=digest(state),goals_sent=0)
+            receipt['transition']=apply_authorization(state,authorization,authorization_sha256,ready_path)
+        return receipt
+
+    def remaining(self):
+        return remaining_state(self.state())
+
+    def reserve(self, request_id, output):
+        with self.transaction('SEND_INTENT') as s:
+            if s.get('cancel_intent'):raise Hold('Mission cancellation requested; dispatch forbidden')
+            old=s.get('attempt')
+            if old and not old.get('terminal_confirmed'):
+                raise Hold('UNKNOWN_DISPATCH: reconcile exact previous UUID first')
+            if old and (not old.get('children_quiescent') or not old.get('stopped')):
+                raise Hold('Prior attempt lacks child quiescence or measured stop')
+            control=s.setdefault('retry_control',new_retry_control());permit=control.get('review_permit')
+            reviewed=(control['paused'] and s['lifecycle']=='NEEDS_TASK_DECISION'
+                and s['hold_reason']=='REPEATED_FAILURE_REVIEW_REQUIRED' and isinstance(permit,dict)
+                and permit.get('request_id')==request_id
+                and permit.get('fingerprint_sha256')==control.get('fingerprint_sha256')
+                and permit.get('after_attempt_id')==(old or {}).get('attempt_id'))
+            if control['paused'] and not reviewed:raise Hold('REPEATED_FAILURE_REVIEW_REQUIRED')
+            if s['lifecycle'] not in ('NEW','RECOVERABLE_FAILURE','PAUSED_INPUT_HEALTH') and not reviewed:
+                raise Hold('Lifecycle does not permit dispatch: '+s['lifecycle'])
+            index=s['progress']['next_index']
+            if index is None:
+                raise Hold('Mission is already complete')
+            budget=s['budgets']; policy=s['policy']; boot, now=boot_clock()
+            if budget['deadline_boottime_sec'] is None:
+                budget['deadline_boot_id']=boot;budget['deadline_boottime_sec']=now+budget['remaining_sec']
+            if boot!=budget['deadline_boot_id'] or now>=budget['deadline_boottime_sec']:
+                raise Hold('FAILED_BUDGET: deadline exhausted or boot changed')
+            child_slots=1+policy['bt_retries']
+            if dispatch_budget_exhaustion(s):
+                raise Hold('FAILED_BUDGET: dispatch allowance exhausted')
+            correction=s.get('final_goal_correction')
+            if correction:
+                if correction.get('consumed_attempt_id') is not None:
+                    raise Hold('FINAL_GOAL_CORRECTION_ALREADY_RESERVED')
+                if (correction['source_attempt_id']!=(old or {}).get('attempt_id')
+                        or correction['source_action_uuid']!=(old or {}).get('parent_action_uuid')
+                        or correction['identity_epoch_id']!=s['identity_epoch_id'] or correction['index']!=index
+                        or correction['original_goal_map']!=s['route'][index]['pose']):
+                    raise Hold('Final goal correction binding differs')
+            if reviewed:
+                control['reviews'][-1]['consumed_by_request_id']=request_id
+                control['review_permit']=None;control['paused']=False
+            budget['mission_dispatches_reserved']+=1
+            for i in range(index,len(s['route'])):
+                budget['per_index_reserved'][i]+=child_slots
+                budget['per_index_parent_dispatches'][i]+=1
+            attempt=dict(attempt_id=str(uuid.uuid4()),parent_action_uuid=str(uuid.uuid4()),request_id=request_id,
+                start_index=index,dispatch_state='INTENT_COMMITTED',native_status=None,native_error_code=None,
+                missed_waypoints=None,terminal_confirmed=False,children_quiescent=False,stopped=False,
+                output=str(Path(output).resolve()),created_ns=time.time_ns(),highest_feedback_index=None)
+            attempt['child_slots_reserved']=child_slots
+            attempt['intent_owner_token']=self.process_token
+            attempt['identity_epoch_id']=s['identity_epoch_id']
+            attempt['source_provenance']=dict(kind='live_execution',source_sha=s['identity']['source_sha'])
+            if correction:
+                correction.update(consumed_attempt_id=attempt['attempt_id'],consumed_action_uuid=attempt['parent_action_uuid'])
+                attempt['final_goal_correction_for']=correction['source_attempt_id']
+            s['attempt']=attempt;s['attempts'].append(copy.deepcopy(attempt))
+            s['lifecycle']='DISPATCH_INTENT';s['hold_reason']=None;s['candidates']={}
+            s['stop']=dict(state='UNPROVEN');s['progress']['active_index']=index
+            if len(s['attempts'])>1: s['result_flags']['recovery_used']=True
+        return self.state()['attempt']
+
+    def review_retry(self,request_id,reason):
+        request_id=str(uuid.UUID(request_id))
+        if not isinstance(reason,str) or not reason.strip():raise Hold('Explicit retry review reason required')
+        with self.transaction('REPEATED_FAILURE_REVIEW') as s:
+            if s.get('cancel_intent'):raise Hold('Mission cancellation requested; retry review forbidden')
+            if (s.get('final_goal_correction') or {}).get('consumed_attempt_id') is not None:
+                raise Hold('Final goal correction allowance cannot be renewed')
+            control=s.get('retry_control') or {};attempt=s.get('attempt') or {}
+            if (s['lifecycle']!='NEEDS_TASK_DECISION' or s['hold_reason']!='REPEATED_FAILURE_REVIEW_REQUIRED'
+                    or not control.get('paused') or not all(attempt.get(key) for key in
+                        ('terminal_confirmed','children_quiescent','stopped'))):
+                raise Hold('Only a proven stopped repeated-failure pause can be reviewed')
+            existing=control.get('review_permit')
+            if existing and existing.get('request_id')==request_id:
+                if (existing.get('reason')!=reason.strip() or existing.get('fingerprint_sha256')!=control['fingerprint_sha256']
+                        or existing.get('after_attempt_id')!=attempt['attempt_id']):raise Hold('Retry review request conflicts')
+                return
+            if any(item.get('request_id')==request_id for item in control.get('reviews',[])):
+                raise Hold('Retry review request was already consumed')
+            if remaining_state(s)<=0 or dispatch_budget_exhaustion(s):raise Hold('FAILED_BUDGET')
+            permit=dict(request_id=request_id,reason=reason.strip(),fingerprint_sha256=control['fingerprint_sha256'],
+                after_attempt_id=attempt['attempt_id'],reviewed_revision=s['revision'])
+            control['review_permit']=permit;control.setdefault('reviews',[]).append(copy.deepcopy(permit))
+
+    def request_cancel(self,request_id,reason):
+        request_id=str(uuid.UUID(request_id))
+        with self.transaction('TASK_CANCEL_REQUESTED') as s:
+            if not s.get('cancel_intent'):
+                s['cancel_intent']=dict(request_id=request_id,reason=reason or 'operator cancel',
+                    requested_revision=s['revision'],requested_unix_ns=time.time_ns())
+            s.setdefault('retry_control',new_retry_control())['review_permit']=None
+            # Business cancellation never rewrites the immutable native cause.
+            if not s['result_flags'].get('operational_complete'):
+                attempt=s.get('attempt') or {}
+                stopped=not attempt or all(attempt.get(key) for key in
+                    ('terminal_confirmed','children_quiescent','stopped'))
+                s['lifecycle']='CANCELED' if stopped else 'HOLD'
+                s['hold_reason']='OPERATOR_CANCEL' if stopped else 'TASK_CANCEL_AWAITING_TERMINAL_AND_STOP'
+
+    def record_not_sent(self,action_uuid,*,result_path,send_invoked):
+        with self.transaction('NOT_SENT_AFTER_INTENT') as s:
+            a=s['attempt'];path=Path(result_path).resolve(strict=True);raw=path.read_bytes();result=json.loads(raw)
+            if (send_invoked is not False or a.get('intent_owner_token')!=self.process_token
+                    or a['parent_action_uuid']!=action_uuid or a['dispatch_state']!='INTENT_COMMITTED'
+                    or result.get('action_uuid')!=action_uuid or result.get('status') is not None
+                    or result.get('send_goal_async_invoked') is not False or result.get('goals_sent')!=0):
+                raise Hold('Current-process never-sent intent proof missing')
+            a.update(dispatch_state='NOT_SENT_AFTER_INTENT',native_status=None,terminal_confirmed=False,
+                not_sent_evidence=dict(path=str(path),sha256=digest(raw)))
+            s['lifecycle']='HOLD';s['hold_reason']='NOT_SENT_AFTER_INTENT_NO_AUTOMATIC_REDISPATCH'
+            if a.get('final_goal_correction_for'):
+                s['final_goal_correction']['outcome']='NOT_SENT_AFTER_RESERVATION'
+            if result.get('strict_scan_timing_status')=='FAIL':s['result_flags']['strict_timing_status']='FAIL'
+            if (result.get('camera_recording_quality') or {}).get('status')=='FAIL':
+                s['result_flags']['camera_recording_quality_status']='FAIL';s['result_flags']['strict_timing_status']='FAIL'
+            s['attempts'][-1]=copy.deepcopy(a)
+
+    def acknowledge(self, action_uuid, accepted):
+        with self.transaction('ACK') as s:
+            if s['attempt']['parent_action_uuid']!=str(uuid.UUID(action_uuid)):
+                raise Hold('Old action acknowledgement')
+            a=s['attempt'];a['dispatch_state']='ACCEPTED' if accepted else 'REJECTED'
+            if not accepted:
+                a.update(terminal_confirmed=True,children_quiescent=True,stopped=True)
+            s['lifecycle']='RUNNING' if accepted else 'RECOVERABLE_FAILURE'
+
+    def observe(self, action_uuid, ordered):
+        s=self.state(); a=s.get('attempt') or {}
+        if a.get('parent_action_uuid')!=str(uuid.UUID(action_uuid)):
+            return False
+        active=ordered.active
+        if active is None:return False
+        changed=a.get('highest_feedback_index')!=active or any(
+            v.get('passed') is not None and str(v['index']) not in s['candidates']
+            for v in ordered.visits[s['progress']['accepted_prefix_count']:])
+        if not changed:return False
+        with self.transaction('VISIT_OBSERVATION') as s:
+            a=s['attempt'];a['highest_feedback_index']=active;s['progress']['active_index']=active
+            for v in ordered.visits[s['progress']['accepted_prefix_count']:]:
+                if v.get('passed') is not None:
+                    validate_visit(s['route'],v['index'],v)
+                    s['candidates'][str(v['index'])]=copy.deepcopy(v)
+            self._promote(s,active,'next_native_feedback_under_exclusive_stop_on_failure')
+        return True
+
+    @staticmethod
+    def _promote(s, until, basis, legacy=False):
+        progress=s['progress']
+        while progress['accepted_prefix_count']<until:
+            index=progress['accepted_prefix_count']; v=s['candidates'].get(str(index))
+            if v is None:break
+            validate_visit(s['route'],index,v,legacy)
+            receipt=dict(index=index,id=s['route'][index]['id'],original_goal_map=s['route'][index]['pose'],
+                source_attempt_id=s['attempt']['attempt_id'],source_action_uuid=s['attempt']['parent_action_uuid'],
+                native_completion_basis=basis,visit=copy.deepcopy(v),legacy_stop_proof=legacy)
+            receipt['sha256']=digest(receipt)
+            progress['accepted_receipts'].append(receipt);progress['accepted_prefix_count']+=1
+        index=progress['accepted_prefix_count'];progress['next_index']=index if index<len(s['route']) else None
+        s['current_target']=s['route'][index] if index<len(s['route']) else None
+
+    def finish_attempt(self, result, children_quiescent, *, result_path):
+        with self.transaction('ATTEMPT_TERMINAL') as s:
+            a=s['attempt']
+            if result.get('action_uuid')!=a['parent_action_uuid']:
+                raise Hold('Terminal result does not match owned Action UUID')
+            # A reconcile observation has its own output, independent of the dispatch.
+            # Bind the exact persisted observation before changing any mission state.
+            try:
+                native_path=Path(result_path).resolve(strict=True)
+                native_raw=native_path.read_bytes()
+                persisted=json.loads(native_raw)
+            except (OSError,ValueError,TypeError) as error:
+                raise Hold('Native result evidence unavailable or invalid') from error
+            if (encoded(persisted)!=encoded(json.loads(evidence_json(result)))
+                    or type(children_quiescent) is not bool
+                    or persisted.get('children_quiescent') is not children_quiescent):
+                raise Hold('Native result evidence differs from terminal observation')
+            evidence=dict(path=str(native_path),sha256=digest(native_raw))
+            history=a.setdefault('native_result_history',[])
+            if a.get('native_result') and a['native_result'] not in history:
+                history.append(copy.deepcopy(a['native_result']))
+            if any(item['path']==evidence['path'] and item['sha256']!=evidence['sha256'] for item in history):
+                raise Hold('Native result evidence path was reused with different bytes')
+            if evidence not in history:history.append(evidence)
+            cause=terminal_authority(s,a,result,history)
+            status=result.get('status');missed=result.get('missed_waypoints')
+            a.update(native_status=status,native_error_code=result.get('error_code'),missed_waypoints=missed,
+                native_error_msg=result.get('error_msg'),
+                terminal_confirmed=status in (4,5,6) or a['dispatch_state']=='REJECTED',children_quiescent=bool(children_quiescent),
+                stopped=result.get('final_measured_and_commanded_stop',result.get('settled_measured_and_commanded_stop')) is True)
+            a['dispatch_state']='TERMINAL_CONFIRMED' if a['terminal_confirmed'] else 'ACCEPTANCE_UNKNOWN'
+            successful=status==4 and result.get('error_code')==0 and missed==[]
+            if successful and result.get('functional_status')=='PASS' and result.get('evidence_writer',{}).get('evidence_complete') is True:
+                self._promote(s,len(s['route']),'successful_native_parent_and_independent_visits')
+            failed=min((v['index'] for v in missed),default=s['progress']['next_index']) if isinstance(missed,list) else s['progress']['next_index']
+            if missed and (type(failed) is not int or not a['start_index']<=failed<len(s['route'])):
+                raise Hold('Invalid absolute failed waypoint index')
+            if not successful:s['progress']['last_failed_index']=failed
+            a['failure']=None
+            if not successful and failed is not None:
+                goal=s['route'][failed];pose=cause.get('final_snapshot',{}).get('last',{}).get('pose')
+                error=None
+                if pose and all(math.isfinite(pose.get(k,math.nan)) for k in ('x','y','yaw')):
+                    error=dict(xy_m=math.hypot(pose['x']-goal['pose'][0],pose['y']-goal['pose'][1]),
+                        yaw_rad=abs(angular_difference(pose['yaw'],goal['pose'][2])),original_pose_snapshot=pose)
+                a['failure']=dict(index=failed,id=goal['id'],original_goal_map=goal['pose'],actual_error=error)
+            a['native_result']=evidence
+            a['latest_stop_observation']=dict(evidence=copy.deepcopy(evidence),
+                parent_action_uuid=a['parent_action_uuid'],children_quiescent=a['children_quiescent'],
+                stopped=a['stopped'])
+            a['bt_recovery_accounting']=cause.get('bt_recovery_accounting')
+            s['stop']=dict(state='PASSED' if a['stopped'] else 'UNPROVEN',source_action_uuid=a['parent_action_uuid'],
+                receipt=result.get('owned_goal_shutdown',{}).get('stop'),evidence=a['native_result'])
+            # Only a terminal failed native batch proves its later suffix was not entered.
+            if status==6 and not a.get('budget_reconciled') and isinstance(missed,list) and len(missed)==1 and isinstance(failed,int):
+                for i in range(failed+1,len(s['route'])):
+                    s['budgets']['per_index_reserved'][i]-=a['child_slots_reserved']
+                    s['budgets']['per_index_parent_dispatches'][i]-=1
+                a['budget_reconciled']=True
+            complete=successful and s['progress']['next_index'] is None and a['stopped'] and a['children_quiescent']
+            s['result_flags']['recovery_used'] |= bool(result.get('bt_recovery_used',True))
+            s['result_flags']['operational_complete']=complete
+            s['result_flags']['single_run_complete']=complete and not s['result_flags']['recovery_used'] and not result.get('bt_recovery_used',True)
+            if result.get('strict_scan_timing_status')=='FAIL':s['result_flags']['strict_timing_status']='FAIL'
+            camera=result.get('camera_recording_quality') or {}
+            if camera.get('status')=='FAIL':
+                s['result_flags']['camera_recording_quality_status']='FAIL'
+                s['result_flags']['strict_timing_status']='FAIL'
+            if complete:
+                s['lifecycle']='COMPLETED_WITH_RECOVERY' if s['result_flags']['recovery_used'] else 'COMPLETED_SINGLE_RUN'
+                s['hold_reason']=None
+                if a.get('final_goal_correction_for'):
+                    s['final_goal_correction']['outcome']='COMPLETE'
+            else:
+                s['lifecycle'],s['hold_reason']=failure_decision(cause,a['terminal_confirmed'],a['children_quiescent'],a['stopped'],
+                    operator_cancel=bool(a.get('operator_cancel_evidence')))
+                correction=s.get('final_goal_correction')
+                if a.get('final_goal_correction_for'):
+                    if all(a.get(k) for k in ('terminal_confirmed','children_quiescent','stopped')) and s['lifecycle'] not in ('CANCELED','HOLD'):
+                        s['lifecycle']='NEEDS_TASK_DECISION';s['hold_reason']='FINAL_GOAL_CORRECTION_FAILED'
+                        correction['outcome']='FAILED'
+                    elif s['lifecycle']=='HOLD':correction['outcome']='HELD'
+                else:
+                    residual=final_yaw_residual(s,a,cause,result)
+                    if residual is not None:
+                        a['failure']=dict(index=residual['original_index'],id=s['current_target']['id'],
+                            original_goal_map=residual['original_goal_map'],actual_error=residual['current_error'],
+                            basis='independent_final_goal_validation',native_status=4)
+                    if residual is not None and not correction:
+                        s['final_goal_correction']=dict(schema='matrix.mission.final_goal_correction.v1',
+                            source_attempt_id=a['attempt_id'],source_action_uuid=a['parent_action_uuid'],
+                            identity_epoch_id=s['identity_epoch_id'],index=s['progress']['next_index'],
+                            original_goal_map=copy.deepcopy(s['current_target']['pose']),source_evidence=copy.deepcopy(a['terminal_authority']['evidence']),
+                            qualification_evidence=copy.deepcopy(evidence),consumed_attempt_id=None,consumed_action_uuid=None,
+                            qualification=residual,outcome='AVAILABLE')
+                        s['lifecycle']='RECOVERABLE_FAILURE';s['hold_reason']='FINAL_GOAL_RESIDUAL_ERROR'
+                    elif residual is not None and correction.get('source_attempt_id')==a['attempt_id'] and correction.get('consumed_attempt_id') is None:
+                        s['lifecycle']='RECOVERABLE_FAILURE';s['hold_reason']='FINAL_GOAL_RESIDUAL_ERROR'
+                if s.get('cancel_intent'):
+                    proven=all(a.get(key) for key in ('terminal_confirmed','children_quiescent','stopped'))
+                    s['lifecycle']='CANCELED' if proven else 'HOLD'
+                    s['hold_reason']='OPERATOR_CANCEL' if proven else 'TASK_CANCEL_AWAITING_TERMINAL_AND_STOP'
+            record_retry_failure(s,a,cause)
+            s['attempts'][-1]=copy.deepcopy(a)
+
+    def import_closed(self, result, result_sha, historical_bt_retries=1):
+        if result.get('status') not in (4,5,6) or not result.get('final_measured_and_commanded_stop'):
+            raise Hold('Historical attempt is not terminal and stopped')
+        with self.transaction('IMPORT_CLOSED') as s:
+            if s['attempts'] or result.get('route_sha256')!=s['identity']['route_raw_sha256']:
+                raise Hold('Import requires empty mission and identical original route')
+            visits=result.get('ordered',{}).get('visits',[])
+            if len(visits)!=len(s['route']):raise Hold('Historical route size differs')
+            missed=result.get('missed_waypoints')
+            if not isinstance(missed,list):raise Hold('Historical missed list missing')
+            end=min((v['index'] for v in missed),default=len(visits))
+            if not isinstance(end,int) or not 0<=end<=len(visits):raise Hold('Invalid historical failed index')
+            for i in range(end):validate_visit(s['route'],i,visits[i],True)
+            a=dict(attempt_id=result.get('attempt_uuid',str(uuid.uuid4())),parent_action_uuid=str(uuid.UUID(result['action_uuid'])),
+                dispatch_state='TERMINAL_CONFIRMED',terminal_confirmed=True,children_quiescent=True,stopped=True,
+                historical_result_sha256=result_sha,start_index=0,native_status=result['status'],missed_waypoints=missed)
+            if type(historical_bt_retries) is not int or historical_bt_retries not in (0,1):raise Hold('Historical BT retry count required')
+            a['child_slots_reserved']=1+historical_bt_retries
+            a['identity_epoch_id']=s['identity_epoch_id']
+            a['source_provenance']=dict(kind='imported_closed_result',historical_result_sha256=result_sha,
+                epoch_role='import_authority_not_historical_execution_source')
+            a['budget_reconciled']=True  # Import already excludes the proven unentered suffix.
+            s['attempt']=a;s['attempts']=[copy.deepcopy(a)]
+            s['candidates']={str(i):visits[i] for i in range(end)}
+            self._promote(s,end,'sealed_historical_native_result_and_stopped_visits',True)
+            s['progress']['last_failed_index']=end if end<len(visits) else None
+            elapsed=max(0.,(result.get('finished_ns',0)-result.get('created_ns',0))/1e9)
+            if not 0<elapsed<s['policy']['mission_budget_sec']:raise Hold('Historical consumed time unavailable or budget exhausted')
+            s['budgets']['remaining_sec']-=elapsed
+            s['budgets']['historical_debited_sec']=elapsed
+            s['budgets']['mission_dispatches_reserved']=1
+            s['budgets']['per_index_reserved']=[(1+historical_bt_retries)*int(i<=end) for i in range(len(visits))]
+            s['budgets']['per_index_parent_dispatches']=[int(i<=end) for i in range(len(visits))]
+            s['result_flags'].update(recovery_used=True,strict_timing_status=result.get('strict_scan_timing_status','NOT_EVALUATED'))
+            s['lifecycle']='RECOVERABLE_FAILURE'
+            s['stop']=dict(state='PASSED',source_action_uuid=a['parent_action_uuid'],legacy_stop_proof=True,
+                historical_result_sha256=result_sha)
+
+    def export(self, output):
+        path=Path(output);path.mkdir(parents=True,exist_ok=True)
+        state=self.state()
+        with self.timing('export_state:atomic_file_and_directory_fsync'):atomic_json(path/'state.json',state)
+        result=dict(schema='matrix.mission.result.v1',mission_id=state['mission_id'],revision=state['revision'],
+            lifecycle=state['lifecycle'],identity=state['identity'],progress=state['progress'],
+            result_flags=state['result_flags'],attempts=state['attempts'],budgets=state['budgets'],
+            current_target=state['current_target'],last_attempt=state['attempt'],stop=state['stop'],reason=state['hold_reason'])
+        result['identity_epoch_id']=state['identity_epoch_id']
+        result['identity_policy_epochs']=state.get('identity_policy_epochs',[])
+        result['continuation_authorizations']=state.get('continuation_authorizations',[])
+        with self.timing('export_result:atomic_file_and_directory_fsync'):atomic_json(path/'result.json',result)
+        return state

@@ -34,6 +34,17 @@ name uniqueness alone is insufficient across restart. Typed source observations
 still carry their own embedded build identity. Metadata never substitutes the
 observer's commit for an unknown external source or plugin.
 
+C++ targets use `robot_debug_build_stamp(target repository_id artifact_id)`. It
+generates a stable private declaration header and a separate small implementation
+source. A commit/build-identity change recompiles that source and relinks its
+target, without recompiling algorithm files solely for identity constants. Each
+target keeps its own hidden implementation, including when multiple copies of a
+component share one process. No-change builds retain generated-file timestamps.
+The generator checks identity whenever the target builds; this is not permission
+to relabel a reused binary with a newer commit. Retain that binary's embedded
+identity and record release assembly separately. Direct C++ generator use must
+pass both `--header` and `--source`; JSON-only Python consumers are unchanged.
+
 Publication happens on independent workers. Business callbacks use bounded
 nonblocking queue handoff and contain diagnostic exceptions. Dropped counters
 are observability loss, not algorithm health. The observer counter records bounded

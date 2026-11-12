@@ -1,0 +1,25 @@
+{
+  "base_source11_manifest_sha256": "62478528bca39a678585a624087a809c9f240300c221bd02b4d1d7353c8c46b6",
+  "other_six_runtime_exact": {
+    "full_scene_mapping_contract.py": true,
+    "mapping_lateral_relay.py": true,
+    "lateral_capability.py": true,
+    "imu_gate.py": true,
+    "dependencies/waypoint_contract.py": true,
+    "dependencies/map_coverage.py": true
+  },
+  "original_critical_AST_exact": {
+    "health": true,
+    "observe_stop": true,
+    "stable": true,
+    "rotate_to": true,
+    "forward_terminal_leg": true,
+    "finalize_owned_relay": true,
+    "BoundedCallbacks": true
+  },
+  "raw_gate_source_sha256": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+  "default_false_69_behavior_tests_PASS": true,
+  "old_mode_warm_loop_retained": true,
+  "root_cases_modified": false,
+  "source_adapter_modified": false
+}

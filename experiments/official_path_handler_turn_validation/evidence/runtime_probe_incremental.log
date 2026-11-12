@@ -1,0 +1,19 @@
+[ 58%] Built target official_rpp_backport
+[ 83%] Built target upstream_path_probe
+[ 91%] Building CXX object CMakeFiles/official_runtime_probe.dir/harness/official_runtime_probe.cpp.o
+/home/charles/project/colcon_ws/analysis_outputs/upstream_nav2_interface_isolated_20261031/harness/official_runtime_probe.cpp: In member function ‘geometry_msgs::msg::Twist LegacyGoalBridge::step(const geometry_msgs::msg::PoseStamped&, const geometry_msgs::msg::Twist&, bool&)’:
+/home/charles/project/colcon_ws/analysis_outputs/upstream_nav2_interface_isolated_20261031/harness/official_runtime_probe.cpp:36:38: warning: converting to ‘geometry_msgs::msg::Twist’ {aka ‘geometry_msgs::msg::Twist_<std::allocator<void> >’} from initializer list would use explicit constructor ‘geometry_msgs::msg::Twist_<ContainerAllocator>::Twist_(rosidl_runtime_cpp::MessageInitialization) [with ContainerAllocator = std::allocator<void>]’
+   36 |     reached=false;if(!active)return {};
+      |                                      ^
+/home/charles/project/colcon_ws/analysis_outputs/upstream_nav2_interface_isolated_20261031/harness/official_runtime_probe.cpp:36:38: note: in C++11 and above a default constructor can be explicit
+/home/charles/project/colcon_ws/analysis_outputs/upstream_nav2_interface_isolated_20261031/harness/official_runtime_probe.cpp:41:38: warning: converting to ‘geometry_msgs::msg::Twist’ {aka ‘geometry_msgs::msg::Twist_<std::allocator<void> >’} from initializer list would use explicit constructor ‘geometry_msgs::msg::Twist_<ContainerAllocator>::Twist_(rosidl_runtime_cpp::MessageInitialization) [with ContainerAllocator = std::allocator<void>]’
+   41 |     if(reached){active=false;return {};}
+      |                                      ^
+/home/charles/project/colcon_ws/analysis_outputs/upstream_nav2_interface_isolated_20261031/harness/official_runtime_probe.cpp:41:38: note: in C++11 and above a default constructor can be explicit
+/home/charles/project/colcon_ws/analysis_outputs/upstream_nav2_interface_isolated_20261031/harness/official_runtime_probe.cpp: In function ‘int main(int, char**)’:
+/home/charles/project/colcon_ws/analysis_outputs/upstream_nav2_interface_isolated_20261031/harness/official_runtime_probe.cpp:130:41: warning: converting to ‘geometry_msgs::msg::Twist_<std::allocator<void> >’ from initializer list would use explicit constructor ‘geometry_msgs::msg::Twist_<ContainerAllocator>::Twist_(rosidl_runtime_cpp::MessageInitialization) [with ContainerAllocator = std::allocator<void>]’
+  130 |           bridge.submit(request);speed={};continue;
+      |                                         ^
+/home/charles/project/colcon_ws/analysis_outputs/upstream_nav2_interface_isolated_20261031/harness/official_runtime_probe.cpp:130:41: note: in C++11 and above a default constructor can be explicit
+[100%] Linking CXX executable official_runtime_probe
+[100%] Built target official_runtime_probe

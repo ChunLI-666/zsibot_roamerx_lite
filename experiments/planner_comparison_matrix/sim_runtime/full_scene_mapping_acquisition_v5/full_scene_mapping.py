@@ -1,0 +1,1114 @@
+#!/usr/bin/env python3
+"""Default-HOLD controlled static SIM raw-data acquisition owner.
+
+Preparation creates no ROS context, subprocess or socket. Execution requires a
+new root release, reviewed physical oracle/route and retired-writer proof. GT is
+used only for acquisition feedback; no Nav TF/pose/status/seed is published.
+"""
+import argparse
+import base64
+import copy
+from collections import deque
+import fcntl
+import json
+import math
+import os
+from pathlib import Path
+import select
+import shutil
+import signal
+import subprocess
+import sys
+import threading
+import time
+
+import full_scene_mapping_contract as contract
+import lateral_capability
+from imu_gate import ImuMonotonicGate
+
+HERE=Path(__file__).resolve().parent
+REPO=HERE
+REQUIRED_RETIRED_ROLES={'old_sim_command_adapter','old_sim_udp_relay','old_navigation'}
+RAW_RECORD_TOPICS={'/front_lidar','/front_lidar/imu','/odom','/front_camera/image/compressed',
+  '/livox/lidar','/livox/imu','/laser_scan','/camera/front/image/compressed','/camera/front/camera_info','/tf_static','/clock'}
+GUARDED_SOURCES={'/odom','/front_lidar','/laser_scan','/front_lidar/imu','/livox/imu'}
+MAPPING_CONTROL_PERIOD=contract.PERIOD
+MAPPING_INPUT_AGE=.3
+MAPPING_SWEEP_COMPUTE_MARGIN=.2
+MAPPING_AUDIT_MAX_AGE=1.
+MAPPING_GRAPH_REFRESH=1.
+
+
+def source_files():
+    return [HERE/name for name in ['full_scene_mapping.py','full_scene_mapping_contract.py',
+      'mapping_lateral_relay.py','lateral_capability.py','imu_gate.py',
+      'dependencies/waypoint_contract.py','dependencies/map_coverage.py']]
+
+
+class BoundedCallbacks:
+    """Private persistent executor dispatch budget; never restamps sensor data."""
+    def __init__(self,executor,clock=time):self.executor=executor;self.clock=clock;self.dispatched=0
+    def wrap(self,callback):
+        def dispatch(*args,**kwargs):
+            self.dispatched+=1
+            return callback(*args,**kwargs)
+        return dispatch
+    def spin(self):
+        deadline=self.clock.monotonic_ns()+10_000_000;count=0;empty=0
+        while count<32:
+            if self.clock.monotonic_ns()>=deadline:break
+            before=self.dispatched;self.executor.spin_once(timeout_sec=0.);after=self.dispatched
+            if after<=before:
+                empty+=1
+                if empty>=2:
+                    remaining=deadline-self.clock.monotonic_ns()
+                    if remaining>0:self.clock.sleep(min(.001,remaining/1e9))
+                continue
+            count+=after-before;empty=0
+
+
+def validate_release(release,route,route_path,oracle_path,output):
+    prearm_requalification_enabled(release)
+    relaxed=release.get('mapping_only_relaxed_survey',False)
+    if type(relaxed) is not bool:raise contract.Hold('mapping_only_relaxed_survey root flag must be strict boolean')
+    if relaxed!=contract.mapping_survey_enabled(route):raise contract.Hold('root relaxed-survey flag differs from mapping route purpose')
+    sim_endpoint=contract.sim_endpoint_from_release(release)
+    if release.get('scope')!=contract.SCOPE or release.get('mode')!=contract.MODE or release.get('allow_execute') is not True:
+        raise contract.Hold('root release absent or not executable')
+    if not relaxed:contract.validate_fine_route(release,route)
+    rid=release.get('release_id','')
+    if len(rid)!=32 or any(c not in '0123456789abcdef' for c in rid):raise contract.Hold('unique root release UUID required')
+    if release.get('route_sha256')!=contract.sha(route_path) or release.get('oracle_sha256')!=contract.sha(oracle_path):raise contract.Hold('root route/oracle hash mismatch')
+    if release.get('output_directory')!=str(output) or release.get('max_runtime_sec')!=route['max_runtime_sec']:raise contract.Hold('output/budget differs from root release')
+    expected={str(p.relative_to(REPO)):contract.sha(p) for p in source_files()}
+    if release.get('sources_sha256')!=expected:raise contract.Hold('root release does not bind all actual owner/relay/geometry/evidence sources')
+    if release.get('boot_id')!=Path('/proc/sys/kernel/random/boot_id').read_text().strip():raise contract.Hold('root boot binding differs')
+    if release.get('network_namespace')!=os.readlink('/proc/self/ns/net'):raise contract.Hold('root network namespace differs')
+    if release.get('controller_pid_namespace')!=os.readlink('/proc/self/ns/pid'):raise contract.Hold('root controller PID namespace differs')
+    proof=release.get('scene_identity_proof',{})
+    path=Path(proof.get('evidence_path',''))
+    if proof.get('mode')!='root_external_host_attestation' or not path.is_absolute() or not path.is_file() or contract.sha(path)!=proof.get('evidence_sha256') or contract.read_json(path)!=route['scene_instance_id']:raise contract.Hold('root external host scene identity proof missing/changed')
+    oracle_manifest=contract.read_json(oracle_path)
+    artifacts=oracle_manifest.get('artifacts_sha256',{})
+    if oracle_manifest.get('scene_instance_id')!=route['scene_instance_id'] or not any((Path(oracle_path).parent/key).resolve()==path and digest==proof['evidence_sha256'] for key,digest in artifacts.items()):raise contract.Hold('root host identity proof is not bound to this physical oracle')
+    if not proof.get('host_pid_namespace') or proof['host_pid_namespace']!=route['scene_instance_id'].get('pid_namespace'):raise contract.Hold('external host scene PID namespace differs')
+    if set(release.get('retired_writer_roles',{}))!=REQUIRED_RETIRED_ROLES:raise contract.Hold('exact old adapter, relay and Nav retirement identities required')
+    if not all(release['retired_writer_roles'][role] for role in REQUIRED_RETIRED_ROLES):raise contract.Hold('empty retired-writer identity set')
+    if not release.get('allowed_udp_source_processes') or not release.get('recorder_process_identity'):raise contract.Hold('root-reviewed UDP inventory/recorder identity missing')
+    identities=[item for values in release['retired_writer_roles'].values() for item in values]+release['allowed_udp_source_processes']+[release['recorder_process_identity']]
+    if not all(contract.valid_local_identity(item) for item in identities):raise contract.Hold('full local PID/start/argv/hash/boot identities required; partial identity cannot prove retirement')
+    deadline=release.get('recorder_deadline_steady_ns')
+    if type(deadline) is not int or (deadline-time.monotonic_ns())/1e9<route['max_runtime_sec']+5.:raise contract.Hold('raw recorder deadline must outlast the entire finite owner budget plus 5s')
+    if not RAW_RECORD_TOPICS<=set(release.get('required_recorded_topics',[])):raise contract.Hold('complete original/derived raw recording topics required')
+    if not release.get('recorder_node_name') or release.get('recorder_node_namespace')!='/':raise contract.Hold('exact recorder graph identity missing')
+    ready=Path(release.get('recorder_ready_path',''))
+    if not ready.is_absolute() or not ready.is_file() or contract.sha(ready)!=release.get('recorder_ready_sha256'):raise contract.Hold('exact raw recorder ready receipt missing/changed')
+    receipt=contract.read_json(ready)
+    if not isinstance(release.get('case_id'),str) or not release['case_id'] or not isinstance(release.get('recording_run_id'),str) or not release['recording_run_id']:raise contract.Hold('recording case/run binding missing')
+    if receipt.get('scope')!='RAW_RECORDING_ONLY' or any(receipt.get(key)!=release.get(key) for key in ['case_id','recording_run_id','recorder_process_identity','recorder_deadline_steady_ns']):raise contract.Hold('raw recorder receipt identity/deadline binding differs')
+    if receipt.get('node_name')!=release['recorder_node_name'] or receipt.get('node_namespace')!=release['recorder_node_namespace'] or not set(release['required_recorded_topics'])<=set(receipt.get('required_recorded_topics',[])):raise contract.Hold('raw recorder receipt graph/topic binding differs')
+    if set(release.get('expected_sensor_publishers',{}))!=GUARDED_SOURCES or not all(len(value)==1 for value in release['expected_sensor_publishers'].values()):raise contract.Hold('exact unique original/derived sensor publisher binding required')
+    if release.get('scene_instance_id')!=route.get('scene_instance_id'):raise contract.Hold('scene instance not bound')
+    if release.get('lateral_capability')!=contract.CAPABILITY:raise contract.Hold('explicit root lateral capability release missing')
+    if release.get('stop_envelope_reference')!=contract.ACTUAL_GT_STOP_REFERENCE or release.get('independent_future_errors_reviewed') is not True:
+        raise contract.Hold('root actual-GT future-error stop-reference approval missing')
+    config_key=oracle_manifest['sensor_config_json'];config_sha=oracle_manifest['artifacts_sha256'][config_key]
+    if release.get('sensor_config_sha256')!=config_sha:raise contract.Hold('calibrated actual sensor configuration differs')
+    adapter=release.get('sensor_adapter_process_identity')
+    if not contract.valid_local_identity(adapter) or contract.process_identity(adapter['pid'])!=adapter:raise contract.Hold('exact calibrated replacement adapter absent/changed')
+    admission=lateral_capability.validate_proof(release.get('lateral_calibration_proof',{}),route['scene_instance_id'],config_sha,adapter,command_endpoint=sim_endpoint,
+        namespace_binding={key:release.get(key) for key in ['network_namespace','controller_pid_namespace']})
+    lateral_capability.validate_model_evidence(oracle_manifest['motion_model'],admission)
+    return admission
+
+
+def atomic_json(path,value):
+    temporary=path.with_name(path.name+'.tmp.'+str(os.getpid()))
+    contract.claim_once(temporary,value);os.replace(temporary,path)
+
+
+def mapping_motion_model(model,truth):
+    """Live SIM sweep assumptions, explicitly expanded beyond measured speed."""
+    effective=copy.deepcopy(model)
+    speed=math.sqrt(sum(v*v for v in truth['twist'][:3]))
+    yaw=max(abs(truth['twist'][5]),abs(truth.get('original_header_yaw_rate_rps') or 0.))
+    effective['max_truth_speed_mps']=max(1.,model['max_truth_speed_mps'],speed*1.15+.05)
+    effective['max_truth_yaw_rate_rps']=max(.5,model['max_truth_yaw_rate_rps'],yaw*1.15+.05)
+    for value in effective['lateral_models'].values():
+        value['max_truth_speed_mps']=max(.45,value['max_truth_speed_mps'],speed*1.15+.05)
+        value['max_yaw_rate_rps']=max(.15,value['max_yaw_rate_rps'],yaw*1.15+.05)
+        value['stop_distance_reserve_m']=max(.1,value['stop_distance_reserve_m'])
+    effective['basis']='mapping_live_expanded_sim_assumption_not_static_model_pass'
+    return effective
+
+
+def mapping_command(truth,yaw,target,policy=None,previous=None):
+    """Coarse body-frame goal feedback; route axes are hints, never tubes."""
+    dx,dy=target[0]-truth['xyz'][0],target[1]-truth['xyz'][1]
+    c,s=math.cos(yaw),math.sin(yaw);bx,by=c*dx+s*dy,-s*dx+c*dy
+    angle=contract.wrap(math.atan2(dy,dx)-yaw)
+    lateral=bool(policy and policy.get('kind')=='lateral_fixed_body_heading')
+    if previous is not None and previous[1] and abs(angle)>.15:
+        return (0.,math.copysign(contract.MAX_WZ,angle),0.)
+    if bx<-.35 and abs(bx)>abs(by):return (0.,math.copysign(contract.MAX_WZ,angle),0.)
+    if lateral and abs(by)>max(.15,abs(bx)*.65):
+        # Fixed route yaw is a hint, never a second competing control target.
+        return (0.,0.,math.copysign(contract.MAX_LATERAL_RAW,by))
+    if abs(by)>max(.2,abs(bx)*1.5):return (0.,0.,math.copysign(contract.MAX_LATERAL_RAW,by))
+    if abs(angle)>.4:return (0.,math.copysign(contract.MAX_WZ,angle),0.)
+    return (contract.MAX_VX,0.,0.)
+
+
+def mapping_survey(route,health,tick,zero,emit,clock=time):
+    """Mapping acquisition only. Unknown/owner/recorder failures remain fatal."""
+    visited=skipped=0;last_command=None
+    def coast(reason,seconds=.8):
+        nonlocal last_command
+        zero(reason);last_command=None;until=clock.monotonic()+seconds
+        while clock.monotonic()<until:
+            try:health()
+            except contract.InputUnavailable:pass
+            zero(reason);clock.sleep(contract.PERIOD)
+    for index,point in enumerate(route['waypoints']):
+        target=point['pose_truth'];blocked_since=None;best_distance=math.inf;detour=None;detour_until=0.;progress_steady=clock.monotonic()
+        emit('point_entered',index=index,original_truth_target=point,mapping_only_relaxed_survey=True)
+        while True:
+            try:
+                truth,yaw=health()[:2]
+            except contract.InputUnavailable as exc:
+                coast('required_input_wait: '+str(exc),.1);continue
+            distance=math.hypot(target[0]-truth['xyz'][0],target[1]-truth['xyz'][1])
+            if distance<=.35:
+                visited+=1;emit('point_visited',index=index,truth=truth,target=point,
+                    mapping_only_relaxed_survey=True,coarse_distance_m=distance,
+                    measured_and_commanded_stop=False,formal_navigation_acceptance=False)
+                break
+            if distance<best_distance-.1:best_distance=distance;blocked_since=None;progress_steady=clock.monotonic()
+            stalled=clock.monotonic()-progress_steady>=20.
+            if stalled or (blocked_since is not None and clock.monotonic()-blocked_since>=5.):
+                coast('blocked_target_skip',.6);skipped+=1
+                emit('point_skipped',index=index,target=point,truth=truth,reason='no_distance_improvement_for_20s' if stalled else 'physical_primitive_blocked_for_5s',formal_navigation_acceptance=False)
+                break
+            command=detour if detour is not None and clock.monotonic()<detour_until else mapping_command(truth,yaw,target,point.get('leg_policy'),last_command)
+            if last_command is not None and command!=last_command:
+                coast('primitive_direction_switch');continue
+            try:
+                tick(command[0],command[1],lateral_raw=command[2])
+                last_command=command
+            except contract.InputUnavailable as exc:
+                coast('required_input_wait: '+str(exc),.1)
+            except contract.CollisionBlocked as exc:
+                if blocked_since is None:blocked_since=clock.monotonic()
+                emit('mapping_collision_rejected',index=index,command=command,reason=str(exc))
+                coast('collision_rejected')
+                # Short alternative primitives still use the same guarded tick.
+                dx,dy=target[0]-truth['xyz'][0],target[1]-truth['xyz'][1]
+                by=-math.sin(yaw)*dx+math.cos(yaw)*dy
+                if command[2]:detour=(0.,math.copysign(contract.MAX_WZ,contract.wrap(math.atan2(dy,dx)-yaw) or 1.),0.)
+                else:detour=(0.,0.,math.copysign(contract.MAX_LATERAL_RAW,by or 1.))
+                detour_until=clock.monotonic()+.8
+    coast('mapping_route_complete',1.)
+    truth,yaw=health()[:2]
+    return truth,yaw,dict(reached_points=visited,skipped_points=skipped,coarse_arrival_tolerance_m=.35,
+        mapping_only_relaxed_survey=True,formal_navigation_acceptance=False)
+
+
+def template():
+    return dict(schema_version=1,scope=contract.SCOPE,mode=contract.MODE,executable=False,
+      stop_envelope_reference=contract.ACTUAL_GT_STOP_REFERENCE,independent_future_errors_reviewed=False,
+      lateral_capability=contract.CAPABILITY,lateral_magnitude=contract.MAX_LATERAL_RAW,scene_instance_id=None,truth_frame_id=contract.TRUTH_FRAME,truth_child_frame_id=contract.TRUTH_CHILD,max_runtime_sec=600.,
+      model_truth_age_cap_field='max_truth_age_sec',timing_bounds=dict(max_truth_age_sec=.05,other_input_age_sec=.3,renewal_sec=.10,relay_packet_age_sec=.10,relay_watchdog_sec=.15),
+      start_anchor_truth=None,waypoints=[],required_root_evidence=['complete physical XML/mesh dependencies',
+       'drivable floor/trinary acquisition oracle in original simulation truth coordinates',
+       'raw-scan coordinate correspondence and actual T_body_lidar',
+       'root-reviewed SIM engineering stop/drift/attitude/height bounds','static scene with no dynamic spawn or mutation',
+       'retired adapter/relay/Nav identities and exact UDP ownership inventory','actual both-sign semantic closed-bag calibration and root directional engineering model','new once-only root release'],
+      boundary='No route is invented. map_coverage.py may generate points only after root supplies the verified whole-scene physical floor oracle. This oracle/GT never becomes a Nav map, TF, localization seed or planner acceptance.')
+
+
+class OwnedRelay:
+    def __init__(self,output,run_id,root_release,model,owner_identity):
+        self.process=None;self.pidfd=None;self.identity=None;self.output=output;self.command=(0.,0.,0.);self.run_id=run_id;self.close_errors=[]
+        source=HERE/'mapping_lateral_relay.py';self.frozen=output/'mapping_lateral_relay_frozen.py';shutil.copy2(source,self.frozen)
+        shutil.copy2(HERE/'lateral_capability.py',output/'lateral_capability.py')
+        shutil.copy2(HERE/'full_scene_mapping_contract.py',output/'full_scene_mapping_contract.py')
+        self.sim_command_endpoint=contract.sim_endpoint_from_release(contract.read_json(root_release))
+        self.expected_ready='MAPPING_LATERAL_RELAY_RECT_V5_READY '+self.sim_command_endpoint['ipv4']+':'+str(self.sim_command_endpoint['port'])
+        self.fine_forward_profile=lateral_capability.fine_profile_from_release(contract.read_json(root_release))
+        self.admission_path=output/'relay_admission.json'
+        contract.claim_once(self.admission_path,dict(root_release_path=str(root_release.resolve()),root_release_sha256=contract.sha(root_release),
+            owner_identity=owner_identity,motion_model=model,fine_forward_profile=self.fine_forward_profile,sim_command_endpoint=self.sim_command_endpoint))
+        self.argv=[sys.executable,'-I',str(self.frozen),'--execute','--admission',str(self.admission_path),'--admission-sha256',contract.sha(self.admission_path)]
+        self.source_sha256=contract.sha(self.frozen)
+        self.log=(output/'relay.stderr').open('w')
+    def start(self,pump=None):
+        env=dict(os.environ,MAPPING_OWNER_RUN_ID=self.run_id,MAPPING_OWNER_OUTPUT=str(self.output))
+        try:
+            self.process=subprocess.Popen(self.argv,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+              stderr=self.log,text=True,bufsize=1,env=env,start_new_session=True)
+            self.pidfd=os.pidfd_open(self.process.pid)
+            os.set_blocking(self.process.stdin.fileno(),False)
+            os.set_blocking(self.process.stdout.fileno(),False)
+            until=time.monotonic()+3.;line=b''
+            while True:
+                if time.monotonic()>=until:raise contract.Hold('owned relay did not acknowledge readiness')
+                if pump is not None:pump()
+                remaining=until-time.monotonic()
+                if remaining<=0 or self.process.poll() is not None:raise contract.Hold('owned relay did not acknowledge readiness')
+                readable=select.select([self.process.stdout],[],[],0. if pump is not None else min(.01,remaining))[0]
+                if time.monotonic()>=until:raise contract.Hold('owned relay did not acknowledge readiness')
+                if not readable:continue
+                chunk=os.read(self.process.stdout.fileno(),4096)
+                if not chunk:raise contract.Hold('owned relay closed before readiness')
+                line+=chunk
+                if len(line)>4096:raise contract.Hold('owned relay readiness line exceeded bound')
+                if b'\n' in line:
+                    if line.split(b'\n',1)[0].strip()!=getattr(self,'expected_ready','MAPPING_LATERAL_RELAY_RECT_V5_READY 127.0.0.1:7447').encode():raise contract.Hold('owned relay did not acknowledge readiness')
+                    break
+            # Immediately retained pidfd binds the Popen child. Wait for the
+            # immutable child's post-exec READY before sampling argv/identity.
+            self.identity=contract.process_identity(self.process.pid)
+            expected=self.argv
+            if self.identity['argv']!=expected or contract.sha(self.frozen)!=self.source_sha256:raise contract.Hold('owned relay identity differs')
+        except BaseException:
+            self.close();raise
+
+    def send(self,vx=0.,wz=0.,preflight=None,lateral_raw=0.,fine_phase=False):
+        qualification=getattr(self,'prearm_qualification',None)
+        if qualification is not None:qualification.require_command(vx,wz,lateral_raw)
+        if type(fine_phase) is not bool:raise contract.Hold('fine phase must be exact boolean')
+        if self.process.poll() is not None or contract.process_identity(self.process.pid)!=self.identity:raise contract.Hold('owned relay exited/changed')
+        if (vx or wz or lateral_raw) and preflight is None:raise contract.Hold('positive relay command requires final input guard')
+        issued_ns,steady=time.time_ns(),time.monotonic()
+        if preflight is not None:preflight(issued_ns,steady)
+        packet=(contract.primitive_packet(vx,wz,issued_ns,lateral_raw,fine_forward_profile=self.fine_forward_profile,fine_phase=True)
+            if fine_phase is True else contract.primitive_packet(vx,wz,issued_ns,lateral_raw))
+        payload=(json.dumps(packet)+'\n').encode()
+        if os.write(self.process.stdin.fileno(),payload)!=len(payload):raise contract.Hold('incomplete nonblocking owned-relay command write')
+        self.command=(vx,wz,lateral_raw)
+        return packet
+
+    def close(self):
+        if self.process is None:self.log.close();return
+        try:
+            if self.identity is not None and self.process.poll() is None:self.send()
+        except (OSError,ValueError,ProcessLookupError):pass
+        try:self.process.stdin.close()
+        except (OSError,ValueError):pass
+        try:self.process.wait(timeout=3.)
+        except subprocess.TimeoutExpired:
+            try:
+                if self.pidfd is not None and (self.identity is None or contract.process_identity(self.process.pid)==self.identity):
+                    # Before READY, the immediately retained Popen pidfd is the
+                    # exact owned child identity; argv has not been admitted.
+                    signal.pidfd_send_signal(self.pidfd,signal.SIGINT)
+            except (OSError,ValueError,ProcessLookupError) as exc:self.close_errors.append(str(exc))
+            try:self.process.wait(timeout=3.)
+            except subprocess.TimeoutExpired:pass
+        if not self.log.closed:self.log.close()
+        if self.pidfd is not None:os.close(self.pidfd);self.pidfd=None
+
+
+def finalize_owned_relay(relay,observe_stop):
+    """Zero first, then observe; any observation failure still closes only ours."""
+    result=dict(stop_verified=False,relay_closed=False,relay_close_errors=[])
+    try:
+        try:
+            packet=relay.send()
+            if not isinstance(packet,dict) or any(packet.get(k)!=0. for k in ['forward','lateral','yaw']) or type(packet.get('issued_unix_ns')) is not int:raise ValueError('successful cleanup zero did not return an issued zero packet')
+            result['initial_cleanup_zero_receipt']=dict(packet=packet,basis='parent_pipe_issue_not_SDK_or_engine_dispatch')
+        except BaseException as exc:
+            result['initial_cleanup_zero_receipt']=None;result['zero_error']=str(exc)
+        try:result['stop_verified']=bool(observe_stop())
+        except BaseException as exc:result['stop_observation_error']=str(exc)
+    finally:
+        try:relay.close()
+        except BaseException as exc:result['relay_close_errors'].append(str(exc))
+        result['relay_close_errors']+=relay.close_errors
+        result['relay_closed']=relay.process is None or relay.process.poll() is not None
+    return result
+
+
+def execute(args,route,oracle_manifest,release,output,lateral_admission):
+    """The only branch that may create ROS/relay, called after explicit release."""
+    import rclpy
+    from rclpy.node import Node
+    from rclpy.executors import SingleThreadedExecutor
+    from rclpy.qos import qos_profile_sensor_data
+    from rclpy.signals import SignalHandlerOptions
+    from rclpy.serialization import deserialize_message
+    from nav_msgs.msg import Odometry
+    from sensor_msgs.msg import PointCloud2,Imu,LaserScan
+    from std_msgs.msg import String
+    sys.path.insert(0,str(HERE/'dependencies'))
+    from waypoint_contract import AsyncEvidenceWriter,evidence_json
+
+    if os.environ.get('ROS_DOMAIN_ID')!='185':raise contract.Hold('isolated same-host SIM domain185 only')
+    if os.environ.get('RMW_IMPLEMENTATION')!='rmw_fastrtps_cpp':raise contract.Hold('root-reviewed same-host FastDDS environment required')
+    if not hasattr(os,'pidfd_open') or not hasattr(signal,'pidfd_send_signal'):raise contract.Hold('pidfd support required')
+    if os.environ.get('MAPPING_OWNER_RUN_ID')!=release['release_id'] or os.environ.get('MAPPING_OWNER_OUTPUT')!=str(output):raise contract.Hold('root controller environment binding differs')
+    relaxed=release.get('mapping_only_relaxed_survey',False);mapping_ready=False
+    started=time.monotonic();release_sha256=contract.sha(args.root_release)
+    oracle=contract.OracleGrid.load(oracle_manifest,args.oracle);model=oracle_manifest['motion_model']
+    if oracle_manifest.get('scene_instance_id')!=release['scene_instance_id']:raise contract.Hold('physical oracle belongs to another scene')
+    retired=[item for identities in release['retired_writer_roles'].values() for item in identities]
+    contract.verify_retired(retired)
+    own=contract.process_identity(os.getpid());recorded=release['recorder_process_identity']
+    if contract.process_identity(recorded['pid'])!=recorded:raise contract.Hold('exact preregistered raw recorder is not alive')
+    allowed=release['allowed_udp_source_processes']+[recorded,own]
+    contract.verify_udp_inventory(contract.udp_inventory(),allowed,release.get('allowed_external_udp_sockets',[]))
+    lock=(Path('/tmp')/('matrix_full_scene_mapping_'+str(os.stat('/proc/self/ns/net').st_ino)+'.lock')).open('a+')
+    fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    stopped=[];previous={number:signal.signal(number,lambda n,f:stopped.append(n)) for number in [signal.SIGINT,signal.SIGTERM]}
+    node=None;executor=None;relay=None;writer=None;stop_verified=False;result={};fault_snapshot=None;last_request=None;stop_observation={}
+    try:
+        relay=OwnedRelay(output,release['release_id'],args.root_release,model,own)
+        rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
+        node=Node('full_scene_mapping_owner_'+release['release_id'],enable_rosout=False,start_parameter_services=False)
+        executor=SingleThreadedExecutor(context=node.context);executor.add_node(node);callbacks=BoundedCallbacks(executor)
+        if node.get_parameter('use_sim_time').value is not False:raise contract.Hold('wall/source clock mode must remain false')
+        raw_imu_gate=ImuMonotonicGate();active_lateral=None;imu_gate_fault=None
+        if prearm_requalification_enabled(release):
+            def qualification_context():
+                return dict(command=list(relay.command),request=[last_request.get(k,0.) for k in ['vx','wz','lateral_raw']] if last_request else [0.,0.,0.],
+                    latest_inputs={key:{k:v for k,v in value.items() if k!='message'} for key,value in latest.items()})
+            raw_imu_gate=PrearmImuQualification(qualification_context)
+            relay.prearm_qualification=raw_imu_gate
+        latest={};history=deque(maxlen=1000);clouds=deque(maxlen=5);scans=deque(maxlen=5);subs=[];cloud_cache=None;last_send=None;clock_pair=None
+        event_pub=node.create_publisher(String,'/experiment/full_scene_mapping/events',50)
+        writer=AsyncEvidenceWriter(output,publish_event=lambda line:event_pub.publish(String(data=line)))
+        def emit(kind,**fields):
+            if not writer.submit('events',dict(kind=kind,scope=contract.SCOPE,run_id=release['release_id'],unix_ns=time.time_ns(),steady_ns=time.monotonic_ns(),**fields)):raise contract.Hold('bounded event writer rejected evidence')
+        def stamp(message):return message.header.stamp.sec*1_000_000_000+message.header.stamp.nanosec
+        def remember(key,message,value):
+            item=dict(value,stamp_ns=stamp(message),frame_id=message.header.frame_id,received_steady=time.monotonic())
+            prior=latest.get(key);item['stamp_regressed']=bool(prior and item['stamp_ns']<prior['stamp_ns'])
+            item['advanced_steady']=item['received_steady'] if prior is None or item['stamp_ns']>prior['stamp_ns'] else prior['advanced_steady']
+            latest[key]=item;return item
+        def odom(message):
+            p,q=message.pose.pose.position,message.pose.pose.orientation;t=message.twist.twist
+            item=remember('truth',message,dict(xyz=[p.x,p.y,p.z],q=[q.x,q.y,q.z,q.w],child_frame_id=message.child_frame_id,
+                twist=[t.linear.x,t.linear.y,t.linear.z,t.angular.x,t.angular.y,t.angular.z]))
+            item['original_header_yaw_rate_rps']=None
+            if history:
+                previous=history[-1];dt=(item['stamp_ns']-previous['stamp_ns'])/1e9
+                if dt>0:item['original_header_yaw_rate_rps']=contract.wrap(contract.rpy(item['q'])[2]-contract.rpy(previous['q'])[2])/dt
+            history.append(item)
+        def cloud(message):clouds.append(remember('raw_lidar',message,dict(message=message,width=message.width)))
+        def scan(message):scans.append(remember('scan',message,dict(ranges=len(message.ranges))))
+        def imu(key,message):
+            a,g=message.linear_acceleration,message.angular_velocity
+            return remember(key,message,dict(acceleration=[a.x,a.y,a.z],angular_velocity=[g.x,g.y,g.z]))
+        def raw_imu(raw):
+            nonlocal imu_gate_fault
+            receipt_ns,steady_ns=time.time_ns(),time.monotonic_ns()
+            if mapping_ready:
+                # Prearm is startup-only. Preserve this consumer's original
+                # message while the independent recorder retains all wire data.
+                sample=imu('raw_imu',deserialize_message(raw,Imu))
+                sample['received_steady']=sample['advanced_steady']=steady_ns/1e9
+                return
+            event=raw_imu_gate.inspect(bytes(raw),receipt_ns,steady_ns)
+            if not event['accepted']:
+                if event['fatal'] and not event.get('prearm_epoch_reopened',False):
+                    if imu_gate_fault is None:imu_gate_fault=event
+                emit('raw_imu_rejected',event=event)
+                return
+            sample=imu('raw_imu',deserialize_message(raw,Imu))
+            sample['received_steady']=sample['advanced_steady']=steady_ns/1e9
+        subs.append(node.create_subscription(Imu,'/front_lidar/imu',callbacks.wrap(raw_imu),qos_profile_sensor_data,raw=True))
+        for kind,topic,callback in [(Odometry,'/odom',odom),(PointCloud2,'/front_lidar',cloud),(LaserScan,'/laser_scan',scan),
+          (Imu,'/livox/imu',lambda m:imu('imu',m))]:
+            subs.append(node.create_subscription(kind,topic,callbacks.wrap(callback),qos_profile_sensor_data))
+        # No Nav publisher/client is created. Only a JSON evidence publisher is present.
+        # Passive truth precheck comes before any relay process: the frozen relay
+        # emits action=walk even for zero, and must not stand a lying robot.
+        truth_deadline=time.monotonic()+10.
+        while 'truth' not in latest and time.monotonic()<truth_deadline:callbacks.spin()
+        contract.standing_before_relay(latest.get('truth'),model,time.time_ns(),time.monotonic())
+        if imu_gate_fault is not None:raise contract.Hold('latched raw IMU fault: '+imu_gate_fault['reason'])
+        relay.start(callbacks.spin);allowed.append(relay.identity)
+        audit=dict(valid=False,checked_steady=0.,reason='not_checked',first_violation=None);audit_stop=threading.Event()
+        def audit_loop():
+            while not audit_stop.is_set():
+                try:
+                    contract.verify_retired(retired)
+                    if contract.process_identity(recorded['pid'])!=recorded:raise contract.Hold('recorder identity changed')
+                    if contract.process_identity(relay.process.pid)!=relay.identity:raise contract.Hold('own relay identity changed')
+                    contract.verify_udp_inventory(contract.udp_inventory(),allowed,release.get('allowed_external_udp_sockets',[]))
+                    audit.update(valid=True,checked_steady=time.monotonic(),reason=None)
+                except BaseException as exc:
+                    first=audit['first_violation'] or dict(steady_ns=time.monotonic_ns(),reason=str(exc))
+                    audit.update(valid=False,checked_steady=time.monotonic(),reason=str(exc),first_violation=first)
+                audit_stop.wait(.1)
+        auditor=threading.Thread(target=audit_loop,name='mapping-owner-inventory',daemon=True);auditor.start()
+        diagnostic_times={}
+        def diagnostic(reason,**fields):
+            if time.monotonic()-diagnostic_times.get(reason,-math.inf)>=1.:
+                diagnostic_times[reason]=time.monotonic();emit('mapping_diagnostic',reason=reason,**fields)
+        def health(skip_graph_refresh=False):
+            nonlocal cloud_cache,clock_pair
+            callbacks.spin()
+            if stopped:raise InterruptedError('mapping stop requested')
+            now_ns,steady=time.time_ns(),time.monotonic()
+            clock_pair=contract.check_clock(clock_pair,now_ns,steady)
+            if steady-started>route['max_runtime_sec']-contract.CLEANUP_RESERVE:raise contract.Hold('fixed acquisition runtime budget expired; cleanup reserve begins')
+            evidence=writer.summary()
+            if evidence['dropped'] or evidence['worker_error'] is not None:raise contract.Hold('bounded writer evidence gap')
+            if audit['first_violation'] is not None:raise contract.Hold('velocity-owner audit violated: '+str(audit['reason']))
+            if not audit['valid'] or steady-audit['checked_steady']>(MAPPING_AUDIT_MAX_AGE if mapping_ready else .3):
+                if mapping_ready:raise contract.InputUnavailable('velocity-owner audit refresh pending')
+                raise contract.Hold('velocity-owner audit missing/stale/violated: '+str(audit['reason']))
+            if imu_gate_fault is not None:
+                if mapping_ready:diagnostic('latched raw IMU consumer fault',fault=imu_gate_fault)
+                else:raise contract.Hold('latched raw IMU fault: '+imu_gate_fault['reason'])
+            if not raw_imu_gate.fresh(now_ns,round(steady*1e9)):
+                if mapping_ready:diagnostic('raw IMU consumer progress unavailable')
+                else:raise contract.Hold('no fresh accepted original IMU progress')
+            if mapping_ready and contract.process_identity(recorded['pid'])!=recorded:raise contract.Hold('recorder identity changed')
+            truth=latest.get('truth');contract.fresh(truth,now_ns,steady,limit=MAPPING_INPUT_AGE if mapping_ready else contract.truth_age_limit(model))
+            if truth['frame_id']!=contract.TRUTH_FRAME or truth['child_frame_id']!=contract.TRUTH_CHILD or not contract.finite([*truth['xyz'],*truth['twist']]):
+                if mapping_ready:raise contract.InputUnavailable('invalid original GT frames/values')
+                raise contract.Hold('invalid original GT frames/values')
+            roll,pitch,yaw=contract.rpy(truth['q'])
+            if max(abs(roll),abs(pitch))>model['max_roll_pitch_rad'] or not model['body_z_min_m']<=truth['xyz'][2]<=model['body_z_max_m']:
+                if mapping_ready:raise contract.InputUnavailable('body attitude/height outside reviewed SIM bounds; zero until recovered')
+                raise contract.Hold('body attitude/height outside reviewed SIM bounds')
+            if math.sqrt(sum(v*v for v in truth['twist'][:3]))>model['max_truth_speed_mps'] or abs(truth['twist'][5])>model['max_truth_yaw_rate_rps']:
+                if mapping_ready:diagnostic('speed_model_exceeded_sweep_expanded',measured_twist=truth['twist'],effective_model=mapping_motion_model(model,truth))
+                else:raise contract.Hold('actual truth speed exceeds approved envelope')
+            for key,frame in [('raw_imu','map'),('imu','imu_link')]:
+                sample=latest.get(key)
+                if mapping_ready:
+                    try:
+                        contract.fresh(sample,now_ns,steady)
+                        if sample['frame_id']!=frame or not contract.finite(sample['acceleration']+sample['angular_velocity']):raise contract.Hold('invalid original/derived IMU')
+                    except contract.Hold as exc:diagnostic('IMU consumer diagnostic: '+str(exc),source=key)
+                else:
+                    contract.fresh(sample,now_ns,steady)
+                    if sample['frame_id']!=frame or not contract.finite(sample['acceleration']+sample['angular_velocity']):raise contract.Hold('invalid original/derived IMU')
+            for key,sample in latest.items():
+                if sample['stamp_regressed'] or steady-sample['advanced_steady']>.3:
+                    if mapping_ready:
+                        if key in ('truth','raw_lidar','scan'):raise contract.InputUnavailable('required source stamp regressed/nonadvancing: '+key)
+                        diagnostic('consumer source stamp regressed/nonadvancing',source=key)
+                    else:raise contract.Hold('regressed or nonadvancing original/derived source stamp')
+            for sample in reversed(clouds):
+                paired=next((s for s in scans if s['stamp_ns']==sample['stamp_ns'] and s['frame_id']=='base_link' and s['ranges']>0),None)
+                if paired is None:continue
+                contract.fresh(paired,now_ns,steady)
+                contract.fresh(sample,now_ns,steady)
+                if sample['frame_id']!='map':raise contract.Hold('raw lidar frame differs from frozen sensor-local contract')
+                if cloud_cache is None or cloud_cache['stamp_ns']!=sample['stamp_ns']:
+                    try:pose=contract.pose_at(history,sample['stamp_ns'])
+                    except contract.Hold:continue
+                    points=contract.checked_cloud(sample['message'])
+                    cloud_cache=dict(stamp_ns=sample['stamp_ns'],raw_received_steady=sample['received_steady'],pose=pose,
+                        points=contract.hits_in_truth(points,pose,oracle_manifest['T_body_lidar']))
+                break
+            if cloud_cache is None:raise contract.InputUnavailable('no fresh original-stamp raw/derived lidar+GT association')
+            contract.fresh(dict(stamp_ns=cloud_cache['stamp_ns'],received_steady=cloud_cache['raw_received_steady']),now_ns,steady)
+            if mapping_ready and (skip_graph_refresh or steady-getattr(relay,'mapping_graph_checked_steady',-math.inf)<MAPPING_GRAPH_REFRESH):
+                return truth,yaw,cloud_cache,(now_ns-truth['stamp_ns'])/1e9
+            graph=dict(source_publishers=[],guarded_nodes=[],recorder_subscriptions=[],unresolved_publishers=[])
+            missing=[]
+            def graph_hold(reason,missing_only=False,unresolved_identity=False):
+                snapshot=dict(graph,missing=missing,missing_only=missing_only,unresolved_identity=unresolved_identity)
+                emit('graph_readiness_not_qualified',reason=reason,graph=snapshot)
+                exc=(contract.InputUnavailable if mapping_ready and (missing_only or unresolved_identity) else contract.Hold)(reason)
+                exc.graph_readiness=True;exc.graph_missing_only=missing_only;exc.graph_unresolved_identity=unresolved_identity;exc.graph_observation=snapshot
+                raise exc
+            for topic in ['/cmd_vel_nav','/cmd_vel','/cmd_vel_safe','/simulation/command_adapter/policy_cmd']:
+                observed=[dict(name=info.node_name,namespace=info.node_namespace,type=info.topic_type) for info in node.get_publishers_info_by_topic(topic)]
+                if observed:
+                    graph['forbidden_publishers']=dict(topic=topic,expected=[],observed=observed)
+                    graph_hold('forbidden concurrent Nav/adapter velocity publisher: '+topic)
+            nav_actions={'/navigate_to_pose','/navigate_through_poses','/follow_waypoints','/follow_path','/compute_path_to_pose'}
+            actions=[dict(name=name,types=types) for name,types in node.get_service_names_and_types() if '/_action/' in name and name.split('/_action/')[0] in nav_actions]
+            if actions:
+                graph['forbidden_actions']=dict(expected=[],observed=actions)
+                graph_hold('concurrent Nav action service remains present')
+            for topic,expected in release['expected_sensor_publishers'].items():
+                observed=[dict(name=info.node_name,namespace=info.node_namespace,type=info.topic_type) for info in node.get_publishers_info_by_topic(topic)]
+                detail=dict(kind='source_publisher',topic=topic,expected=expected,observed=observed)
+                graph['source_publishers'].append(detail)
+                if observed!=expected:
+                    if not observed:
+                        if mapping_ready and topic in ('/front_lidar/imu','/livox/imu'):diagnostic('IMU consumer publisher absent',topic=topic)
+                        else:missing.append(detail)
+                    elif len(expected)==len(observed)==1 and observed[0]==dict(name='_NODE_NAME_UNKNOWN_',namespace='_NODE_NAMESPACE_UNKNOWN_',type=expected[0]['type']):
+                        detail['resolution_status']='ROS_node_identity_unresolved_not_expected_identity'
+                        graph['unresolved_publishers'].append(detail)
+                    else:graph_hold('original/derived publisher ownership changed: '+topic)
+            identities=node.get_node_names_and_namespaces()
+            guarded=[(release['recorder_node_name'],release['recorder_node_namespace'])]+[(entry[0]['name'],entry[0]['namespace']) for entry in release['expected_sensor_publishers'].values()]
+            required_control_nodes={(entry[0]['name'],entry[0]['namespace']) for topic,entry in release['expected_sensor_publishers'].items() if topic in ('/odom','/front_lidar','/laser_scan')}
+            for identity in guarded:
+                count=identities.count(identity);detail=dict(kind='guarded_node',expected=dict(name=identity[0],namespace=identity[1]),observed_count=count,
+                    observed=[dict(name=name,namespace=namespace) for name,namespace in identities])
+                graph['guarded_nodes'].append(detail)
+                if count==0:
+                    if mapping_ready and identity==(release['recorder_node_name'],release['recorder_node_namespace']):graph_hold('raw recorder graph identity absent')
+                    if mapping_ready and identity not in required_control_nodes:diagnostic('consumer graph node absent',identity=identity)
+                    else:missing.append(detail)
+                elif count!=1:graph_hold('duplicate recorder or sensor graph identity')
+            required=release.get('required_recorded_topics',[])+['/experiment/full_scene_mapping/events']
+            if not required:raise contract.Hold('raw recording topic contract absent')
+            recorder_identity=(release['recorder_node_name'],release['recorder_node_namespace'])
+            for topic in required:
+                observed=[dict(name=info.node_name,namespace=info.node_namespace,type=getattr(info,'topic_type',None)) for info in node.get_subscriptions_info_by_topic(topic)]
+                count=sum((item['name'],item['namespace'])==recorder_identity for item in observed)
+                detail=dict(kind='recorder_subscription',topic=topic,expected=dict(name=recorder_identity[0],namespace=recorder_identity[1]),observed=observed,matching_count=count)
+                graph['recorder_subscriptions'].append(detail)
+                if count==0:
+                    if mapping_ready:graph_hold('raw recorder subscription absent: '+topic)
+                    missing.append(detail)
+                elif count!=1:graph_hold('duplicate raw recorder subscription: '+topic)
+            if graph['unresolved_publishers']:graph_hold('startup publisher identity unresolved',unresolved_identity=True)
+            if missing:graph_hold('startup graph discovery incomplete',missing_only=True)
+            if mapping_ready:
+                relay.mapping_graph_checked_steady=time.monotonic()
+                # DDS graph queries are not part of the pose/geometry critical path.
+                # Drain new callbacks and re-read original GT/LiDAR after them.
+                return health(skip_graph_refresh=True)
+            return truth,yaw,cloud_cache,(now_ns-truth['stamp_ns'])/1e9
+        def tick(vx=0.,wz=0.,bridge=None,lateral_raw=0.,terminal_deadline_steady=None,fine_phase=False):
+            nonlocal last_send,last_request,active_lateral
+            mapping_ready=getattr(relay,'mapping_only_relaxed_survey',False)
+            qualification=getattr(relay,'prearm_qualification',None)
+            if qualification is not None:qualification.require_command(vx,wz,lateral_raw)
+            if fine_phase is not False:
+                if fine_phase is not True or terminal_deadline_steady is None:raise contract.Hold('fine phase requires fixed terminal deadline')
+                fine_profile=contract.fine_command_profile(release,bridge,vx)
+                contract.primitive_packet(vx,wz,time.time_ns(),lateral_raw,fine_forward_profile=fine_profile,fine_phase=True)
+            else:contract.primitive_packet(vx,wz,time.time_ns(),lateral_raw)
+            last_request=dict(vx=vx,wz=wz,lateral_raw=lateral_raw,requested_unix_ns=time.time_ns())
+            until=time.monotonic()+(MAPPING_CONTROL_PERIOD if mapping_ready else contract.PERIOD)
+            while time.monotonic()<until:callbacks.spin()
+            if stopped:raise InterruptedError('mapping stop requested')
+            if qualification is not None:
+                reset=qualification.reanchor_zero(last_send,(vx,wz,lateral_raw),relay.command)
+                if reset is not None:
+                    emit('prearm_zero_reanchor',snapshot=reset);last_send=None
+            if not mapping_ready and last_send is not None and time.monotonic()-last_send>contract.CONTROL_RENEWAL_LIMIT:raise contract.Hold('control-loop gap; no stale positive command is renewed')
+            guard_started=time.monotonic();truth,yaw,cloud,age=health()
+            if mapping_ready:
+                guard_started=time.monotonic();age_cap=MAPPING_INPUT_AGE
+                age_upper=min(age_cap,max(0.,age)+MAPPING_SWEEP_COMPUTE_MARGIN)
+            else:age_cap=contract.truth_age_limit(model);age_upper=contract.command_age_upper(age,age_cap)
+            if mapping_ready:
+                active_lateral=None;lateral_context=None;checked_bridge=None;policy=None
+                kind='lateral' if lateral_raw else 'forward' if vx else 'turn' if wz else 'zero'
+                sign=1 if (lateral_raw if lateral_raw else wz)>0 else -1 if (lateral_raw if lateral_raw else wz)<0 else 0
+            elif lateral_raw:
+                if bridge is None or bridge[2].get('kind')!='lateral_fixed_body_heading':raise contract.Hold('lateral command missing frozen leg')
+                lateral_context=(1 if lateral_raw>0 else -1,bridge)
+                if active_lateral is not None and lateral_context!=active_lateral:raise contract.Hold('lateral sign/leg cannot change before measured stop')
+            else:lateral_context=active_lateral
+            if mapping_ready:pass
+            elif lateral_context is not None:
+                if vx or wz:raise contract.Hold('lateral must reach measured stop before another primitive')
+                sign,checked_bridge=lateral_context;kind='lateral';policy=checked_bridge[2]
+                if sign!=policy['lateral_sign']:raise contract.Hold('actual lateral packet sign differs from checked stop reference')
+                contract.lateral_leg_state(checked_bridge[0],checked_bridge[1],(*truth['xyz'][:2],yaw),policy)
+                if math.sqrt(sum(v*v for v in truth['twist'][:3]))>contract.lateral_model(model,sign)['max_truth_speed_mps']:raise contract.Hold('actual lateral truth speed exceeds directional model')
+            else:
+                kind='forward' if vx else 'turn' if wz else 'zero';sign=1 if wz>0 else -1 if wz<0 else 0
+                checked_bridge=bridge;policy=None
+            stop_reference=None
+            if mapping_ready:
+                swept_model=mapping_motion_model(model,truth)
+                sweep,inflation=contract.stopping_sweep(oracle,(*truth['xyz'][:2],yaw),kind,sign,swept_model,age_upper,policy=None)
+                stop_reference=dict(basis=swept_model['basis'],max_truth_speed_mps=swept_model['max_truth_speed_mps'],max_truth_yaw_rate_rps=swept_model['max_truth_yaw_rate_rps'])
+            elif kind=='lateral':
+                sweep,inflation,stop_reference=contract.actual_gt_lateral_stopping_sweep(
+                    oracle,truth,checked_bridge,model,time.time_ns(),time.monotonic())
+                age_upper=stop_reference['input_age_upper_s']
+            else:sweep,inflation=contract.stopping_sweep(oracle,(*truth['xyz'][:2],yaw),kind,sign,model,age_upper,policy)
+
+            visibility=contract.guard_hits(cloud['points'],sweep,inflation,model,oracle)
+            # Geometry/graph work must not turn a previously fresh sample into a
+            # stale positive command with a new packet timestamp.
+            final_facts={}
+            def final_guard(issued_ns,steady):
+                if terminal_deadline_steady is not None and steady>=terminal_deadline_steady:raise contract.Hold('forward terminal deadline reached before packet send')
+                contract.check_clock(clock_pair,issued_ns,steady)
+                final_facts['issued_steady_sec']=steady
+                if mapping_ready:
+                    final_facts['pose']=contract.fresh(truth,issued_ns,steady,limit=age_cap)
+                    if final_facts['pose']['header_age_s']>age_upper+1e-9:raise contract.InputUnavailable('mapping command pose age exceeds expanded sweep')
+                    final_facts['pose'].update(guard_elapsed_s=steady-guard_started,swept_pose_age_upper_s=age_upper)
+                else:final_facts['pose']=contract.command_time_pose_guard(truth,issued_ns,steady,guard_started,age_upper,age_cap)
+                if checked_bridge is not None:
+                    start,target,leg_policy=checked_bridge
+                    check=contract.lateral_leg_state if leg_policy.get('kind')=='lateral_fixed_body_heading' else contract.straight_leg_state
+                    final_facts['bridge']=check(start,target,(*truth['xyz'][:2],yaw),leg_policy)
+                    if vx and contract.forward_terminal_policy(start,target,leg_policy) is not None:
+                        endpoint=contract.forward_endpoint_state(start,target,(*truth['xyz'][:2],yaw),leg_policy)
+                        if final_facts['bridge']['along_m']>final_facts['bridge']['length_m']+endpoint['along_endpoint_tolerance_m']:
+                            raise contract.Hold('forward terminal overshoot at final packet guard')
+                guarded_inputs={key:value for key,value in latest.items() if not mapping_ready or key in ('truth','raw_lidar','scan')}
+                final_facts['inputs']={key:contract.fresh(value,issued_ns,steady,limit=age_cap if key=='truth' else contract.MAX_INPUT_AGE) for key,value in guarded_inputs.items()}
+                final_facts['cloud']=contract.fresh(dict(stamp_ns=cloud['stamp_ns'],received_steady=cloud['raw_received_steady']),issued_ns,steady)
+                if not mapping_ready and last_send is not None and steady-last_send>contract.CONTROL_RENEWAL_LIMIT:raise contract.Hold('guard computation exceeded command renewal bound')
+                if audit['first_violation'] is not None:raise contract.Hold('owner audit violated during guard computation')
+                if not audit['valid'] or steady-audit['checked_steady']>(MAPPING_AUDIT_MAX_AGE if mapping_ready else .3):raise (contract.InputUnavailable if mapping_ready else contract.Hold)('owner audit expired during guard computation')
+            packet=(relay.send(vx,wz,preflight=final_guard,lateral_raw=lateral_raw,fine_phase=True) if fine_phase is True else relay.send(vx,wz,preflight=final_guard,lateral_raw=lateral_raw));last_send=final_facts['issued_steady_sec']
+            if lateral_raw:active_lateral=lateral_context
+            if not mapping_ready and time.monotonic()-last_send>contract.CONTROL_RENEWAL_LIMIT:raise contract.Hold('command write/dispatch exceeded renewal bound; issued anchor retained')
+            accepted=writer.submit('state_trace',dict(unix_ns=time.time_ns(),scope=contract.SCOPE,truth=truth,lidar_stamp_ns=cloud['stamp_ns'],
+              lidar_gt_association=cloud['pose'],command=packet,policy_vx=vx,policy_wz=wz,policy_lateral_raw=lateral_raw,primitive=kind,
+              input_qualification_epoch=getattr(qualification,'epoch',None),input_qualification_armed=getattr(qualification,'armed',None),
+              fine_forward_phase=fine_phase,applied_forward_policy_mps=vx,applied_command=dict(version=1,action='walk',forward=packet['forward'],lateral=packet['lateral'],yaw=packet['yaw']),
+              applied_command_basis='owner pipe write accepted; not child UDP or actuation proof',
+              lateral_stop_envelope_retained=bool(lateral_context),
+              actual_GT_stop_reference=stop_reference,
+              original_inputs={key:{k:v for k,v in value.items() if k!='message'} for key,value in latest.items()},
+              final_command_guard=final_facts,input_ages_at_command=final_facts['inputs'],used_lidar_age_at_command=final_facts['cloud'],
+              stop_sweep_samples=len(sweep),inflation_m=inflation,visibility=visibility,owner_audit=dict(audit)))
+            if not accepted:raise contract.Hold('bounded state writer rejected evidence')
+            return truth,yaw
+        def stable(seconds,timeout,heading=None,deadline_steady=None):
+            nonlocal active_lateral
+            begin=time.monotonic();checker=contract.StableStop(contract.truth_age_limit(model))
+            while time.monotonic()-begin<timeout:
+                truth,yaw=tick()
+                if heading is not None:
+                    if time.monotonic()-begin>=timeout or (deadline_steady is not None and time.monotonic()>=deadline_steady):
+                        raise contract.Hold('heading settle exceeded original stop deadline')
+                    if abs(contract.wrap(heading[0]-yaw))>heading[1]:
+                        checker=contract.StableStop(contract.truth_age_limit(model));continue
+                if checker.update(truth,relay.command,time.time_ns(),time.monotonic(),seconds):
+                    active_lateral=None;return truth,yaw
+            raise contract.Hold('fresh truth/zero-command stable stop not observed')
+        if isinstance(raw_imu_gate,PrearmImuQualification):
+            def prearm_waiting_allowed(exc):
+                evidence=writer.summary()
+                if evidence['dropped'] or evidence['worker_error'] is not None or imu_gate_fault is not None:return False
+                if audit['first_violation'] is not None or (audit['checked_steady'] and (not audit['valid'] or time.monotonic()-audit['checked_steady']>.3)):return False
+                if getattr(exc,'graph_readiness',False):
+                    if (getattr(exc,'graph_missing_only',False) is not True and getattr(exc,'graph_unresolved_identity',False) is not True) or not isinstance(raw_imu_gate,PrearmImuQualification):return False
+                    context=raw_imu_gate.context()
+                    return (not raw_imu_gate.armed and not raw_imu_gate.ever_armed and not raw_imu_gate.ever_nonzero_requested
+                        and raw_imu_gate.fault is None and time.monotonic()<raw_imu_gate.deadline
+                        and raw_imu_gate.zero(context['command']) and raw_imu_gate.zero(context['request']))
+                return str(exc) in {'missing input','stale/future input header or callback receipt','no fresh accepted original IMU progress',
+                    'no fresh original-stamp raw/derived lidar+GT association','velocity-owner audit missing/stale/violated: not_checked',
+                    'control-loop gap; no stale positive command is renewed','guard computation exceeded command renewal bound','command write/dispatch exceeded renewal bound; issued anchor retained'}
+            def prearm_arming_allowed():
+                evidence=writer.summary()
+                return (not evidence['dropped'] and evidence['worker_error'] is None and imu_gate_fault is None
+                    and audit['valid'] and audit['first_violation'] is None and time.monotonic()-audit['checked_steady']<=.3)
+            truth,yaw=qualify_prearm_zero(raw_imu_gate,tick,relay,model,emit,prearm_waiting_allowed,arming_allowed=prearm_arming_allowed)
+        else:
+            # Warm data before requesting a continuous 10s stopped interval.
+            deadline=time.monotonic()+40.
+            while True:
+                try:truth,yaw=tick();break
+                except contract.Hold as exc:
+                    if imu_gate_fault is not None:raise
+                    if getattr(exc,'graph_readiness',False):raise
+                    relay.send()
+                    if 'first_warm_hold' not in locals():
+                        first_warm_hold=str(exc);emit('first_warm_hold',reason=first_warm_hold)
+                    if audit['checked_steady'] and not audit['valid']:raise
+                    if time.monotonic()>=deadline:raise
+            truth,yaw=stable(contract.START_STABLE,max(0.,deadline-time.monotonic()))
+        anchor=route['start_anchor_truth']
+        if math.hypot(truth['xyz'][0]-anchor[0],truth['xyz'][1]-anchor[1])>.1 or abs(contract.wrap(yaw-anchor[2]))>.08:
+            if relaxed:emit('mapping_start_anchor_diagnostic',truth=truth,anchor=anchor)
+            else:raise contract.Hold('fresh truth start differs from frozen root anchor')
+        emit('runtime_ready',receipt=dict(scope=contract.SCOPE,mode=contract.MODE,run_id=release['release_id'],
+          owner_process_identity=own,relay_identity=relay.identity,relay_source_sha256=relay.source_sha256,
+          root_release_sha256=release_sha256,route_sha256=release['route_sha256'],oracle_sha256=release['oracle_sha256'],
+          sources_sha256=release['sources_sha256'],lateral_admission=lateral_admission,output_directory=str(output),truth=truth,start_stable_seconds=contract.START_STABLE,
+          actual_truth_age_cap_sec=contract.truth_age_limit(model),lateral_magnitude=contract.MAX_LATERAL_RAW,
+          scene_identity_basis='root external host attestation; no direct host UE monitoring',controller_pid_namespace=release['controller_pid_namespace'],scene_identity_proof=release['scene_identity_proof'],
+          checked_unix_ns=time.time_ns(),checked_steady_ns=time.monotonic_ns(),boundary='Preflight evidence only; no additional motion permission.'),
+          prearm_qualification=getattr(getattr(relay,'prearm_qualification',None),'arm_receipt',None),sim_command_endpoint=getattr(relay,'sim_command_endpoint',None))
+        if relaxed:
+            mapping_ready=True;relay.mapping_only_relaxed_survey=True;relay.prearm_qualification=None;active_lateral=None
+            emit('mapping_relaxed_survey_started',purpose='mapping_only_relaxed_survey',formal_navigation_acceptance=False)
+            def mapping_zero(reason):
+                nonlocal last_send,active_lateral
+                packet=relay.send();last_send=None;active_lateral=None
+                diagnostic('mapping_zero: '+reason,packet=packet)
+            truth,yaw,survey=mapping_survey(route,health,tick,mapping_zero,emit)
+            result=dict(classification='controlled_static_sim_raw_acquisition_completed',points=len(route['waypoints']),
+                final_truth=truth,start_stable_seconds=contract.START_STABLE,end_stable_seconds=0.,**survey)
+        else:
+            def rotate_to(target,tolerance=.08,deadline_steady=None,terminal_deadline_steady=None):
+                command_deadline=min((value for value in (deadline_steady,terminal_deadline_steady) if value is not None),default=None)
+                previous_error=None
+                while True:
+                    if deadline_steady is not None and time.monotonic()>=deadline_steady:raise contract.Hold('bounded heading correction deadline expired')
+                    truth,yaw=health()[:2];error=contract.wrap(target-yaw)
+                    if abs(error)<=tolerance/2.:break
+                    if previous_error is not None and max(abs(previous_error),abs(error))<math.pi/2. and previous_error*error<0.:break
+                    previous_error=error
+                    tick(0.,math.copysign(contract.MAX_WZ,error),terminal_deadline_steady=command_deadline)
+                settle_deadline=time.monotonic()+8.
+                if deadline_steady is not None:settle_deadline=min(settle_deadline,deadline_steady)
+                remaining=max(0.,settle_deadline-time.monotonic())
+                truth,yaw=stable(contract.STOP_STABLE,remaining,heading=(target,tolerance),deadline_steady=settle_deadline)
+                if deadline_steady is not None and time.monotonic()>deadline_steady:raise contract.Hold('heading settle exceeded correction deadline')
+                if abs(contract.wrap(target-yaw))>tolerance:raise contract.Hold('settled heading outside acquisition tolerance')
+                return truth,yaw
+            for index,point in enumerate(route['waypoints']):
+                x,y,heading=point['pose_truth'];emit('point_entered',index=index,original_truth_target=point)
+                policy=point.get('leg_policy');leg_start=tuple(route['start_anchor_truth'] if index==0 else route['waypoints'][index-1]['pose_truth'])
+                lateral=policy is not None and policy.get('kind')=='lateral_fixed_body_heading'
+                tolerance=policy['endpoint_tolerance_m'] if lateral else contract.translation_endpoint_tolerance(leg_start,(x,y,heading))
+                if policy is not None:
+                    stable(contract.STOP_STABLE,8.)
+                    rotate_to(policy['body_yaw_rad'] if lateral else policy['travel_yaw_rad'],policy['max_yaw_error_rad'])
+                entry_truth,entry_yaw=health()[:2];leg_entry=(*entry_truth['xyz'][:2],entry_yaw);corrections=0;correction_used=0.;feedback=None
+                if not lateral and contract.forward_terminal_policy(leg_start,(x,y,heading),policy) is not None:
+                    truth,yaw=forward_terminal_leg(leg_start,(x,y,heading),leg_entry,policy,health,tick,stable,rotate_to,
+                        lambda phase,**fields:emit('forward_terminal_phase',index=index,phase=phase,**fields))
+                    progress=contract.require_translation_progress(leg_start,(x,y,heading),leg_entry,(*truth['xyz'][:2],yaw),tolerance)
+                    emit('point_visited',index=index,truth=truth,target=point,measured_and_commanded_stop=True,actual_leg_progress=progress)
+                    continue
+                while True:
+                    truth,yaw=health()[:2];dx,dy=x-truth['xyz'][0],y-truth['xyz'][1]
+                    if lateral:
+                        state=contract.lateral_leg_state(leg_start,(x,y,heading),(*truth['xyz'][:2],yaw),policy)
+                        if state['reached']:
+                            contract.require_translation_progress(leg_start,(x,y,heading),leg_entry,(*truth['xyz'][:2],yaw),tolerance);break
+                        feedback=contract.feedback_window(feedback,state,time.monotonic(),state['along_m'])
+                        decision=contract.lateral_correction_state(state,(*truth['xyz'][:2],yaw),policy,corrections,model)
+                        if decision['observe_cross'] and feedback is None:
+                            feedback=dict(started_steady=time.monotonic(),start_along_m=state['along_m'],start_abs_cross_m=abs(state['cross_track_m']))
+                        if decision['stop_then_recheck']:
+                            # Zero through the signed actual-GT stop envelope first.
+                            # stable() alone clears active_lateral after measured stop.
+                            remaining=contract.LATERAL_CORRECTION_BUDGET_SEC-correction_used
+                            if remaining<=0:raise contract.Hold('total per-leg correction budget exhausted')
+                            correction_started=time.monotonic();correction_deadline=correction_started+remaining
+                            truth,yaw=stable(contract.STOP_STABLE,min(8.,remaining))
+                            state=contract.lateral_leg_state(leg_start,(x,y,heading),(*truth['xyz'][:2],yaw),policy)
+                            desired=contract.lateral_heading_target(state,(*truth['xyz'][:2],yaw),policy,model)
+                            fine=desired['settled_yaw_tolerance_rad'];turned=desired['yaw_error_to_target_rad']>fine
+                            if turned:
+                                truth,yaw=rotate_to(desired['target_body_yaw_rad'],fine,correction_deadline)
+                                corrections+=1
+                            correction_used+=time.monotonic()-correction_started
+                            if correction_used>contract.LATERAL_CORRECTION_BUDGET_SEC:raise contract.Hold('total heading correction work exceeded20s')
+                            state=contract.lateral_leg_state(leg_start,(x,y,heading),(*truth['xyz'][:2],yaw),policy)
+                            aligned=contract.lateral_heading_target(state,(*truth['xyz'][:2],yaw),policy,model)
+                            if aligned['yaw_error_to_target_rad']>aligned['settled_yaw_tolerance_rad']:raise contract.Hold('settled compensation target changed beyond attained tolerance')
+                            feedback=dict(started_steady=time.monotonic(),start_along_m=state['along_m'],start_abs_cross_m=abs(state['cross_track_m'])) if abs(state['cross_track_m'])>=decision['cross_trigger_m'] else None
+                            emit('same_leg_stopped_heading_compensation',index=index,correction=corrections,correction_work_sec=correction_used,turned=turned,truth=truth,decision=aligned)
+                            continue  # Same start/target/entry/sign, no new route or axis.
+                        tick(bridge=(leg_start,(x,y,heading),policy),lateral_raw=policy['lateral_sign']*contract.MAX_LATERAL_RAW)
+                        continue
+                    if policy is not None:contract.straight_leg_state(leg_start,(x,y,heading),(*truth['xyz'][:2],yaw),policy)
+                    if contract.forward_endpoint_state(leg_start,(x,y,heading),(*truth['xyz'][:2],yaw),policy)['reached']:
+                        contract.require_translation_progress(leg_start,(x,y,heading),leg_entry,(*truth['xyz'][:2],yaw),tolerance);break
+                    bearing=math.atan2(dy,dx)
+                    if policy is not None:tick(contract.MAX_VX,0.,bridge=(leg_start,(x,y,heading),policy))
+                    elif abs(contract.wrap(bearing-yaw))>.12:
+                        stable(contract.STOP_STABLE,8.);rotate_to(bearing)
+                    else:tick(contract.MAX_VX,0.)
+                stable(contract.STOP_STABLE,8.);truth,yaw=rotate_to(heading)
+                if (math.hypot(x-truth['xyz'][0],y-truth['xyz'][1])>tolerance if lateral else not contract.forward_endpoint_state(leg_start,(x,y,heading),(*truth['xyz'][:2],yaw),policy)['reached']):raise contract.Hold('settled acquisition XY target missed; no retry')
+                progress=contract.require_translation_progress(leg_start,(x,y,heading),leg_entry,(*truth['xyz'][:2],yaw),tolerance)
+                emit('point_visited',index=index,truth=truth,target=point,measured_and_commanded_stop=True,actual_leg_progress=progress)
+            truth,yaw=stable(contract.END_STABLE,28.);stop_verified=True
+            result=dict(classification='controlled_static_sim_raw_acquisition_completed',points=len(route['waypoints']),
+              final_truth=truth,start_stable_seconds=contract.START_STABLE,end_stable_seconds=contract.END_STABLE)
+    except BaseException as exc:
+        if 'latest' in locals():fault_snapshot={key:dict(value) for key,value in latest.items()}
+        result=dict(classification='HOLD_or_interrupted_acquisition_incomplete',error_type=type(exc).__name__,error=str(exc))
+    finally:
+        # No evidence I/O precedes zeroing the owned relay on this exit path.
+        if relay is not None:
+            def observe_stop():
+                if node is None:return False
+                checker=contract.StableStop(contract.truth_age_limit(model));until=time.monotonic()+8.
+                while rclpy.ok() and time.monotonic()<until:
+                    callbacks.spin()
+                    try:
+                        relay.send();sample=latest.get('truth')
+                        if active_lateral is not None:contract.directional_yaw_guard(sample,model,active_lateral[0])
+                        contract.standing_before_relay(sample,model,time.time_ns(),time.monotonic())
+                        if checker.update(sample,relay.command,time.time_ns(),time.monotonic(),contract.STOP_STABLE):
+                            stop_observation.update(truth=sample,command=list(relay.command),checked_unix_ns=time.time_ns(),checked_steady_ns=time.monotonic_ns(),continuous_seconds=contract.STOP_STABLE)
+                            return True
+                    except BaseException:checker=contract.StableStop(contract.truth_age_limit(model))
+                return False
+            closed=finalize_owned_relay(relay,observe_stop);result.update(closed);stop_verified=closed['stop_verified']
+            if writer is not None:
+                try:emit('initial_cleanup_zero_receipt',receipt=closed.get('initial_cleanup_zero_receipt'),zero_error=closed.get('zero_error'))
+                except BaseException as exc:result['cleanup_zero_receipt_emit_error']=str(exc)
+            result.update(relay_identity=relay.identity,relay_source_sha256=relay.source_sha256,relay_returncode=relay.process.poll() if relay.process is not None else None)
+            if not result['relay_closed']:result['classification']='HOLD_owned_relay_not_closed'
+            elif result['relay_close_errors']:result['classification']='HOLD_owned_relay_close_error'
+        if 'audit_stop' in locals():audit_stop.set();auditor.join(timeout=.5)
+        result.update(lateral_admission=lateral_admission,imu_gate=raw_imu_gate.diagnostics(time.time_ns(),time.monotonic_ns()) if 'raw_imu_gate' in locals() else None,
+                      scope=contract.SCOPE,mode=contract.MODE,run_id=release['release_id'],stop_verified=stop_verified,
+                      final_stop_observation=stop_observation,owner_process_identity=own,
+                      controller_pid_namespace=release['controller_pid_namespace'],scene_identity_basis='root external host attestation; no direct host UE monitoring',scene_identity_proof=release['scene_identity_proof'],
+                      runtime_binding=dict(root_release_sha256=release_sha256,route_sha256=release['route_sha256'],oracle_sha256=release['oracle_sha256'],sources_sha256=release['sources_sha256'],
+                        output_directory=str(output),case_id=release.get('case_id'),recording_run_id=release.get('recording_run_id'),recorder_ready_sha256=release['recorder_ready_sha256']),
+                      signals=stopped,elapsed_seconds=time.monotonic()-started,mapping_only_relaxed_survey=relaxed,formal_navigation_acceptance=False)
+        if fault_snapshot is not None:
+            summary={}
+            for key,value in fault_snapshot.items():
+                message=value.pop('message',None)
+                if message is not None:value['original_point_data_sha256']=__import__('hashlib').sha256(message.data).hexdigest()
+                summary[key]=value
+            result['first_fault_original_inputs']=summary;result['last_requested_command']=last_request
+        if result.get('classification')=='controlled_static_sim_raw_acquisition_completed' and not stop_verified and not relaxed:
+            result['classification']='HOLD_final_measured_stop_unobserved'
+        if writer is not None:
+            result['writer']=writer.close()
+            if not result['writer']['evidence_complete']:result['classification']='HOLD_evidence_gap'
+        if executor is not None:
+            try:
+                executor.remove_node(node)
+                if not executor.shutdown(timeout_sec=0.):raise contract.Hold('owned mapping executor did not stop')
+            except BaseException as exc:result.update(classification='HOLD_executor_close_error',executor_close_error=str(exc))
+        if node is not None:
+            try:node.destroy_node()
+            except BaseException as exc:result.update(classification='HOLD_node_close_error',node_close_error=str(exc))
+        if rclpy.ok():
+            try:rclpy.shutdown()
+            except BaseException as exc:result.update(classification='HOLD_context_close_error',context_close_error=str(exc))
+        (output/'result.json').write_text(evidence_json(result,indent=2)+'\n')
+        for number,handler in previous.items():signal.signal(number,handler)
+        lock.close()
+    return result
+
+
+def forward_terminal_leg(start,target,entry,policy,health,tick,stable,rotate_to,emit,clock=time):
+    """Bounded optional terminal work. All packets use the original guarded tick."""
+    config=contract.forward_terminal_policy(start,target,policy)
+    if config is None:raise contract.Hold('forward terminal policy was not explicitly selected')
+    bridge=(start,target,policy);deadline=None;corrections=0;fine_vx=config.get('fine_forward_mps',contract.MAX_VX)
+    pulse_count=0;pulse_ticks=config.get('fine_pulse_ticks')
+    tolerance=contract.translation_endpoint_tolerance(start,target)
+    def budget():
+        if deadline is not None and clock.monotonic()>=deadline:raise contract.Hold('forward terminal extra work deadline expired')
+    def state(truth,yaw):
+        budget();pose=(*truth['xyz'][:2],yaw)
+        track=contract.straight_leg_state(start,target,pose,policy)
+        endpoint=contract.forward_endpoint_state(start,target,pose,policy)
+        remaining=track['length_m']-track['along_m']
+        if remaining < -endpoint['along_endpoint_tolerance_m']:raise contract.Hold('forward terminal overshoot; no reverse correction')
+        return remaining,endpoint,pose
+    def stop(phase,**phase_fields):
+        budget();truth,yaw=stable(contract.STOP_STABLE,min(8.,deadline-clock.monotonic()))
+        remaining,endpoint,pose=state(truth,yaw)
+        emit(phase,truth=truth,remaining_m=remaining,endpoint=endpoint,correction=corrections,
+            deadline_steady=deadline,original_start=start,original_target=target,**phase_fields)
+        budget();return truth,yaw
+    # Coarse travel retains the ordinary route/controller deadline. The20s extra
+    # budget begins at the first neutral/stopped terminal transition, not mid-leg.
+    while True:
+        truth,yaw=health()[:2];remaining,endpoint,pose=state(truth,yaw)
+        if remaining<=config['coarse_stop_remaining_m']:
+            deadline=clock.monotonic()+config['max_extra_work_sec']
+            emit('coarse_stop_requested',truth=truth,remaining_m=remaining,deadline_steady=deadline)
+            truth,yaw=stop('coarse_stopped');break
+        tick(contract.MAX_VX,0.,bridge=bridge)
+    while True:
+        remaining,endpoint,pose=state(truth,yaw)
+        emit('fine_started' if corrections==0 else 'correction_started',truth=truth,remaining_m=remaining,correction=corrections,applied_forward_policy_mps=fine_vx,semantic_forward=fine_vx/2.)
+        while not endpoint['reached']:
+            if remaining<=endpoint['along_endpoint_tolerance_m']:
+                raise contract.Hold('forward terminal radial miss cannot be repaired by forward-only correction')
+            if pulse_ticks is not None:
+                if pulse_count>=config['max_fine_pulses']:raise contract.Hold('total fine pulse budget exhausted')
+                pulse_count+=1;issued_ticks=0;reached_during_pulse=False
+                emit('fine_pulse_started',pulse_index=pulse_count,max_ticks=pulse_ticks,correction=corrections,truth=truth,
+                    original_start=start,original_goal=target,deadline_steady=deadline)
+                for burst_tick in range(pulse_ticks):
+                    budget();issued_truth,issued_yaw=tick(contract.MAX_VX,0.,bridge=bridge,terminal_deadline_steady=deadline);issued_ticks+=1
+                    emit('fine_pulse_issued',pulse_index=pulse_count,tick_index=issued_ticks,max_ticks=pulse_ticks,correction=corrections,
+                        truth=issued_truth,original_start=start,original_goal=target,deadline_steady=deadline,
+                        applied_forward_policy_mps=contract.MAX_VX,semantic_forward=contract.MAX_VX/2.,
+                        basis='guarded parent tick returned; childUDP or actuation not asserted')
+                    budget();truth,yaw=health()[:2];remaining,endpoint,pose=state(truth,yaw)
+                    if endpoint['reached']:reached_during_pulse=True;break
+                # This measured stop is mandatory before another positive pulse.
+                truth,yaw=stop('fine_pulse_stopped',pulse_index=pulse_count,issued_ticks=issued_ticks,max_ticks=pulse_ticks,original_goal=target,fine_pulse_count=pulse_count);remaining,endpoint,pose=state(truth,yaw)
+                if reached_during_pulse and not endpoint['reached']:
+                    if corrections>=config['max_corrections']:raise contract.Hold('forward terminal correction count exhausted after pulse stop')
+                    corrections+=1
+                continue  # Same absolute deadline/count/frozen target, no new axis.
+            budget()
+            if 'fine_forward_mps' in config:tick(fine_vx,0.,bridge=bridge,terminal_deadline_steady=deadline,fine_phase=True)
+            else:tick(contract.MAX_VX,0.,bridge=bridge,terminal_deadline_steady=deadline)
+            budget()
+            truth,yaw=health()[:2];remaining,endpoint,pose=state(truth,yaw)
+        contract.require_translation_progress(start,target,entry,pose,tolerance)
+        truth,yaw=stop('fine_stopped')
+        remaining,endpoint,pose=state(truth,yaw)
+        if endpoint['reached']:
+            # No turn begins from an unaccepted translation endpoint. A stopped
+            # undershoot is repaired first, with the same frozen forward bridge.
+            budget();truth,yaw=rotate_to(target[2],deadline_steady=deadline,terminal_deadline_steady=deadline);budget()
+            remaining,endpoint,pose=state(truth,yaw)
+            if endpoint['reached']:
+                contract.require_translation_progress(start,target,entry,pose,tolerance)
+                emit('completed',truth=truth,endpoint=endpoint,correction=corrections,deadline_steady=deadline)
+                budget();return truth,yaw
+        if remaining<=endpoint['along_endpoint_tolerance_m']:
+            raise contract.Hold('settled forward terminal radial/overshoot miss; no feasible forward correction')
+        if corrections>=config['max_corrections']:raise contract.Hold('forward terminal correction count exhausted')
+        corrections+=1
+        # Same frozen start/target/sign and original leg-entry progress reference.
+        # The preceding stop and rotate_to both verified a real zero-command stop.
+
+
+def prearm_requalification_enabled(release):
+    value=release.get('allow_prearm_imu_gap_requalification',False)
+    if type(value) is not bool:raise contract.Hold('prearm IMU gap requalification flag must be strict boolean')
+    return value
+
+
+class PrearmImuQualification:
+    """Local zero-only lease epochs; original Gate code and limits are unchanged."""
+    def __init__(self,context,clock=time):
+        self.context=context;self.clock=clock;self.deadline=clock.monotonic()+40.;self.armed=False;self.ever_armed=False
+        self.ever_nonzero_requested=False;self.fault=None;self.high_water=None;self.receipt_high_water=None
+        self.epochs=[];self.invalid_snapshots=[];self.arm_receipt=None;self._new_epoch()
+    def _new_epoch(self):
+        self.gate=ImuMonotonicGate()
+        self.epochs.append(dict(gate=self.gate,raw_received=0,accepted=0,rejected=0,reject_reasons={},first_header_ns=None,
+            first_receipt_steady_ns=None,last_header_ns=None,last_receipt_steady_ns=None))
+    @property
+    def epoch(self):return len(self.epochs)-1
+    @staticmethod
+    def zero(values):return isinstance(values,(tuple,list)) and len(values)==3 and all(type(v) in (int,float) and v==0. for v in values)
+    def snapshot(self,kind,**extra):
+        value=dict(kind=kind,epoch=self.epoch,steady_ns=self.clock.monotonic_ns(),context=copy.deepcopy(self.context()),**extra)
+        self.invalid_snapshots.append(value);return value
+    def require_command(self,vx=0.,wz=0.,lateral_raw=0.):
+        if not any(v!=0. for v in [vx,wz,lateral_raw]):return
+        self.ever_nonzero_requested=True
+        if not self.armed or self.fault is not None:raise contract.Hold('prearm qualification forbids nonzero before armed or after fatal')
+    def inspect(self,raw,receipt_unix_ns,receipt_steady_ns,now_unix_ns=None,now_steady_ns=None):
+        # Candidate inspection first preserves all original decode/frame/finite/
+        # clock checks. Discarding an old-epoch candidate never submits its accept.
+        stats=self.epochs[-1];gate=copy.copy(self.gate) if stats['first_header_ns'] is None and self.high_water is not None else self.gate
+        event=gate.inspect(raw,receipt_unix_ns,receipt_steady_ns,now_unix_ns,now_steady_ns)
+        if event['accepted'] and stats['first_header_ns'] is None and self.high_water is not None and (
+            event['header_ns']<=self.high_water or receipt_steady_ns<self.receipt_high_water):
+            original=copy.deepcopy(event);event=dict(event,accepted=False,reason='prearm_epoch_header_not_above_high_water',fatal=False,
+                original_gate_candidate_event=original,original_cdr_base64=base64.b64encode(bytes(raw)).decode('ascii'))
+            if receipt_steady_ns<self.receipt_high_water:event.update(reason='receipt_clock_regression',fatal=True)
+        else:self.gate=gate;stats['gate']=gate
+        stats['raw_received']+=1
+        if event['accepted']:
+            stats['accepted']+=1
+            if stats['first_header_ns'] is None:stats.update(first_header_ns=event['header_ns'],first_receipt_steady_ns=receipt_steady_ns)
+            stats.update(last_header_ns=event['header_ns'],last_receipt_steady_ns=receipt_steady_ns)
+        else:
+            stats['rejected']+=1;reason=event['reason'];stats['reject_reasons'][reason]=stats['reject_reasons'].get(reason,0)+1
+        event=dict(event,qualification_epoch=self.epoch,qualification_lifetime_raw_index=sum(e['raw_received'] for e in self.epochs)-1)
+        if event['fatal']:
+            context=self.context()
+            eligible=(event['reason']=='accepted_header_gap_exceeded' and not self.ever_armed and not self.ever_nonzero_requested
+                and self.fault is None and self.zero(context['command']) and self.zero(context['request'])
+                and self.epoch<3 and self.clock.monotonic()<self.deadline)
+            if eligible:
+                previous=dict(stats);previous.pop('gate')
+                invalid=self.snapshot('accepted_header_gap_epoch_invalidated',event=copy.deepcopy(event),epoch_counters=previous)
+                self.high_water=max(v for v in [self.high_water,event['header_ns'],event['last_accepted_header_ns']] if v is not None)
+                self.receipt_high_water=max(receipt_steady_ns,self.receipt_high_water or 0)
+                self._new_epoch();event=dict(event,prearm_epoch_reopened=True,invalidated_epoch=self.epoch-1,new_epoch=self.epoch,
+                    cross_epoch_header_high_water_ns=self.high_water)
+            elif self.fault is None:self.fault=copy.deepcopy(event)
+        return event
+    def fresh(self,now_unix_ns,now_steady_ns):return self.gate.fresh(now_unix_ns,now_steady_ns)
+    def spans(self):
+        e=self.epochs[-1]
+        return dict(header_span_ns=0 if e['first_header_ns'] is None else e['last_header_ns']-e['first_header_ns'],
+            receipt_steady_span_ns=0 if e['first_receipt_steady_ns'] is None else e['last_receipt_steady_ns']-e['first_receipt_steady_ns'])
+    def arm(self,epoch,stop_ready,health_valid):
+        span=self.spans()
+        if (self.ever_armed or self.fault is not None or self.ever_nonzero_requested or epoch!=self.epoch or self.clock.monotonic()>=self.deadline
+            or not stop_ready or not health_valid or min(span.values())<10_000_000_000
+            or not self.fresh(self.clock.time_ns(),self.clock.monotonic_ns())):raise contract.Hold('prearm qualification not complete or permanently invalid')
+        self.armed=self.ever_armed=True
+        self.arm_receipt=dict(epoch=self.epoch,armed_unix_ns=self.clock.time_ns(),armed_steady_ns=self.clock.monotonic_ns(),**span,
+            old_epochs_not_motion_acceptance=True,qualification_new_lease_only=True)
+        return self.arm_receipt
+    def reanchor_zero(self,last_send,request,command):
+        if last_send is None or self.clock.monotonic()-last_send<=contract.CONTROL_RENEWAL_LIMIT:return None
+        if self.ever_armed or self.ever_nonzero_requested or self.fault is not None or not self.zero(request) or not self.zero(command):return None
+        return self.snapshot('prearm_expired_zero_anchor_cleared',old_issued_steady_sec=last_send,observed_gap_sec=self.clock.monotonic()-last_send,
+            replacement_anchor='None; only next original final preflight issue may create it')
+    def diagnostics(self,now_unix_ns,now_steady_ns):
+        reasons={};epochs=[]
+        for index,e in enumerate(self.epochs):
+            for k,v in e['reject_reasons'].items():reasons[k]=reasons.get(k,0)+v
+            epochs.append(dict({k:copy.deepcopy(v) for k,v in e.items() if k!='gate'},epoch=index,
+                original_gate=e['gate'].diagnostics(now_unix_ns,now_steady_ns)))
+        active=self.gate.diagnostics(now_unix_ns,now_steady_ns)
+        active.update(raw_received=sum(e['raw_received'] for e in self.epochs),accepted=sum(e['accepted'] for e in self.epochs),
+            rejected=sum(e['rejected'] for e in self.epochs),reject_reasons=reasons,epochs=epochs,active_epoch=self.epoch,
+            qualification_mode=True,armed=self.armed,ever_armed=self.ever_armed,ever_nonzero_requested=self.ever_nonzero_requested,permanent_fault=copy.deepcopy(self.fault),
+            warm_invalid_snapshots=copy.deepcopy(self.invalid_snapshots),arm_receipt=self.arm_receipt,
+            lifetime_counters_include_all_epochs=True,old_errors_not_erased=True)
+        return active
+
+
+def qualify_prearm_zero(qualification,tick,relay,model,emit,waiting_allowed,clock=time,arming_allowed=None):
+    """Every successful tick runs the original complete health/final zero guards."""
+    epoch=qualification.epoch;checker=contract.StableStop(contract.truth_age_limit(model))
+    while clock.monotonic()<qualification.deadline:
+        if qualification.fault is not None:raise contract.Hold('latched prearm raw IMU fatal: '+qualification.fault['reason'])
+        if epoch!=qualification.epoch:epoch=qualification.epoch;checker=contract.StableStop(contract.truth_age_limit(model))
+        try:truth,yaw=tick()
+        except contract.Hold as exc:
+            snapshot=qualification.snapshot('prearm_health_not_qualified',reason=str(exc),tracked_epoch=epoch,GT_stop_checker=copy.deepcopy(vars(checker)))
+            checker=contract.StableStop(contract.truth_age_limit(model));epoch=qualification.epoch
+            emit('prearm_qualification_invalid',snapshot=snapshot)
+            if qualification.fault is not None or not waiting_allowed(exc):raise
+            relay.send()  # Still zero; never issues a new last_send preflight anchor.
+            continue
+        if epoch!=qualification.epoch:epoch=qualification.epoch;checker=contract.StableStop(contract.truth_age_limit(model))
+        stopped=checker.update(truth,relay.command,clock.time_ns(),clock.monotonic(),contract.START_STABLE)
+        if stopped and min(qualification.spans().values())>=10_000_000_000:
+            qualification.arm(epoch,stopped,bool(arming_allowed is not None and arming_allowed()));return truth,yaw
+    raise contract.Hold('fixed40s prearm qualification expired')
+
+
+def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--execute',action='store_true');parser.add_argument('--route',type=Path)
+    parser.add_argument('--oracle',type=Path);parser.add_argument('--root-release',type=Path)
+    parser.add_argument('--output',required=True,type=Path);args=parser.parse_args()
+    output=args.output.resolve()
+    if output.exists():parser.error('unique output required; never overwrite an attempt')
+    output.mkdir(parents=True)
+    manifest=dict(schema_version=1,scope=contract.SCOPE,mode=contract.MODE,execution_requested=args.execute,
+      sources_sha256={str(p.relative_to(REPO)):contract.sha(p) for p in source_files()},template=template())
+    (output/'preparation.json').write_text(json.dumps(manifest,indent=2)+'\n')
+    try:
+        if args.route is None or args.oracle is None:raise contract.Hold('root physical oracle/route pending; executable:false template only')
+        route=contract.validate_route(contract.read_json(args.route),args.execute)
+        oracle=contract.validate_oracle(contract.read_json(args.oracle),args.oracle)
+        grid=contract.OracleGrid.load(oracle,args.oracle)
+        geometry=contract.audit_route_geometry(grid,route,oracle['motion_model'])
+        (output/'route_geometry_audit.json').write_text(json.dumps(geometry,indent=2)+'\n')
+        if not args.execute:result=dict(classification='PREPARED_ONLY_NO_ROS_NO_MOTION',route_sha256=contract.sha(args.route),oracle_sha256=contract.sha(args.oracle))
+        else:
+            if args.root_release is None:raise contract.Hold('explicit once-only root release required')
+            release=contract.read_json(args.root_release);admission=validate_release(release,route,args.route,args.oracle,output)
+            marker=args.root_release.resolve().parent/(release['release_id']+'.mapping_once.json')
+            contract.claim_once(marker,dict(scope=contract.SCOPE,release_sha256=contract.sha(args.root_release),
+              output_directory=str(output),owner_identity=contract.process_identity(os.getpid()),claimed_unix_ns=time.time_ns()))
+            result=execute(args,route,oracle,release,output,admission)
+    except BaseException as exc:
+        result=dict(classification='HOLD_no_execution_or_incomplete',error_type=type(exc).__name__,error=str(exc),formal_navigation_acceptance=False)
+        (output/'result.json').write_text(json.dumps(result,indent=2)+'\n')
+    if not (output/'result.json').exists():(output/'result.json').write_text(json.dumps(result,indent=2)+'\n')
+    print(json.dumps(dict(output=str(output),classification=result['classification'])))
+    return 0 if not args.execute else 0 if result['classification']=='controlled_static_sim_raw_acquisition_completed' else 2
+
+
+if __name__=='__main__':raise SystemExit(main())

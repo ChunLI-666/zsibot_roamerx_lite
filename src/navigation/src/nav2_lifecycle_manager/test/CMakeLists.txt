@@ -41,6 +41,11 @@ ament_add_test(test_bond
 )
 
 # Local lifetime regression: no navigation nodes, algorithms or actuator bridges.
+ament_add_gtest(test_bounded_transition test_bounded_transition.cpp)
+target_link_libraries(test_bounded_transition ${library_name})
+ament_target_dependencies(test_bounded_transition ${dependencies})
+set_tests_properties(test_bounded_transition PROPERTIES TIMEOUT 30)
+
 ament_add_gtest(test_callback_lifetime test_callback_lifetime.cpp)
 target_link_libraries(test_callback_lifetime ${library_name})
 ament_target_dependencies(test_callback_lifetime ${dependencies})
@@ -61,7 +66,7 @@ set_tests_properties(component_populated_client_lifetime PROPERTIES TIMEOUT 20)
 add_executable(blocked_request_shutdown blocked_request_shutdown.cpp)
 target_link_libraries(blocked_request_shutdown ${library_name})
 ament_target_dependencies(blocked_request_shutdown ${dependencies})
-foreach(mode ownership startup shutdown bond_active bond_owner_release bond_recovery_shutdown)
+foreach(mode ownership startup shutdown bond_active bond_owner_release bond_recovery_shutdown bond_unconfirmed_activate)
   add_test(NAME blocked_request_${mode} COMMAND blocked_request_shutdown ${mode})
   set_tests_properties(blocked_request_${mode} PROPERTIES TIMEOUT 15)
 endforeach()

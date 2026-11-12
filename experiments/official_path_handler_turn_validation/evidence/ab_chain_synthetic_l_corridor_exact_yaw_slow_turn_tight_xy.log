@@ -1,0 +1,119 @@
+[WARN] [1793448446.941735237] [rcl]: ROS_LOCALHOST_ONLY is deprecated but still honored if it is enabled. Use ROS_AUTOMATIC_DISCOVERY_RANGE and ROS_STATIC_PEERS instead.
+[WARN] [1793448446.941759904] [rcl]: 'localhost_only' is enabled, 'automatic_discovery_range' and 'static_peers' will be ignored.
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+[37;1m2026-10-31 20:07:26.946 [31;1m[[37;1mTRANSPORT_UDP[31;1m Error] [37mError creating socket: Operation not permitted[34;1m -> Function [36minit[m
+[37;1m2026-10-31 20:07:26.946 [31;1m[[37;1mRTPS_PARTICIPANT[31;1m Error] [37mUser transport failed to register.[34;1m -> Function [36mRTPSParticipantImpl[m
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+{"tick":0,"x":0,"y":0,"yaw_deg":0,"vx":0.15,"wz":0,"segment_poses":1066}
+{"tick":20,"x":0.299875,"y":0,"yaw_deg":0,"vx":0.145031,"wz":0,"segment_poses":767}
+{"tick":40,"x":0.533182,"y":0,"yaw_deg":0,"vx":0.1,"wz":0,"segment_poses":534}
+{"tick":60,"x":0.733182,"y":0,"yaw_deg":0,"vx":0.1,"wz":0,"segment_poses":334}
+{"tick":80,"x":0.873182,"y":0,"yaw_deg":3.43775,"vx":0,"wz":0.1,"segment_poses":194}
+{"tick":100,"x":0.873182,"y":0,"yaw_deg":14.8969,"vx":0,"wz":0.1,"segment_poses":194}
+{"tick":120,"x":0.873182,"y":0,"yaw_deg":25.7831,"vx":0,"wz":-0.1,"segment_poses":152}
+{"tick":140,"x":0.891479,"y":0.00806128,"yaw_deg":29.2208,"vx":0,"wz":0.1,"segment_poses":139}
+{"tick":160,"x":0.891479,"y":0.00806128,"yaw_deg":40.68,"vx":0,"wz":0.1,"segment_poses":139}
+{"tick":180,"x":0.993397,"y":0.104038,"yaw_deg":42.6524,"vx":0,"wz":0.1,"segment_poses":325}
+{"tick":200,"x":0.993397,"y":0.104038,"yaw_deg":54.1116,"vx":0,"wz":0.1,"segment_poses":325}
+{"tick":220,"x":0.993397,"y":0.104038,"yaw_deg":65.5707,"vx":0,"wz":0.1,"segment_poses":325}
+{"tick":240,"x":0.993397,"y":0.104038,"yaw_deg":77.0299,"vx":0,"wz":0.1,"segment_poses":325}
+{"tick":260,"x":0.993397,"y":0.104038,"yaw_deg":88.489,"vx":0,"wz":0.1,"segment_poses":325}
+{"tick":280,"x":0.998027,"y":0.389,"yaw_deg":89.2857,"vx":0.15,"wz":0.00589079,"segment_poses":613}
+{"tick":300,"x":0.999962,"y":0.632509,"yaw_deg":89.7712,"vx":0.1,"wz":0.00257297,"segment_poses":369}
+{"tick":320,"x":1.00032,"y":0.832509,"yaw_deg":90.0136,"vx":0.1,"wz":0.00200543,"segment_poses":169}
+{"tick":336,"x":1.00003,"y":0.992508,"yaw_deg":90.1744,"vx":0,"wz":0,"segment_poses":9}
+{"planner_controller_summary":true,"success":1,"checker_reached":1,"body_safe":1,"ticks":336,"travelled_m":1.92170034772,"max_excursion_m":1.40894775476,"request_position_error_m":0.00749162003831,"request_yaw_error_deg":0.174417893593,"error":""}

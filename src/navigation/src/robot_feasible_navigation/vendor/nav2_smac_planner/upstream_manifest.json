@@ -1,0 +1,294 @@
+{
+  "project": "https://github.com/ros-navigation/navigation2",
+  "ref": "1.3.13",
+  "tag_commit": "f4108e5b1c2bce804a1aa0c7be6673a8eb4a1501",
+  "scope": "Private vendored official Smac Lattice dependencies only; no stock nav2_smac_planner DSO linkage. Main algorithm and licenses retained; namespace isolated. Safety changes separately listed.",
+  "private_namespace": "robot_feasible_navigation_smac",
+  "files": [
+    {
+      "path": "include/nav2_smac_planner/a_star.hpp",
+      "url": "https://github.com/ros-navigation/navigation2/blob/1.3.13/nav2_smac_planner/include/nav2_smac_planner/a_star.hpp",
+      "upstream_sha256": "0011c2f0ddea1529362a1117674be3325d07b4022c3af71dee1eeed928f01f18",
+      "upstream_git_blob_sha1": "f9abeea302a840c45bc7aa3e8fc8e1e78f1d7f13",
+      "directory_listing_git_blob_sha1": "f9abeea302a840c45bc7aa3e8fc8e1e78f1d7f13",
+      "namespace_only_sha256": "b07af9f98728152bce5b602e15a9a9f1a4da3d9e651dd3b8d576fa9fb877daf5",
+      "vendored_sha256": "b07af9f98728152bce5b602e15a9a9f1a4da3d9e651dd3b8d576fa9fb877daf5"
+    },
+    {
+      "path": "include/nav2_smac_planner/analytic_expansion.hpp",
+      "url": "https://github.com/ros-navigation/navigation2/blob/1.3.13/nav2_smac_planner/include/nav2_smac_planner/analytic_expansion.hpp",
+      "upstream_sha256": "736c039c5da309775de548e0aba77c86985b3e4900c09da490d5f24bcd386986",
+      "upstream_git_blob_sha1": "76719d723131818a0196b77c728b6c9c42239f43",
+      "directory_listing_git_blob_sha1": "76719d723131818a0196b77c728b6c9c42239f43",
+      "namespace_only_sha256": "a00831d44a77268dd9a2b056376cfdcb7d3a02a9a2014106b68d0feb7ebe943c",
+      "vendored_sha256": "a00831d44a77268dd9a2b056376cfdcb7d3a02a9a2014106b68d0feb7ebe943c"
+    },
+    {
+      "path": "include/nav2_smac_planner/collision_checker.hpp",
+      "url": "https://github.com/ros-navigation/navigation2/blob/1.3.13/nav2_smac_planner/include/nav2_smac_planner/collision_checker.hpp",
+      "upstream_sha256": "75bbb37f3364cd53cbc53483b6032552e568d01fcb1baa7176779cfeff5b22ed",
+      "upstream_git_blob_sha1": "d2135fb5f12f4b1961fadb67cb907acab597d676",
+      "directory_listing_git_blob_sha1": "d2135fb5f12f4b1961fadb67cb907acab597d676",
+      "namespace_only_sha256": "b70cf189521652df3911dff644f3bea03a5c627f8c83899b5ce17abf51b89f95",
+      "vendored_sha256": "b70cf189521652df3911dff644f3bea03a5c627f8c83899b5ce17abf51b89f95"
+    },
+    {
+      "path": "include/nav2_smac_planner/constants.hpp",
+      "url": "https://github.com/ros-navigation/navigation2/blob/1.3.13/nav2_smac_planner/include/nav2_smac_planner/constants.hpp",
+      "upstream_sha256": "58b128c745193c6928545a43f1ba21f8fbd016dec3d99b7d14b5423dea7afae2",
+      "upstream_git_blob_sha1": "a1946bc8d65c2538e66369b5e508af1e9ee75a95",
+      "directory_listing_git_blob_sha1": "a1946bc8d65c2538e66369b5e508af1e9ee75a95",
+      "namespace_only_sha256": "a84a96bd2b329dabe88d3b2478c6a131ef676a9defabe300d3da8a96cbc3a2d6",
+      "vendored_sha256": "a84a96bd2b329dabe88d3b2478c6a131ef676a9defabe300d3da8a96cbc3a2d6"
+    },
+    {
+      "path": "include/nav2_smac_planner/costmap_downsampler.hpp",
+      "url": "https://github.com/ros-navigation/navigation2/blob/1.3.13/nav2_smac_planner/include/nav2_smac_planner/costmap_downsampler.hpp",
+      "upstream_sha256": "991784b72826a8fc97ae8db8d251b97343452b6f06a85c487bd1f565779e89fe",
+      "upstream_git_blob_sha1": "332507d7c2a75b57504fba659911c98c5a818b99",
+      "directory_listing_git_blob_sha1": "332507d7c2a75b57504fba659911c98c5a818b99",
+      "namespace_only_sha256": "b7eaca4939167b4ac550df6250165ca758b8e5f9929740fa496c74b82071c56d",
+      "vendored_sha256": "b7eaca4939167b4ac550df6250165ca758b8e5f9929740fa496c74b82071c56d"
+    },
+    {
+      "path": "include/nav2_smac_planner/node_2d.hpp",
+      "url": "https://github.com/ros-navigation/navigation2/blob/1.3.13/nav2_smac_planner/include/nav2_smac_planner/node_2d.hpp",
+      "upstream_sha256": "ce2cb7f4f8cb5d2419667ab0f8e969ec49d04a76680d892cafe305fb938ce64f",
+      "upstream_git_blob_sha1": "957cdb4cc31fc6a189104ceb0d8e15e2190ccb0e",
+      "directory_listing_git_blob_sha1": "957cdb4cc31fc6a189104ceb0d8e15e2190ccb0e",
+      "namespace_only_sha256": "adc7e5dda008deb419a83ccdc31fbcefe9f3cf0376faa2729d6b17731d765748",
+      "vendored_sha256": "adc7e5dda008deb419a83ccdc31fbcefe9f3cf0376faa2729d6b17731d765748"
+    },
+    {
+      "path": "include/nav2_smac_planner/node_basic.hpp",
+      "url": "https://github.com/ros-navigation/navigation2/blob/1.3.13/nav2_smac_planner/include/nav2_smac_planner/node_basic.hpp",
+      "upstream_sha256": "10d1e76854d9e798a2b6df79f115b7dcc4e3a9c525f5dcd74812d579acf1e844",
+      "upstream_git_blob_sha1": "dfb26c5ddaf7d188189c6eb04d42377f6ee57653",
+      "directory_listing_git_blob_sha1": "dfb26c5ddaf7d188189c6eb04d42377f6ee57653",
+      "namespace_only_sha256": "f3a1ef5357ff34889d89f9d871d115a588c7656903e3b12ef5f1dc74acb7460d",
+      "vendored_sha256": "f3a1ef5357ff34889d89f9d871d115a588c7656903e3b12ef5f1dc74acb7460d"
+    },
+    {
+      "path": "include/nav2_smac_planner/node_hybrid.hpp",
+      "url": "https://github.com/ros-navigation/navigation2/blob/1.3.13/nav2_smac_planner/include/nav2_smac_planner/node_hybrid.hpp",
+      "upstream_sha256": "d1394a7f14e09e2ae0807557a3f813e952abc039bec1c1c3458db427e9d5a223",
+      "upstream_git_blob_sha1": "0a5d267547efe44e0a6e9d1fc746289207e973f9",
+      "directory_listing_git_blob_sha1": "0a5d267547efe44e0a6e9d1fc746289207e973f9",
+      "namespace_only_sha256": "2c0120d2b7d1acdea660a1610fa64e5a2cb5f0be0eee694f87d6a604720c80c6",
+      "vendored_sha256": "2c0120d2b7d1acdea660a1610fa64e5a2cb5f0be0eee694f87d6a604720c80c6"
+    },
+    {
+      "path": "include/nav2_smac_planner/node_lattice.hpp",
+      "url": "https://github.com/ros-navigation/navigation2/blob/1.3.13/nav2_smac_planner/include/nav2_smac_planner/node_lattice.hpp",
+      "upstream_sha256": "077b55225f6c1069bf8488aa9f979bd6e3bed5b198786be8bd7061d4e0ad9239",
+      "upstream_git_blob_sha1": "711708790b349f8d9ec39e972c531421e915ea65",
+      "directory_listing_git_blob_sha1": "711708790b349f8d9ec39e972c531421e915ea65",
+      "namespace_only_sha256": "51d89d0562fbbf58c66116cffb9ebb0f3c6317998f21e6565f757ab57482b081",
+      "vendored_sha256": "51d89d0562fbbf58c66116cffb9ebb0f3c6317998f21e6565f757ab57482b081"
+    },
+    {
+      "path": "include/nav2_smac_planner/smac_planner_2d.hpp",
+      "url": "https://github.com/ros-navigation/navigation2/blob/1.3.13/nav2_smac_planner/include/nav2_smac_planner/smac_planner_2d.hpp",
+      "upstream_sha256": "b2166494271e9d9ce89413891ddf08f59a0afa7ecb129492ba47260dd91c9e94",
+      "upstream_git_blob_sha1": "059871d867737e9bbee70546f0ef536a11f23bd2",
+      "directory_listing_git_blob_sha1": "059871d867737e9bbee70546f0ef536a11f23bd2",
+      "namespace_only_sha256": "2d142a73606ea38d425b00254cf2471fa35913a2ce9b79ff82a67dd46ffea7c1",
+      "vendored_sha256": "2d142a73606ea38d425b00254cf2471fa35913a2ce9b79ff82a67dd46ffea7c1"
+    },
+    {
+      "path": "include/nav2_smac_planner/smac_planner_hybrid.hpp",
+      "url": "https://github.com/ros-navigation/navigation2/blob/1.3.13/nav2_smac_planner/include/nav2_smac_planner/smac_planner_hybrid.hpp",
+      "upstream_sha256": "9aa02a4191927dca5f6a5daaab933eb81ceee5f34557dab9eb365ee52deac31e",
+      "upstream_git_blob_sha1": "2f2b2fdd5b7cc4fd784d4983bf6dd84bc102cc8b",
+      "directory_listing_git_blob_sha1": "2f2b2fdd5b7cc4fd784d4983bf6dd84bc102cc8b",
+      "namespace_only_sha256": "d836ba60af88b5576ff3e6a37f95cd5aff321c2175b23bc1ec0325a6bf8d5ec9",
+      "vendored_sha256": "d836ba60af88b5576ff3e6a37f95cd5aff321c2175b23bc1ec0325a6bf8d5ec9"
+    },
+    {
+      "path": "include/nav2_smac_planner/smac_planner_lattice.hpp",
+      "url": "https://github.com/ros-navigation/navigation2/blob/1.3.13/nav2_smac_planner/include/nav2_smac_planner/smac_planner_lattice.hpp",
+      "upstream_sha256": "3c27d16981e31c66ad50c7f3a04d6d97fe6f41d423ca61ed243f998b756eee06",
+      "upstream_git_blob_sha1": "f3b56a112b46786421450d13591fe301887cab15",
+      "directory_listing_git_blob_sha1": "f3b56a112b46786421450d13591fe301887cab15",
+      "namespace_only_sha256": "f735fc9ea88dea2b639df1e22199b05d71b36cba6e8290883284949d54a84c09",
+      "vendored_sha256": "f735fc9ea88dea2b639df1e22199b05d71b36cba6e8290883284949d54a84c09"
+    },
+    {
+      "path": "include/nav2_smac_planner/smoother.hpp",
+      "url": "https://github.com/ros-navigation/navigation2/blob/1.3.13/nav2_smac_planner/include/nav2_smac_planner/smoother.hpp",
+      "upstream_sha256": "09305a27fa66128528266258d295cbca5cf40414a2ca367bddb6254ee335e49c",
+      "upstream_git_blob_sha1": "d896cd90b5f7ec5227db34a26f7d65c45fb7afed",
+      "directory_listing_git_blob_sha1": "d896cd90b5f7ec5227db34a26f7d65c45fb7afed",
+      "namespace_only_sha256": "0b149e7cdb4114e7b2a0f64454c40c37a5c414c8c5a0c4f7ad9b78c2d69f569e",
+      "vendored_sha256": "0b149e7cdb4114e7b2a0f64454c40c37a5c414c8c5a0c4f7ad9b78c2d69f569e"
+    },
+    {
+      "path": "include/nav2_smac_planner/types.hpp",
+      "url": "https://github.com/ros-navigation/navigation2/blob/1.3.13/nav2_smac_planner/include/nav2_smac_planner/types.hpp",
+      "upstream_sha256": "eb28aeda350c7f1e2621d6f54a6e58588035424094a14a9ae706ceabf5595cee",
+      "upstream_git_blob_sha1": "18c2e1315f190765f19297a34253dc3c80bcc9f8",
+      "directory_listing_git_blob_sha1": "18c2e1315f190765f19297a34253dc3c80bcc9f8",
+      "namespace_only_sha256": "f550d84d6138305471e06708bdaee9d9f0d478cf0f825deac092e6b634bfa690",
+      "vendored_sha256": "f550d84d6138305471e06708bdaee9d9f0d478cf0f825deac092e6b634bfa690"
+    },
+    {
+      "path": "include/nav2_smac_planner/utils.hpp",
+      "url": "https://github.com/ros-navigation/navigation2/blob/1.3.13/nav2_smac_planner/include/nav2_smac_planner/utils.hpp",
+      "upstream_sha256": "1dcfc6d72a9417fda68aa8d51c8f55ee2236279ff005fec48636ed8af29eb199",
+      "upstream_git_blob_sha1": "4f6ae6ec3331981d809356a3431e074807f91072",
+      "directory_listing_git_blob_sha1": "4f6ae6ec3331981d809356a3431e074807f91072",
+      "namespace_only_sha256": "3d5e1bbf83de997d7294a5e0c9889a64aa065b17dca340ccac2f44ae2fa17058",
+      "vendored_sha256": "3d5e1bbf83de997d7294a5e0c9889a64aa065b17dca340ccac2f44ae2fa17058"
+    },
+    {
+      "path": "src/smac_planner_lattice.cpp",
+      "url": "https://github.com/ros-navigation/navigation2/blob/1.3.13/nav2_smac_planner/src/smac_planner_lattice.cpp",
+      "upstream_sha256": "21510b24f2b60b06e50451052c7857d955ca7bf6595e3e075eb5a1553a41850c",
+      "upstream_git_blob_sha1": "112fcfedb5f21f291886dc74cbf3ce234598e406",
+      "directory_listing_git_blob_sha1": null,
+      "namespace_only_sha256": "c8058d727fb9462bc632d74515f08791a0795fc5127b8beee9cc45ce5e60579e",
+      "vendored_sha256": "33f6ec081117ae7367c68b902975e481b9ab87e4d9e9f249454a0feed0aebde9"
+    },
+    {
+      "path": "src/a_star.cpp",
+      "url": "https://github.com/ros-navigation/navigation2/blob/1.3.13/nav2_smac_planner/src/a_star.cpp",
+      "upstream_sha256": "5e33a489ff3eb77ff607326d7552798a1155023b7d82b669988b61d786fa9126",
+      "upstream_git_blob_sha1": "52b94db14afa6bb2f9019069e3c214096aaa1c42",
+      "directory_listing_git_blob_sha1": null,
+      "namespace_only_sha256": "ec656ad8b9835541dc161d5abc11ccfbe66f6510052a9d8e4f58a375b7dd34ef",
+      "vendored_sha256": "ec656ad8b9835541dc161d5abc11ccfbe66f6510052a9d8e4f58a375b7dd34ef"
+    },
+    {
+      "path": "src/collision_checker.cpp",
+      "url": "https://github.com/ros-navigation/navigation2/blob/1.3.13/nav2_smac_planner/src/collision_checker.cpp",
+      "upstream_sha256": "de383f6e993ffdf1470025618f04ee06e7e18e690a3a5654569faab32713f509",
+      "upstream_git_blob_sha1": "5becfa17c3a877ef82c8fecb5dbdbc4aab26222e",
+      "directory_listing_git_blob_sha1": null,
+      "namespace_only_sha256": "797eaf3f802e43d82f57549d0acba7a2b6c4a266bcfad77c27af03148a4c6cc7",
+      "vendored_sha256": "797eaf3f802e43d82f57549d0acba7a2b6c4a266bcfad77c27af03148a4c6cc7"
+    },
+    {
+      "path": "src/smoother.cpp",
+      "url": "https://github.com/ros-navigation/navigation2/blob/1.3.13/nav2_smac_planner/src/smoother.cpp",
+      "upstream_sha256": "eb971009c1ceebf2f625dea989b4ff48bfb73e2a98b909ee50cbcdff316ba011",
+      "upstream_git_blob_sha1": "a69e14011f32361087021e30ffa4ec44f963bcaa",
+      "directory_listing_git_blob_sha1": null,
+      "namespace_only_sha256": "5f989963266963e20b12a6c606e230da12a5b6ae0ea87be96637b37136f6dd7a",
+      "vendored_sha256": "5f989963266963e20b12a6c606e230da12a5b6ae0ea87be96637b37136f6dd7a"
+    },
+    {
+      "path": "src/analytic_expansion.cpp",
+      "url": "https://github.com/ros-navigation/navigation2/blob/1.3.13/nav2_smac_planner/src/analytic_expansion.cpp",
+      "upstream_sha256": "47b90b88223825cee5edbaf0328c80db86cbfaf29c5aa9f3d78cd6189c4f32a4",
+      "upstream_git_blob_sha1": "f8e90004dad2364b808a05a8f1c5ec2ca70c8667",
+      "directory_listing_git_blob_sha1": null,
+      "namespace_only_sha256": "0bffaa369c1a2634ee4f6ca2ca64d701120cf4263229d195c67a2cd540978af2",
+      "vendored_sha256": "0bffaa369c1a2634ee4f6ca2ca64d701120cf4263229d195c67a2cd540978af2"
+    },
+    {
+      "path": "src/node_hybrid.cpp",
+      "url": "https://github.com/ros-navigation/navigation2/blob/1.3.13/nav2_smac_planner/src/node_hybrid.cpp",
+      "upstream_sha256": "e398942dc085e8d060130c937b793f2b8dd3c94ddc5dc9d03ee143747e08c79f",
+      "upstream_git_blob_sha1": "c9d254194d4f80717cf999044e092041c626a312",
+      "directory_listing_git_blob_sha1": null,
+      "namespace_only_sha256": "fe0aab1d92728aec752bb7dbf4424ffa49e77a8fafccc72c9537344dd550738d",
+      "vendored_sha256": "fe0aab1d92728aec752bb7dbf4424ffa49e77a8fafccc72c9537344dd550738d"
+    },
+    {
+      "path": "src/node_lattice.cpp",
+      "url": "https://github.com/ros-navigation/navigation2/blob/1.3.13/nav2_smac_planner/src/node_lattice.cpp",
+      "upstream_sha256": "0e7431d8e65b20a8376c69647b34bf93937982632e7e8182df829e8b2c737836",
+      "upstream_git_blob_sha1": "bece0f833d465654c7b9d2a08b3143e75832b15f",
+      "directory_listing_git_blob_sha1": null,
+      "namespace_only_sha256": "fbe3b95ff8d514d0fe382b6e4795ebbe9a46f1050d933e2b5c47da87d8201b75",
+      "vendored_sha256": "320108e802ae6d357e30a2be0ddf1e6d4f2e8b8ec6b47cb18b06caa1a8b671c1"
+    },
+    {
+      "path": "src/costmap_downsampler.cpp",
+      "url": "https://github.com/ros-navigation/navigation2/blob/1.3.13/nav2_smac_planner/src/costmap_downsampler.cpp",
+      "upstream_sha256": "92ecc0c525871ffc513c3fc77005435aa2d2cfcd5f5dd35eb143946e0d68f28f",
+      "upstream_git_blob_sha1": "d0581daaf8013756b2b0eda0c2fe5766684a34a6",
+      "directory_listing_git_blob_sha1": null,
+      "namespace_only_sha256": "6f82057395e1732b8d8bbe118a79ff37c794c5882be8d1d7eed68c850e6db8c8",
+      "vendored_sha256": "6f82057395e1732b8d8bbe118a79ff37c794c5882be8d1d7eed68c850e6db8c8"
+    },
+    {
+      "path": "src/node_2d.cpp",
+      "url": "https://github.com/ros-navigation/navigation2/blob/1.3.13/nav2_smac_planner/src/node_2d.cpp",
+      "upstream_sha256": "7262bea9fb096cba83a5516b575efa04c257ed66f49e5eea927246cf2e317526",
+      "upstream_git_blob_sha1": "8a88620430004f3a933eca3f860174f5594a42d5",
+      "directory_listing_git_blob_sha1": null,
+      "namespace_only_sha256": "81993de658a2bef10cb5e8037c857e2185e97fd0dcbd54bc2f5cd777980233c1",
+      "vendored_sha256": "81993de658a2bef10cb5e8037c857e2185e97fd0dcbd54bc2f5cd777980233c1"
+    },
+    {
+      "path": "src/node_basic.cpp",
+      "url": "https://github.com/ros-navigation/navigation2/blob/1.3.13/nav2_smac_planner/src/node_basic.cpp",
+      "upstream_sha256": "e2ea0bfea944e05450e254b594ca82066a0803e7e1667ddb3f0f703d7f32c2ee",
+      "upstream_git_blob_sha1": "616154e096fcd54e725d5fae67a62d75059c197f",
+      "directory_listing_git_blob_sha1": null,
+      "namespace_only_sha256": "f7962fda1cc13eaae354c2b925252a9f2aa2b98c1781bcf372f19c55068b29c9",
+      "vendored_sha256": "f7962fda1cc13eaae354c2b925252a9f2aa2b98c1781bcf372f19c55068b29c9"
+    },
+    {
+      "path": "include/nav2_smac_planner/thirdparty/robin_hood.h",
+      "url": "https://github.com/ros-navigation/navigation2/blob/1.3.13/nav2_smac_planner/include/nav2_smac_planner/thirdparty/robin_hood.h",
+      "upstream_sha256": "4e76d7fdd15d2f6033891c282e367538c212b7cedbe27373d96de3b7239448f2",
+      "upstream_git_blob_sha1": "4d3977937bf0d845da03ce54874be9f87da7900c",
+      "directory_listing_git_blob_sha1": null,
+      "namespace_only_sha256": "4e76d7fdd15d2f6033891c282e367538c212b7cedbe27373d96de3b7239448f2",
+      "vendored_sha256": "4e76d7fdd15d2f6033891c282e367538c212b7cedbe27373d96de3b7239448f2"
+    },
+    {
+      "path": "LICENSE",
+      "url": "https://github.com/ros-navigation/navigation2/blob/1.3.13/LICENSE",
+      "upstream_sha256": "e71fcb65bd31cdbdcf50cf43ab87a0c600ea3ec407495c2e15d1e68bc9c3bfc1",
+      "upstream_git_blob_sha1": "ce2ed3dff819a38de11b17883e38dace87fb4922",
+      "directory_listing_git_blob_sha1": null,
+      "namespace_only_sha256": "e71fcb65bd31cdbdcf50cf43ab87a0c600ea3ec407495c2e15d1e68bc9c3bfc1",
+      "vendored_sha256": "e71fcb65bd31cdbdcf50cf43ab87a0c600ea3ec407495c2e15d1e68bc9c3bfc1"
+    }
+  ],
+  "patches": [
+    {
+      "id": "namespace-isolation",
+      "scope": "all vendored project C++ declarations",
+      "reason": "Private robot_feasible_navigation_smac symbols cannot interpose installed stock Smac DSO. Include paths and upstream notices retained."
+    },
+    {
+      "id": "incoming-actual-angle-sweep",
+      "files": [
+        "src/node_lattice.cpp"
+      ],
+      "reason": "Every incoming primitive is checked with full filled actual-angle convex footprint including rotation, without XY gating or stale incoming-edge validity reuse. Uses shared conservative sweep; center max cost for accepted transition replaces old quantized-checker side effect."
+    },
+    {
+      "id": "initial-rotation-positive-cost",
+      "files": [
+        "src/node_lattice.cpp"
+      ],
+      "reason": "First pure turn is charged positive rotation penalty instead of zero translational length."
+    },
+    {
+      "id": "guarded-plugin-only",
+      "files": [
+        "src/smac_planner_lattice.cpp"
+      ],
+      "reason": "Remove private base plugin export; public guarded SafeLatticePlanner alone is exported. Wrapper intercepts same-cell requests, checks exact start/goal adapters and complete returned path, static stop-turn control contract, immutable safety profile."
+    },
+    {
+      "id": "preserve-first-origin-pose",
+      "files": [
+        "src/smac_planner_lattice.cpp"
+      ],
+      "reason": "Avoid treating a legitimate first world-origin/yaw0 pose as a duplicate of the default last_pose placeholder; needed to retain exact start connection."
+    },
+    {
+      "id": "merge-proved-simple-edge-sweeps",
+      "files": [
+        "src/node_lattice.cpp"
+      ],
+      "reason": "Only after verifying monotonic sameXY shortest rotation or constant-heading monotonic collinear translation, one full shared corner-displacement sweep covers the exact edge continuously. Generic paths retain per-subsegment sweeps. Original primitive bytes and center-cost maximum retained."
+    }
+  ]
+}

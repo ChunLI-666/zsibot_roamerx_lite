@@ -1,0 +1,48 @@
+{
+  "schema": "locnav.semantic_sustained_lateral.source_freeze.v3",
+  "scope": "MAPPING_SEMANTIC_LATERAL_SUSTAINED_CALIBRATION_ONLY",
+  "state": "SOURCE_ONLY_DEFAULT_HOLD_REVIEW_PENDING",
+  "base_observer_v2_manifest_sha256": "e17963884f6d0fede9925a73dbbdde459db1a159fd8e0c850c0fea53dd8bf7d2",
+  "runtime_package_sha256": {
+    "lateral_once.py": "c311c2a71ac9f745d54d3fe34bfa1b44b9c539d190c4614030bd4f6e44d86c2e",
+    "lateral_contract.py": "1a1cb6b00cd40d1b9543823c50ee4cf01d96a3dd35e33f9d06f7cb5c4f1ae857",
+    "semantic_tool_timed.py": "682153d9c9be94914db9a4d6eb63c1e5ede8c877d7cc99d6dde2ede48b3455b4",
+    "host_preflight.py": "749da4569db74798f69a47b8cbe31af1d656f99013dea23be8911cdd1ac3dfb7",
+    "calibration_observer.py": "2d8b36b459b74b85fab36557515bb4bad7528bcda7434735fba0e919132a2515",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+    "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792"
+  },
+  "runtime_bundle_sha256": "ec4754718587f1d9a29f7256fb8cf003a8869c1c4380ab215e62923a59b3567d",
+  "changed_runtime_files": [
+    "lateral_once.py",
+    "lateral_contract.py",
+    "semantic_tool_timed.py"
+  ],
+  "observer_bytes_exact_v2": true,
+  "pure_tests": 21,
+  "preservation_checks": 42,
+  "root_release_supplied": false,
+  "no_runtime_actions": true,
+  "files_sha256": {
+    "README.txt": "bc6ec41bc11d7c0a20fb48c8194b600b28d5b13145b5e51af25f5f5821b8ed09",
+    "acquisition_oracle.npz": "eeb89b1687bb81988dab09e773428c2ccf6071dc2fa25b1b236049282655e9f6",
+    "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792",
+    "calibration_observer.py": "2d8b36b459b74b85fab36557515bb4bad7528bcda7434735fba0e919132a2515",
+    "case.HOLD.json": "95312e75de9f023043f5f949a10a7f78d14d1d697ca91a378c22444a1a54d1c0",
+    "fixtures_v3.log": "8cb9f1e4afc3d32daea35b5041baf38544e1e7f0e07cbb65bca8aecb13f2977d",
+    "host_preflight.py": "749da4569db74798f69a47b8cbe31af1d656f99013dea23be8911cdd1ac3dfb7",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "lateral_contract.py": "1a1cb6b00cd40d1b9543823c50ee4cf01d96a3dd35e33f9d06f7cb5c4f1ae857",
+    "lateral_once.py": "c311c2a71ac9f745d54d3fe34bfa1b44b9c539d190c4614030bd4f6e44d86c2e",
+    "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+    "runtime_bundle_v3.tar": "ec4754718587f1d9a29f7256fb8cf003a8869c1c4380ab215e62923a59b3567d",
+    "runtime_inventory_v3.json": "01d6bfe1584e1a838b4f9a536f736e3927b11fbc9f9aa1779646a6a2243162f9",
+    "semantic_tool_timed.py": "682153d9c9be94914db9a4d6eb63c1e5ede8c877d7cc99d6dde2ede48b3455b4",
+    "sensor_config.json": "38aab54b3a6ca49570feaaa8e983f4f9bc9ee197060066b186478a70f92ea023",
+    "source_delta_v3.diff": "296d8b73356d5e96e747b73cc22bb6d009f159a641da85a30809fffd80409a7e",
+    "source_preservation_v3.json": "e2e8f01d3961e5477c2098f37e45566461e9cf96690598cb1243327d783aea9b",
+    "test_sustained_backend.py": "4bb35b6324dfcb18d59383c8911360d26d9ecfa717833ffd969657b95984920f",
+    "test_sustained_parent.py": "9d521e05152d445c9fcbf0b9dfab132a11f72392da5536520e78f919470846ca"
+  }
+}

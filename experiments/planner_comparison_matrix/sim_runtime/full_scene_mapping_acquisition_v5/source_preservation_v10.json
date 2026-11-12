@@ -1,0 +1,63 @@
+{
+  "base_manifest_sha256": "b16219261975bb62c6fcb18df80731b48d88bdad499782437f94c75c1f054612",
+  "runtime_three_exact": {
+    "imu_gate.py": true,
+    "dependencies/waypoint_contract.py": true,
+    "dependencies/map_coverage.py": true
+  },
+  "critical_AST_exact": {
+    "health": true,
+    "observe_stop": true,
+    "stable": true,
+    "rotate_to": true,
+    "raw_imu": true,
+    "BoundedCallbacks": true
+  },
+  "functions": {
+    "full_scene_mapping.py": {
+      "changed_original_functions": [
+        "validate_release",
+        "finalize_owned_relay",
+        "execute",
+        "forward_terminal_leg",
+        "__init__",
+        "send",
+        "tick"
+      ],
+      "added_functions": [],
+      "other_original_function_AST_exact": true
+    },
+    "full_scene_mapping_contract.py": {
+      "changed_original_functions": [
+        "primitive_packet",
+        "forward_terminal_policy"
+      ],
+      "added_functions": [
+        "fine_command_profile",
+        "validate_fine_route"
+      ],
+      "other_original_function_AST_exact": true
+    },
+    "mapping_lateral_relay.py": {
+      "changed_original_functions": [
+        "validated_axes",
+        "run_loop",
+        "admit",
+        "main"
+      ],
+      "added_functions": [],
+      "other_original_function_AST_exact": true
+    },
+    "lateral_capability.py": {
+      "changed_original_functions": [],
+      "added_functions": [
+        "fine_profile",
+        "fine_profile_from_release",
+        "fine_admission_profile"
+      ],
+      "other_original_function_AST_exact": true
+    }
+  },
+  "original_lateral_measurement_functions_unchanged": true,
+  "test_only_change": "replace obsolete relay/proof exact-v8 assertion with remaining3runtime exact; rest59 tests retained"
+}

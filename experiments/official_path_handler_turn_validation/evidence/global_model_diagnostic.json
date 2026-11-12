@@ -1,0 +1,12 @@
+{
+  "source": "analysis_outputs/upstream_nav2_interface_isolated_20261031/inputs/global_planner/stop_turn_1cm_h16.json",
+  "source_sha256": "eb3ee2f4b112ba6ec3163424db937d50b396f43c2a42f0b6f032fccf78dc9526",
+  "variant": "analysis_outputs/upstream_nav2_interface_isolated_20261031/inputs/global_planner/diagnostic_euclidean_same_actions.json",
+  "changes": {
+    "lattice_metadata.motion_model": [
+      "diff",
+      "omni"
+    ]
+  },
+  "purpose": "Diagnostic only: keep identical straight and in-place primitives and select official SE2 heuristic instead of Dubins. Not an official generated omni control set."
+}

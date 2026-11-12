@@ -1,0 +1,360 @@
+{
+  "scope": "SIM_IMU_ADAPTER60_REPLACEMENT_ONLY",
+  "executable": false,
+  "container_id": "b5ebab492d5dbc3994fd859605d24e0bcba2f11ea094e7c7e59e07d5be2dc468",
+  "uid": 1000,
+  "boot_id": "c3697337-f336-48f4-8127-4af9e461035d",
+  "pid_namespace": "pid:[4026532746]",
+  "network_namespace": "net:[4026531840]",
+  "old_adapter": {
+    "pid": 60,
+    "starttime_ticks": 4460360,
+    "cmdline_sha256": "2182d0da6ae7cd136dfddd47ae1a80e8d514795d2561cd08a796d2eea46705e9",
+    "argv": [
+      "/usr/bin/python3",
+      "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/samehost_runtime/frozen_inputs/live_sensor_adapter.py",
+      "--runtime-config",
+      "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/samehost_runtime/frozen_inputs/runtime_config.json"
+    ],
+    "boot_id": "c3697337-f336-48f4-8127-4af9e461035d",
+    "uid": [
+      1000,
+      1000,
+      1000,
+      1000
+    ],
+    "gid": [
+      1000,
+      1000,
+      1000,
+      1000
+    ],
+    "namespace_pids": [
+      60
+    ],
+    "pid_namespace": "pid:[4026532746]",
+    "mount_namespace": "mnt:[4026532742]",
+    "executable": "/usr/bin/python3.12",
+    "cwd": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/samehost_runtime/pipeline_v1",
+    "cgroup_sha256": "9fa70efda0abd3441e0b7c893e0e5f4fd7022c0dd0dd38b0de414cadd634d4e9"
+  },
+  "old_host_identity": {
+    "pid": 31984,
+    "starttime_ticks": 4460360,
+    "cmdline_sha256": "2182d0da6ae7cd136dfddd47ae1a80e8d514795d2561cd08a796d2eea46705e9",
+    "argv": [
+      "/usr/bin/python3",
+      "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/samehost_runtime/frozen_inputs/live_sensor_adapter.py",
+      "--runtime-config",
+      "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/samehost_runtime/frozen_inputs/runtime_config.json"
+    ],
+    "boot_id": "c3697337-f336-48f4-8127-4af9e461035d",
+    "uid": [
+      1000,
+      1000,
+      1000,
+      1000
+    ],
+    "gid": [
+      1000,
+      1000,
+      1000,
+      1000
+    ],
+    "namespace_pids": [
+      31984,
+      60
+    ],
+    "pid_namespace": "pid:[4026532746]",
+    "mount_namespace": "mnt:[4026532742]",
+    "executable": "/usr/bin/python3.12",
+    "cwd": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/samehost_runtime/pipeline_v1",
+    "cgroup_sha256": "9fa70efda0abd3441e0b7c893e0e5f4fd7022c0dd0dd38b0de414cadd634d4e9"
+  },
+  "retained_sources": {
+    "24": {
+      "pid": 24,
+      "starttime_ticks": 4460159,
+      "cmdline_sha256": "1b108714643627137dce26b9e9ae2b96ece4c1bc86b230abf7c376b42296cf86",
+      "argv": [
+        "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/simulation_setup/zenoh_bridge_jazzy/install/lib/ue_zenoh_bridge/ue_zenoh_bridge",
+        "--endpoint",
+        "tcp/127.0.0.1:7447",
+        "--recording-mode",
+        "--wait-for-recorder-ms",
+        "0",
+        "--predeclare-topic",
+        "/front_lidar:=sensor_msgs/msg/PointCloud2",
+        "--predeclare-topic",
+        "/front_lidar/imu:=sensor_msgs/msg/Imu",
+        "--predeclare-topic",
+        "/odom:=nav_msgs/msg/Odometry",
+        "--predeclare-topic",
+        "/front_camera/image/compressed:=sensor_msgs/msg/CompressedImage"
+      ],
+      "boot_id": "c3697337-f336-48f4-8127-4af9e461035d",
+      "uid": [
+        1000,
+        1000,
+        1000,
+        1000
+      ],
+      "gid": [
+        1000,
+        1000,
+        1000,
+        1000
+      ],
+      "namespace_pids": [
+        24
+      ],
+      "pid_namespace": "pid:[4026532746]",
+      "mount_namespace": "mnt:[4026532742]",
+      "executable": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/simulation_setup/zenoh_bridge_jazzy/install/lib/ue_zenoh_bridge/ue_zenoh_bridge",
+      "cwd": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/samehost_runtime/pipeline_v1",
+      "cgroup_sha256": "9fa70efda0abd3441e0b7c893e0e5f4fd7022c0dd0dd38b0de414cadd634d4e9"
+    },
+    "61": {
+      "pid": 61,
+      "starttime_ticks": 4460362,
+      "cmdline_sha256": "3cb9ba8d5927ba302a2551e90f25373f9e36c840d6d8046d9b98f7cc445833a3",
+      "argv": [
+        "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/projector_runtime/build/livox_scan_projector",
+        "--ros-args",
+        "-p",
+        "use_sim_time:=false",
+        "-p",
+        "lidar_x:=0.0",
+        "-p",
+        "lidar_y:=0.0",
+        "-p",
+        "lidar_z:=0.1",
+        "-p",
+        "lidar_pitch:=0.0",
+        "-p",
+        "lidar_roll:=0.0",
+        "-p",
+        "lidar_yaw:=0.0",
+        "-p",
+        "min_height:=-0.25",
+        "-p",
+        "max_height:=1.1",
+        "-p",
+        "sensor_qos_depth:=10",
+        "-p",
+        "max_sensor_age_sec:=0.3",
+        "-p",
+        "robot_min_x:=-0.35",
+        "-p",
+        "robot_max_x:=0.35",
+        "-p",
+        "robot_min_y:=-0.2",
+        "-p",
+        "robot_max_y:=0.2",
+        "-p",
+        "sensor_input_reliable:=true"
+      ],
+      "boot_id": "c3697337-f336-48f4-8127-4af9e461035d",
+      "uid": [
+        1000,
+        1000,
+        1000,
+        1000
+      ],
+      "gid": [
+        1000,
+        1000,
+        1000,
+        1000
+      ],
+      "namespace_pids": [
+        61
+      ],
+      "pid_namespace": "pid:[4026532746]",
+      "mount_namespace": "mnt:[4026532742]",
+      "executable": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/projector_runtime/build/livox_scan_projector",
+      "cwd": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/samehost_runtime/pipeline_v1",
+      "cgroup_sha256": "9fa70efda0abd3441e0b7c893e0e5f4fd7022c0dd0dd38b0de414cadd634d4e9"
+    }
+  },
+  "retained_host_identities": {
+    "24": {
+      "pid": 31888,
+      "starttime_ticks": 4460159,
+      "cmdline_sha256": "1b108714643627137dce26b9e9ae2b96ece4c1bc86b230abf7c376b42296cf86",
+      "argv": [
+        "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/simulation_setup/zenoh_bridge_jazzy/install/lib/ue_zenoh_bridge/ue_zenoh_bridge",
+        "--endpoint",
+        "tcp/127.0.0.1:7447",
+        "--recording-mode",
+        "--wait-for-recorder-ms",
+        "0",
+        "--predeclare-topic",
+        "/front_lidar:=sensor_msgs/msg/PointCloud2",
+        "--predeclare-topic",
+        "/front_lidar/imu:=sensor_msgs/msg/Imu",
+        "--predeclare-topic",
+        "/odom:=nav_msgs/msg/Odometry",
+        "--predeclare-topic",
+        "/front_camera/image/compressed:=sensor_msgs/msg/CompressedImage"
+      ],
+      "boot_id": "c3697337-f336-48f4-8127-4af9e461035d",
+      "uid": [
+        1000,
+        1000,
+        1000,
+        1000
+      ],
+      "gid": [
+        1000,
+        1000,
+        1000,
+        1000
+      ],
+      "namespace_pids": [
+        31888,
+        24
+      ],
+      "pid_namespace": "pid:[4026532746]",
+      "mount_namespace": "mnt:[4026532742]",
+      "executable": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/simulation_setup/zenoh_bridge_jazzy/install/lib/ue_zenoh_bridge/ue_zenoh_bridge",
+      "cwd": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/samehost_runtime/pipeline_v1",
+      "cgroup_sha256": "9fa70efda0abd3441e0b7c893e0e5f4fd7022c0dd0dd38b0de414cadd634d4e9"
+    },
+    "61": {
+      "pid": 31985,
+      "starttime_ticks": 4460362,
+      "cmdline_sha256": "3cb9ba8d5927ba302a2551e90f25373f9e36c840d6d8046d9b98f7cc445833a3",
+      "argv": [
+        "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/projector_runtime/build/livox_scan_projector",
+        "--ros-args",
+        "-p",
+        "use_sim_time:=false",
+        "-p",
+        "lidar_x:=0.0",
+        "-p",
+        "lidar_y:=0.0",
+        "-p",
+        "lidar_z:=0.1",
+        "-p",
+        "lidar_pitch:=0.0",
+        "-p",
+        "lidar_roll:=0.0",
+        "-p",
+        "lidar_yaw:=0.0",
+        "-p",
+        "min_height:=-0.25",
+        "-p",
+        "max_height:=1.1",
+        "-p",
+        "sensor_qos_depth:=10",
+        "-p",
+        "max_sensor_age_sec:=0.3",
+        "-p",
+        "robot_min_x:=-0.35",
+        "-p",
+        "robot_max_x:=0.35",
+        "-p",
+        "robot_min_y:=-0.2",
+        "-p",
+        "robot_max_y:=0.2",
+        "-p",
+        "sensor_input_reliable:=true"
+      ],
+      "boot_id": "c3697337-f336-48f4-8127-4af9e461035d",
+      "uid": [
+        1000,
+        1000,
+        1000,
+        1000
+      ],
+      "gid": [
+        1000,
+        1000,
+        1000,
+        1000
+      ],
+      "namespace_pids": [
+        31985,
+        61
+      ],
+      "pid_namespace": "pid:[4026532746]",
+      "mount_namespace": "mnt:[4026532742]",
+      "executable": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/projector_runtime/build/livox_scan_projector",
+      "cwd": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/samehost_runtime/pipeline_v1",
+      "cgroup_sha256": "9fa70efda0abd3441e0b7c893e0e5f4fd7022c0dd0dd38b0de414cadd634d4e9"
+    }
+  },
+  "scene_instance_id": {
+    "pid": 1172665,
+    "starttime_ticks": 9427026,
+    "cmdline_sha256": "6e67b4b335a63f5f1cb06b34d0d592d6dd235529a1fcc0b81113626766e8661e",
+    "argv": [
+      "/mnt/data/matrix_v1.1.2_migration_20261030/runtime/MATRiX_v1.1.2/UeSim/Binaries/Linux/UeSim",
+      "UeSim",
+      "/Game/Maps/SceneWorld",
+      "-windowed",
+      "-ResX=1280",
+      "-ResY=720",
+      "-nosound",
+      "-unattended",
+      "-log",
+      "-Abslog=/mnt/data/planner_comparison_20261105/whole_scene_geometry_recovery_20261106/attempt_v1/SceneWorld_attempt_v1.log"
+    ],
+    "boot_id": "c3697337-f336-48f4-8127-4af9e461035d",
+    "uid": [
+      1000,
+      1000,
+      1000,
+      1000
+    ],
+    "gid": [
+      1000,
+      1000,
+      1000,
+      1000
+    ],
+    "namespace_pids": [
+      1172665
+    ],
+    "pid_namespace": "pid:[4026531836]",
+    "mount_namespace": "mnt:[4026531841]",
+    "executable": "/mnt/data/matrix_v1.1.2_migration_20261030/runtime/MATRiX_v1.1.2/UeSim/Binaries/Linux/UeSim",
+    "cwd": "/mnt/data/matrix_v1.1.2_migration_20261030/runtime/MATRiX_v1.1.2/UeSim/Binaries/Linux",
+    "cgroup_sha256": "fbf84cf7338e342871c7319fa00b4b1a92043a129ce4d355dfd41f0300b5f6c5"
+  },
+  "old_sources_sha256": {
+    "live_sensor_adapter.py": "e8e7c2fb24db5ef08b4cdc0ee53392575f9b3f67a6265d8cfdbe240f42f48b06",
+    "matrix_sensor_contract.py": "3159610e54ae74e50312979103cb37e6634b24a6c47dcf74a32685d130e9dc7a"
+  },
+  "runtime_config": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/samehost_runtime/frozen_inputs/runtime_config.json",
+  "runtime_config_sha256": "38aab54b3a6ca49570feaaa8e983f4f9bc9ee197060066b186478a70f92ea023",
+  "source_directory": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_imu_monotonic_gate_v1/review_source_v1",
+  "new_sources_sha256": {
+    "sim_imu_adapter.py": "8b21f321ed7fe79042d28202ebf1fb4ec848ceacb720a4066fd21dbbba52edc2",
+    "adapter_with_gate.py": "be6c4863a0616e2d2b861a9e31e559f0d60f4cde18fa85093042b2198a5df53c",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "matrix_sensor_contract.py": "3159610e54ae74e50312979103cb37e6634b24a6c47dcf74a32685d130e9dc7a"
+  },
+  "old_exit_timeout_sec": 15.0,
+  "new_identity_timeout_sec": 5.0,
+  "expected_environment": {
+    "ROS_DOMAIN_ID": "185",
+    "RMW_IMPLEMENTATION": "rmw_fastrtps_cpp",
+    "ROS_LOCALHOST_ONLY": "0",
+    "ROS_AUTOMATIC_DISCOVERY_RANGE": "LOCALHOST"
+  },
+  "no_new_motion_permission": true,
+  "normal_post_start_state": "SOURCE_STARTED_PENDING_ROOT_READINESS",
+  "rollback_reference": {
+    "old_argv": [
+      "/usr/bin/python3",
+      "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/samehost_runtime/frozen_inputs/live_sensor_adapter.py",
+      "--runtime-config",
+      "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/samehost_runtime/frozen_inputs/runtime_config.json"
+    ],
+    "old_cwd": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/samehost_runtime/pipeline_v1",
+    "automatic": false,
+    "note": "If root later authorizes rollback, exact-stop the NEW identity first, then start the old bytes/config with a NEW PID. Never reuse old60 authorization."
+  }
+}

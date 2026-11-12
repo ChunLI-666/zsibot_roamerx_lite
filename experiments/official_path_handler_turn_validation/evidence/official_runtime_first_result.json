@@ -1,0 +1,8 @@
+{
+  "returncode": 2,
+  "elapsed_s": 0.46514738898258656,
+  "domain": 218,
+  "discovery": "localhost only",
+  "robot_command_publishers": false,
+  "scope": "Real ROS node and Jazzy Costmap2DROS, official frozen RPP/path handler; ideal kinematics; no action server or physical robot"
+}

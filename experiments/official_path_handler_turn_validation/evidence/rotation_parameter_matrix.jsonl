@@ -1,0 +1,16 @@
+{"sample_deg":1,"threshold_deg":0.5,"first_translation_visible_yaw_deg":87,"remaining_yaw_deg":3}
+{"sample_deg":1,"threshold_deg":5,"first_translation_visible_yaw_deg":87,"remaining_yaw_deg":3}
+{"sample_deg":1,"threshold_deg":10,"first_translation_visible_yaw_deg":83,"remaining_yaw_deg":7}
+{"sample_deg":1,"threshold_deg":45,"first_translation_visible_yaw_deg":43,"remaining_yaw_deg":47}
+{"sample_deg":5,"threshold_deg":0.5,"first_translation_visible_yaw_deg":83,"remaining_yaw_deg":7}
+{"sample_deg":5,"threshold_deg":5,"first_translation_visible_yaw_deg":83,"remaining_yaw_deg":7}
+{"sample_deg":5,"threshold_deg":10,"first_translation_visible_yaw_deg":83,"remaining_yaw_deg":7}
+{"sample_deg":5,"threshold_deg":45,"first_translation_visible_yaw_deg":43,"remaining_yaw_deg":47}
+{"sample_deg":15,"threshold_deg":0.5,"first_translation_visible_yaw_deg":73,"remaining_yaw_deg":17}
+{"sample_deg":15,"threshold_deg":5,"first_translation_visible_yaw_deg":73,"remaining_yaw_deg":17}
+{"sample_deg":15,"threshold_deg":10,"first_translation_visible_yaw_deg":73,"remaining_yaw_deg":17}
+{"sample_deg":15,"threshold_deg":45,"first_translation_visible_yaw_deg":43,"remaining_yaw_deg":47}
+{"sample_deg":30,"threshold_deg":0.5,"first_translation_visible_yaw_deg":58,"remaining_yaw_deg":32}
+{"sample_deg":30,"threshold_deg":5,"first_translation_visible_yaw_deg":58,"remaining_yaw_deg":32}
+{"sample_deg":30,"threshold_deg":10,"first_translation_visible_yaw_deg":58,"remaining_yaw_deg":32}
+{"sample_deg":30,"threshold_deg":45,"first_translation_visible_yaw_deg":28,"remaining_yaw_deg":62}

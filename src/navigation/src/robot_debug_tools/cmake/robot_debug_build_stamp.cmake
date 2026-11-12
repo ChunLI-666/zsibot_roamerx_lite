@@ -25,6 +25,7 @@ function(robot_debug_build_stamp target repository_id artifact_id)
     set(_generator "${_ROBOT_DEBUG_STAMP_CMAKE_DIR}/../scripts/generate_build_stamp.py")
   endif()
   set(_dir "${CMAKE_CURRENT_BINARY_DIR}/debug_build/${target}")
+  set(_source "${_dir}/robot_debug_build.cpp")
   _robot_debug_source_manifest_args("${repository_id}" _manifest_args _manifest)
   set(_proof_output "")
   if(_manifest)
@@ -37,10 +38,19 @@ function(robot_debug_build_stamp target repository_id artifact_id)
       --repository-id "${repository_id}" --artifact "${artifact_id}"
       ${_manifest_args}
       --build-context "${_context}|$<JOIN:$<TARGET_PROPERTY:${target},COMPILE_OPTIONS>,,>|$<JOIN:$<TARGET_PROPERTY:${target},COMPILE_DEFINITIONS>,,>|$<JOIN:$<TARGET_PROPERTY:${target},LINK_OPTIONS>,,>"
-      --header "${_dir}/robot_debug_build.hpp" --json "${_dir}/debug_build.json"
-    BYPRODUCTS "${_dir}/robot_debug_build.hpp" "${_dir}/debug_build.json" ${_proof_output}
+      --symbol-id "${PROJECT_NAME}/${target}"
+      --header "${_dir}/robot_debug_build.hpp" --source "${_source}"
+      --json "${_dir}/debug_build.json"
+    BYPRODUCTS "${_dir}/robot_debug_build.hpp" "${_source}" "${_dir}/debug_build.json" ${_proof_output}
     VERBATIM)
+  # The generator runs on every requested target build to inspect HEAD/dirty
+  # state, but writes only changed bytes. The stable declaration does not make
+  # algorithm translation units recompile when only the identity changes.
+  # BYPRODUCTS + target dependency also order first-build generated sources and
+  # headers before consumer compilation under Ninja.
   add_dependencies(${target} ${target}_debug_stamp)
+  set_source_files_properties("${_source}" PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
+  target_sources(${target} PRIVATE "${_source}")
   target_include_directories(${target} PRIVATE "${_dir}")
   install(FILES "${_dir}/debug_build.json" DESTINATION share/${PROJECT_NAME}/debug_build/${target})
   if(_manifest)

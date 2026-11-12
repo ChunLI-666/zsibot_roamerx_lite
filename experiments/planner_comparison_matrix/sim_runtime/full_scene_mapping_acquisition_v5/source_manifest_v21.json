@@ -1,0 +1,42 @@
+{
+  "schema": "locnav.mapping.joint_heading_stop.source21.freeze.v1",
+  "state": "SOURCE_ONLY_INDEPENDENT_REVIEW_PENDING_RUNTIME_HOLD",
+  "scope": "MAPPING_ACQUISITION_LATERAL_RECT_V5_ONLY",
+  "base_source20_manifest_sha256": "1136e045a9e5ebc176ae407fa5e82ee902139b8194f04ff1fb9df06a2e477303",
+  "runtime_package_sha256": {
+    "full_scene_mapping.py": "df09a3328d86505084c1a63d0c03c290f79a748489fc20ddac23a41e42dd7a08",
+    "full_scene_mapping_contract.py": "ffeeec104586f56934ed2c554e5f22d26cc02cc13ff941fc6d07fb1b95100e07",
+    "mapping_lateral_relay.py": "604a7b3882d353b0e9f4b75c4a0c1f41009382309c875286e4943e8f56885f5b",
+    "lateral_capability.py": "e291c29d62f23f049f2e1aa1bd7180cabd087b903a3b4bd32055e7883c279f6a",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "dependencies/waypoint_contract.py": "7258d6c9f5f56bf08930356187505628b446cfd74d02ec41b4c1851faacb4624",
+    "dependencies/map_coverage.py": "bd5f8b855e10d1cb6ad19955fc8b8c5283d31cb543e98dc988c78d9eb1e9f80b"
+  },
+  "changed_runtime": [
+    "full_scene_mapping.py"
+  ],
+  "only_changed_functions": [
+    "execute.stable",
+    "execute.rotate_to"
+  ],
+  "remaining_whole_module_AST_exact20": true,
+  "pure_tests_PASS": 132,
+  "new_tests": 9,
+  "new_positive_commands": false,
+  "heading_tolerance_or_model_changed": false,
+  "original_settle8s_and_call_deadline_retained": true,
+  "runtime_authorized": false,
+  "UUID": null,
+  "files_sha256": {
+    "full_scene_mapping.py": "df09a3328d86505084c1a63d0c03c290f79a748489fc20ddac23a41e42dd7a08",
+    "full_scene_mapping_contract.py": "ffeeec104586f56934ed2c554e5f22d26cc02cc13ff941fc6d07fb1b95100e07",
+    "mapping_lateral_relay.py": "604a7b3882d353b0e9f4b75c4a0c1f41009382309c875286e4943e8f56885f5b",
+    "lateral_capability.py": "e291c29d62f23f049f2e1aa1bd7180cabd087b903a3b4bd32055e7883c279f6a",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "dependencies/waypoint_contract.py": "7258d6c9f5f56bf08930356187505628b446cfd74d02ec41b4c1851faacb4624",
+    "dependencies/map_coverage.py": "bd5f8b855e10d1cb6ad19955fc8b8c5283d31cb543e98dc988c78d9eb1e9f80b",
+    "test_joint_heading_stop_v21.py": "2685c77b81ff88e61c964a81fe6dc213bcffd5dc76f8edf2fedaf8aec5a8bc45",
+    "fixtures_all_v21.log": "162048f6d8364acafe7f86b655c5cb36a12ed1d5ae72f8bc1fbe2c4e803a8db0",
+    "source20_to_source21.diff": "7f356abdf1d7e724eeedb7a6b44d9c0713ebe032ac1b0dddab8e10be2e691b1f"
+  }
+}

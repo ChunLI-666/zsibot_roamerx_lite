@@ -1,0 +1,235 @@
+--- source15/full_scene_mapping.py
++++ source16/full_scene_mapping.py
+@@ -64,7 +64,7 @@
+ 
+ def validate_release(release,route,route_path,oracle_path,output):
+     prearm_requalification_enabled(release)
+-    contract.sim_endpoint_from_release(release)
++    sim_endpoint=contract.sim_endpoint_from_release(release)
+     if release.get('scope')!=contract.SCOPE or release.get('mode')!=contract.MODE or release.get('allow_execute') is not True:
+         raise contract.Hold('root release absent or not executable')
+     contract.validate_fine_route(release,route)
+@@ -108,7 +108,8 @@
+     if release.get('sensor_config_sha256')!=config_sha:raise contract.Hold('calibrated actual sensor configuration differs')
+     adapter=release.get('sensor_adapter_process_identity')
+     if not contract.valid_local_identity(adapter) or contract.process_identity(adapter['pid'])!=adapter:raise contract.Hold('exact calibrated replacement adapter absent/changed')
+-    admission=lateral_capability.validate_proof(release.get('lateral_calibration_proof',{}),route['scene_instance_id'],config_sha,adapter)
++    admission=lateral_capability.validate_proof(release.get('lateral_calibration_proof',{}),route['scene_instance_id'],config_sha,adapter,command_endpoint=sim_endpoint,
++        namespace_binding={key:release.get(key) for key in ['network_namespace','controller_pid_namespace']})
+     lateral_capability.validate_model_evidence(oracle_manifest['motion_model'],admission)
+     return admission
+ 
+--- source15/mapping_lateral_relay.py
++++ source16/mapping_lateral_relay.py
+@@ -102,8 +102,9 @@
+     if r['sources_sha256']['mapping_lateral_relay.py']!=proof.sha(__file__) or r['sources_sha256']['lateral_capability.py']!=proof.sha(Path(__file__).with_name('lateral_capability.py')):raise ValueError('frozen relay/proof module differs')
+     if r['sources_sha256']['full_scene_mapping_contract.py']!=proof.sha(Path(__file__).with_name('full_scene_mapping_contract.py')):raise ValueError('frozen endpoint contract module differs')
+     import full_scene_mapping_contract as endpoint_contract
+-    endpoint_contract.sim_endpoint_from_admission(a,r)
+-    admitted=proof.validate_proof(r['lateral_calibration_proof'],r['scene_instance_id'],r['sensor_config_sha256'],r['sensor_adapter_process_identity'])
++    selected_endpoint=endpoint_contract.sim_endpoint_from_admission(a,r)
++    admitted=proof.validate_proof(r['lateral_calibration_proof'],r['scene_instance_id'],r['sensor_config_sha256'],r['sensor_adapter_process_identity'],command_endpoint=selected_endpoint,
++        namespace_binding={key:r.get(key) for key in ['network_namespace','controller_pid_namespace']})
+     proof.validate_model_evidence(a['motion_model'],admitted)
+     if identity(r['sensor_adapter_process_identity']['pid'])!=r['sensor_adapter_process_identity']:raise ValueError('calibrated adapter changed')
+     return a
+--- source15/lateral_capability.py
++++ source16/lateral_capability.py
+@@ -12,6 +12,18 @@
+              'calibration_observer.py','imu_gate.py','recording_deadline.py','bag_summary.py'}
+ # Exact independently reviewed combined canary. A changed diagnostic needs review.
+ CAL_SOURCE_SHA={'lateral_once.py': 'd630eb255c96c922d3fdcd91e23532d2253fdb03c08737ac1a800fadbdb98a5f', 'lateral_contract.py': '910ce9e739854a5f073fdef8564eff198ce406cd620d26dd3df3b4cdde6ec7d3', 'semantic_tool_timed.py': 'c7c0281553bb1a457f99b344cd0d06a95b714a732dca3485956d223d6dfd051a', 'host_preflight.py': '749da4569db74798f69a47b8cbe31af1d656f99013dea23be8911cdd1ac3dfb7', 'calibration_observer.py': '2d8b36b459b74b85fab36557515bb4bad7528bcda7434735fba0e919132a2515', 'imu_gate.py': '0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66', 'recording_deadline.py': 'e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c', 'bag_summary.py': '1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792'}
++PRIVATE_CAL_SOURCE_SHA={'lateral_once.py':'8c430db01f61a8656466a57c9577329f5c3a7284b9231aebdac05c5b2b658cf3',
++    'lateral_contract.py':'b96423ffa183689234eb5bc290cb2b83b314ff616ca6e1315adbcf9f3c8f2e94',
++    'semantic_tool_timed.py':'895db93894c4bf1c3cb53301a5012a3e83657e82ab3b841877f6a4227e031e38',
++    'host_preflight.py':'200ac3f54141963f69eb2cd3923999cfdd953de686fdc284225e0f4734c23d1e',
++    'calibration_observer.py':'2d8b36b459b74b85fab36557515bb4bad7528bcda7434735fba0e919132a2515',
++    'imu_gate.py':'0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66',
++    'recording_deadline.py':'e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c',
++    'bag_summary.py':'1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792'}
++LEGACY_ENDPOINT=('127.0.0.1',7447)
++PRIVATE_ENDPOINT=('192.168.1.219',7447)
++PRIVATE_IMAGE='sha256:1e05a178bb34bb6e391150104b1d2924bb733153b6c9e9d9bae1e55ae882917e'
++IDENTITY_KEYS=('pid','starttime_ticks','cmdline_sha256','argv','boot_id')
+ RAW_TOPICS={'/odom','/front_lidar','/front_lidar/imu','/front_camera/image/compressed',
+             '/camera/front/image/compressed','/camera/front/camera_info'}
+ 
+@@ -37,7 +49,89 @@
+ 
+ def finite(values):return all(type(v) in (int,float) and math.isfinite(v) for v in values)
+ 
+-def semantic_trace(path,sign,duration_sec=4.):
++def calibration_endpoint(value):
++    require(isinstance(value,list) and len(value)==2 and type(value[0]) is str and type(value[1]) is int
++        and tuple(value) in (LEGACY_ENDPOINT,PRIVATE_ENDPOINT),'exact calibration IPv4/integer-port pair required')
++    return tuple(value)
++
++
++def complete_identity(value):
++    return (isinstance(value,dict) and set(value)==set(IDENTITY_KEYS) and type(value['pid']) is int and value['pid']>0
++        and type(value['starttime_ticks']) is int and value['starttime_ticks']>0
++        and isinstance(value['cmdline_sha256'],str) and len(value['cmdline_sha256'])==64
++        and all(ch in '0123456789abcdef' for ch in value['cmdline_sha256'])
++        and isinstance(value['argv'],list) and bool(value['argv']) and all(isinstance(v,str) for v in value['argv'])
++        and isinstance(value['boot_id'],str) and bool(value['boot_id']))
++
++
++def calibration_family(sources):
++    if sources==CAL_SOURCE_SHA:return 'legacy_shared_v4',LEGACY_ENDPOINT,{'new_adapter','bridge24','projector61'}
++    if sources==PRIVATE_CAL_SOURCE_SHA:return 'private_v4r2',PRIVATE_ENDPOINT,{'new_adapter','bridge','projector'}
++    raise AdmissionError('exact old8 or exact private8 required; no per-file mixtures or partial family')
++
++
++def mapping_endpoint(value):
++    if value is None:return LEGACY_ENDPOINT
++    require(isinstance(value,dict) and value.get('schema')=='locnav.exact_sim_command_endpoint.v1'
++        and type(value.get('port')) is int and (value.get('ipv4'),value['port']) in (LEGACY_ENDPOINT,PRIVATE_ENDPOINT),
++        'exact Source15 Root-selected mapping endpoint required')
++    return value['ipv4'],value['port']
++
++
++def private_calibration_binding(proof,case,measurements,files,artifacts,sources,scene,endpoint,namespace_binding):
++    """Archived original Root/calibration data only; no live imports or new lease."""
++    keys={'calibration_root_release','host_preflight','container_attestation'}
++    require(keys<=set(files),'new actual private Root release/host/container provenance required')
++    release=read(files['calibration_root_release']);host=read(files['host_preflight']);container=read(files['container_attestation'])
++    target=list(PRIVATE_ENDPOINT);identities=case.get('source_identities',{});cid=case.get('container_id')
++    require(case.get('private_network_endpoint') is True and calibration_endpoint(case.get('command_endpoint'))==PRIVATE_ENDPOINT
++        and calibration_endpoint(proof.get('command_endpoint'))==PRIVATE_ENDPOINT
++        and calibration_endpoint(measurements.get('command_endpoint'))==PRIVATE_ENDPOINT,
++        'new actual private case/proof/measurement must bind the selected endpoint')
++    require(release.get('scope')==CAL_SCOPE and release.get('allow_execute') is True
++        and release.get('allow_private_network_endpoint') is True and calibration_endpoint(release.get('command_endpoint'))==PRIVATE_ENDPOINT
++        and release.get('case_sha256')==artifacts['case']['sha256'] and release.get('package_sha256')==sources,
++        'original private calibration Root release/case/complete source family differs')
++    require(release.get('host_preflight',{}).get('mode')=='root_external_host_attestation'
++        and release['host_preflight'].get('sha256')==artifacts['host_preflight']['sha256']
++        and case.get('container_attestation_artifact',{}).get('sha256')==artifacts['container_attestation']['sha256'],
++        'original private host/container artifact references differ')
++    require(isinstance(cid,str) and len(cid)==64 and all(ch in '0123456789abcdef' for ch in cid)
++        and container.get('Id')==cid and container.get('Image')==PRIVATE_IMAGE
++        and host.get('container_id')==cid and host.get('container_image')==PRIVATE_IMAGE,
++        'new actual private container ID/image differs')
++    require(host.get('state')=='PASS' and host.get('mode')=='root_external_host_attestation'
++        and host.get('scene_identity')==scene and host.get('uid')==release.get('uid')==1000
++        and host.get('boot_id')==release.get('boot_id')==scene.get('boot_id') and calibration_endpoint(host.get('command_endpoint'))==PRIVATE_ENDPOINT
++        and host.get('collector_sha256')==sources['host_preflight.py']
++        and host.get('shared_host_network') is False and host.get('private_bridge_verified') is True
++        and set(identities)=={'new_adapter','bridge','projector'} and all(complete_identity(v) for v in identities.values())
++        and host.get('container_sources')==identities and host.get('container_attestation_sha256')==artifacts['container_attestation']['sha256']
++        and host.get('port7447_exact_scene_owner') is True and host.get('retired_workers_verified') is True
++        and host.get('forbidden_live_processes')==[] and bool(host.get('artifacts_verified')),
++        'new actual private host/UE/current-source evidence differs')
++    require(bool(container.get('netns')) and bool(container.get('pidns')) and bool(host.get('host_network_namespace'))
++        and container['netns']==host.get('network_namespace')==host.get('container_network_namespace')==release.get('network_namespace')
++        and container['pidns']==host.get('container_pid_namespace')==release.get('controller_pid_namespace')
++        and host['host_network_namespace']!=container['netns'],'new actual private/host namespaces differ')
++    require(isinstance(namespace_binding,dict) and set(namespace_binding)=={'network_namespace','controller_pid_namespace'}
++        and namespace_binding['network_namespace']==container['netns'] and namespace_binding['controller_pid_namespace']==container['pidns'],
++        'new actual calibration must belong to the same Root mapping PID/network namespace')
++    require(endpoint is not None and endpoint.get('ue_process_identity')=={key:scene.get(key) for key in IDENTITY_KEYS}
++        and isinstance(endpoint.get('scene_identity_proof_sha256'),str) and len(endpoint['scene_identity_proof_sha256'])==64
++        and all(ch in '0123456789abcdef' for ch in endpoint['scene_identity_proof_sha256']),
++        'Root mapping endpoint must bind the same exact UE5; no old proof transfer')
++    inputs=set(measurements.get('actual_case_artifact_sha256',{}).values())
++    require(all(artifacts[key]['sha256'] in inputs for key in keys),
++        'new actual measurement audit must bind original private Root/host/container inputs')
++    ttl=release['host_preflight'].get('max_age_sec');completed=host.get('completed_unix_ns')
++    require(finite([ttl]) and 0<ttl<=30. and type(completed) is int and completed>0,'original private host-proof finite TTL required')
++    return dict(completed_unix_ns=completed,max_age_sec=ttl)
++
++
++def semantic_trace(path,sign,duration_sec=4.,target=LEGACY_ENDPOINT):
++    require(type(target) is tuple and len(target)==2 and type(target[1]) is int and target in (LEGACY_ENDPOINT,PRIVATE_ENDPOINT),
++        'only exact selected calibration endpoint')
+     require(sign in (-.4,.4) and finite([duration_sec]) and 1.5<=duration_sec<=4.,
+             'only actual measured magnitude0.4 case in1.5..4s')
+     records=[json.loads(line) for line in Path(path).read_text().splitlines()]
+@@ -51,7 +145,7 @@
+             and command['version']==1 and command['action']=='walk' and finite([command['forward'],command['lateral'],command['yaw']])
+             and command['forward']==command['yaw']==0. and command['lateral'] in (0.,sign),
+             'only actual semantic single-axis measured sign may establish capability; MC/reverse/mixed rejected')
+-        require(item.get('target')==['127.0.0.1',7447],'semantic target differs')
++        require(calibration_endpoint(item.get('target'))==target,'semantic target differs from selected whole source family')
+         before,after=item['send_before_steady_ns'],item['send_after_steady_ns']
+         require(type(before) is int and type(after) is int and before<=after and (previous is None or before>=previous),'send syscall order invalid')
+         require(all(type(item.get(k)) is int and item[k]>=0 for k in ['send_before_unix_ns','send_after_unix_ns'])
+@@ -66,7 +160,7 @@
+     return moving
+ 
+ 
+-def validate_proof(reference,scene,sensor_sha,adapter_identity):
++def validate_proof(reference,scene,sensor_sha,adapter_identity,command_endpoint=None,namespace_binding=None):
+     require(isinstance(adapter_identity,dict) and set(adapter_identity)=={'pid','starttime_ticks','cmdline_sha256','argv','boot_id'}
+         and type(adapter_identity['pid']) is int and adapter_identity['pid']>0 and type(adapter_identity['starttime_ticks']) is int
+         and adapter_identity['starttime_ticks']>0 and bool(adapter_identity['argv']) and len(adapter_identity['cmdline_sha256'])==64
+@@ -94,11 +188,14 @@
+     for name,item in artifacts.items():
+         value=Path(item['path']);value=value if value.is_absolute() else path.parent/value
+         require(value.is_file() and sha(value)==item['sha256'],'calibration artifact changed: '+name);files[name]=value
+-    case=read(files['case'])
++    case=read(files['case']);result=read(files['result']);sources=result.get('source_package_sha256',{})
++    family,target,source_roles=calibration_family(sources)
++    require(mapping_endpoint(command_endpoint)==target,'mapping endpoint and selected complete calibration family differ')
+     identity_record=read(files['adapter_identity'])
++    if family=='private_v4r2':require('sources' in identity_record,'new actual private source precheck required; no old adapter relabel')
+     if 'sources' in identity_record:
+         require(identity_record.get('state')=='PASS' and isinstance(case.get('source_identities'),dict)
+-            and set(identity_record['sources'])=={'new_adapter','bridge24','projector61'}
++            and set(identity_record['sources'])==source_roles
+             and identity_record['sources']==case['source_identities'],
+             'original actual precheck PASS/full source identities must equal frozen case')
+         identity_record=identity_record['sources']['new_adapter']
+@@ -112,7 +209,6 @@
+         and finite([duration]) and 1.5<=duration<=4. and case.get('max_runtime_sec')==60.,'only exact actual0.4 paired case admitted')
+     require(case.get('scene_instance_id')==scene and case.get('sensor_config_artifact',{}).get('sha256')==sensor_sha,
+         'actual case scene/config differs from mapping proof')
+-    result=read(files['result']);sources=result.get('source_package_sha256',{})
+     require(result.get('scope')==CAL_SCOPE and result.get('recorder_exited') is True
+         and result.get('source_signals_sent')==result.get('host_signals_sent')==0 and result.get('raw_cdr_reencoded') is False,
+         'closed raw actual case with no source/host signal required')
+@@ -122,9 +218,9 @@
+     else:
+         require(result.get('diagnostic_passed') is False and result.get('state')=='HOLD_DIAGNOSTIC_FAILED'
+             and result.get('failure_stop_and_tail_verified') is True,'limited admission must preserve original HOLD and measured stop+tail')
+-    require(sources==CAL_SOURCE_SHA and proof.get('source_package_sha256')==sources,
++    require(proof.get('source_package_sha256')==sources,
+         'exact8 independently reviewed bounded calibration source SHAs required')
+-    require(all(artifacts['source_'+name]['sha256']==digest for name,digest in CAL_SOURCE_SHA.items()),
++    require(all(artifacts['source_'+name]['sha256']==digest for name,digest in sources.items()),
+         'actual closed calibration runtime source bytes differ from reviewed8')
+     require(read(files['source_manifest']).get('runtime_package_sha256')==sources,'actual source manifest must bind8 sources')
+     require(all(result.get('observed_topic_counts',{}).get(t,0)>0 for t in RAW_TOPICS),'raw/GT/IMU/camera observation evidence missing')
+@@ -136,6 +232,11 @@
+         require(value.is_file() and sha(value)==item['sha256'],'actual MCAP bytes missing/changed')
+     require(bag.get('metadata_sha256')==artifacts['bag_metadata']['sha256'],'bag metadata binding differs')
+     measurements=read(files['model_measurements'])
++    private_host=private_calibration_binding(proof,case,measurements,files,artifacts,sources,scene,command_endpoint,namespace_binding) if family=='private_v4r2' else None
++    if family=='legacy_shared_v4':
++        require(case.get('private_network_endpoint',False) is False and calibration_endpoint(case.get('command_endpoint',list(LEGACY_ENDPOINT)))==LEGACY_ENDPOINT
++            and calibration_endpoint(proof.get('command_endpoint',list(LEGACY_ENDPOINT)))==LEGACY_ENDPOINT
++            and calibration_endpoint(measurements.get('command_endpoint',list(LEGACY_ENDPOINT)))==LEGACY_ENDPOINT,'old exact8 only establishes original loopback evidence')
+     require(measurements.get('schema')=='locnav.root_lateral_model_measurement_input.v1'
+         and measurements.get('original_case_state')==result['state']
+         and measurements.get('diagnostic_passed')==result['diagnostic_passed']
+@@ -178,7 +279,11 @@
+             and raw.get('strict_stop_confirmed') is True and finite([raw.get('retained_signed_net_m')])
+             and abs(raw['retained_signed_net_m']-s['signed_net_stopped_body_y_m'])<1e-5,
+             'both original-GT sustained directions and actual strict stop required')
+-        moving=semantic_trace(files[f'probe{index}_trace'],sign,duration)
++        moving=semantic_trace(files[f'probe{index}_trace'],sign,duration,target)
++        if private_host:
++            require(-.05<=(moving[0]['send_before_unix_ns']-private_host['completed_unix_ns'])/1e9
++                and (moving[-1]['send_after_unix_ns']-private_host['completed_unix_ns'])/1e9<=private_host['max_age_sec'],
++                'actual private send lies outside original host-proof TTL; no current lease inferred')
+         trace=[json.loads(line) for line in files[f'probe{index}_trace'].read_text().splitlines()]
+         zeros=[v for v in trace if not v['command']['lateral']]
+         require(len(zeros)==5 and all(v['send_before_steady_ns']>moving[-1]['send_after_steady_ns'] for v in zeros),
+@@ -203,6 +308,7 @@
+     require(read(files['probe1_plan']).get('prior_positive_acceptance_sha256')==artifacts['probe0_acceptance']['sha256'],
+         'negative was not bound to admitted positive')
+     return dict(proof_sha256=reference['sha256'],audit=dict(probes=normalized),source_package_sha256=sources,
++        calibration_source_family=family,command_endpoint=list(target),
+         actual_semantic_two_sign_admitted=True,calibration_diagnostic_passed=result['diagnostic_passed'],admission_kind=kind,
+         boundary='Finite actual magnitude0.4 both-sign evidence plus root normal static-SIM engineering model; original overall result retained,not whole-route or hard plant acceptance')
+ 

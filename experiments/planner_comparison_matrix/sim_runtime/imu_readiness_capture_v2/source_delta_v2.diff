@@ -1,0 +1,96 @@
+--- frozen_v1/imu_converter.py
++++ v2/imu_converter.py
+@@ -1,7 +1,29 @@
+ """Exact baseline imu_to_local function; no CustomMsg or ROS imports."""
+ import copy
++import hashlib
++import math
++from imu_gate import decode_imu_cdr
+ 
+ def imu_to_local(msg):
+     out=copy.deepcopy(msg)
+     out.header.frame_id='imu_link'
+     return out
++
++def imu_cdr_evidence(raw):
++    """Keep every wire bit except the3 CDR1 alignment bytes after imu_link NUL.
++
++    Fixed deployed schema: CDR1 little-endian/options0, header.frame_id=imu_link,
++    string end25, next double aligned to payload-relative8 => byte28, then37
++    contiguous float64 fields. No header, value, trailing or unknown byte is
++    excluded. Original bytes and original SHA remain untouched evidence.
++    """
++    raw=bytes(raw);sample=decode_imu_cdr(raw)
++    if (len(raw)!=324 or raw[:4]!=b'\x00\x01\x00\x00'
++        or raw[12:25]!=b'\x09\x00\x00\x00imu_link\x00'
++        or sample['frame']!='imu_link' or not all(math.isfinite(v) for v in sample['values'])):
++        raise ValueError('unsupported/nonfinite derived IMU comparison layout')
++    normalized=raw[:25]+b'\x00\x00\x00'+raw[28:]
++    return dict(schema='sensor_msgs.Imu.cdr1_le.imu_link.padding_only.v1',wire_bytes=len(raw),
++        original_cdr_sha256=hashlib.sha256(raw).hexdigest(),alignment_padding_offsets=[25,26,27],
++        alignment_padding_hex=raw[25:28].hex(),padding_normalized_cdr_sha256=hashlib.sha256(normalized).hexdigest(),
++        all37_numeric_field_bits_preserved=True)
+--- frozen_v1/readiness_validator.py
++++ v2/readiness_validator.py
+@@ -3,6 +3,7 @@
+ import math
+ import readiness_contract as c
+ from imu_gate import ImuMonotonicGate
++from imu_converter import imu_cdr_evidence
+ 
+ RAW_IMU='/front_lidar/imu';IMU='/livox/imu';GT='/odom'
+ RAW_CAMERA='/front_camera/image/compressed';CAMERA='/camera/front/image/compressed';INFO='/camera/front/camera_info'
+@@ -41,6 +42,7 @@
+         self.paired=set();self.camera_paired=set();self.clock_matched=set();self.static={};self.static_rules=static_expected(sensor_config)
+         self.graph_pinned=None;self.measure_start=None;self.measure_end=None
+         self.core_stats={}
++        self.imu_whole_CDR_equal=0;self.imu_padding_only_differences=0
+     def core(self,row):return self.measure_start is not None and self.measure_start<=row['received_steady_ns'] and (self.measure_end is None or row['received_steady_ns']<=self.measure_end)
+     def sample(self,topic,raw,msg,wall,steady,evidence):
+         self.received[topic]+=1
+@@ -72,10 +74,18 @@
+         if topic in self.latest and header<=self.latest[topic]['stamp_ns']:raise c.Hold('nonadvancing header/clock: '+topic)
+         if not -50_000_000<=wall-header<=300_000_000:raise c.Hold('stale/future original header at callback: '+topic)
+         if topic in (RAW_IMU,IMU):
+-            item=dict(row,expected_cdr_sha256=hashlib.sha256(self.convert_imu(raw)).hexdigest()) if topic==RAW_IMU else dict(row)
++            if topic==RAW_IMU:
++                row['imu_expected_encoding']=imu_cdr_evidence(self.convert_imu(raw))
++                item=dict(row,expected_cdr_sha256=row['imu_expected_encoding']['original_cdr_sha256'],
++                    expected_padding_normalized_cdr_sha256=row['imu_expected_encoding']['padding_normalized_cdr_sha256'])
++            else:
++                row['imu_observed_encoding']=imu_cdr_evidence(raw)
++                item=dict(row,padding_normalized_cdr_sha256=row['imu_observed_encoding']['padding_normalized_cdr_sha256'])
+             (self.raw if topic==RAW_IMU else self.derived)[header]=item
+             if header in self.raw and header in self.derived:
+-                if self.raw[header]['expected_cdr_sha256']!=self.derived[header]['cdr_sha256']:raise c.Hold('baseline raw->derived IMU full CDR differs')
++                if self.raw[header]['expected_padding_normalized_cdr_sha256']!=self.derived[header]['padding_normalized_cdr_sha256']:raise c.Hold('baseline raw->derived IMU wire fields differ outside3 CDR alignment bytes')
++                equal=self.raw[header]['expected_cdr_sha256']==self.derived[header]['cdr_sha256']
++                self.imu_whole_CDR_equal+=int(equal);self.imu_padding_only_differences+=int(not equal)
+                 self.paired.add(header)
+         elif topic==GT:
+             sample=dict(row,position=vector(msg.pose.pose.position),quaternion=quaternion(msg.pose.pose.orientation),
+@@ -156,7 +166,9 @@
+             item=self.core_stats.get(topic,{})
+             if item.get('count',0)<2 or item.get('last_header_ns',0)-item.get('first_header_ns',0)<9_300_000_000:missing.append(['insufficient core sample/header span',topic])
+         return dict(complete=not missing,unmatched_core_samples=missing,raw_gate=self.raw_gate.diagnostics(wall,steady),derived_gate=self.derived_gate.diagnostics(wall,steady),
+-            received=self.received,accepted=self.accepted,topic_statistics=self.stats,imu_full_CDR_matches=len(self.paired),
++            received=self.received,accepted=self.accepted,topic_statistics=self.stats,imu_semantic_bit_matches=len(self.paired),
++            imu_whole_CDR_equal=self.imu_whole_CDR_equal,imu_padding_only_differences=self.imu_padding_only_differences,
++            imu_excluded_wire_byte_offsets=[25,26,27],imu_all_other_wire_bits_compared_exactly=True,
+             core_topic_statistics=self.core_stats,
+             camera_original_payload_matches=len(self.camera_paired),clock_original_IMU_header_matches=len(self.clock_matched),
+             measure_start_steady_ns=self.measure_start,measure_end_steady_ns=self.measure_end,
+--- frozen_v1/test_readiness.py
++++ v2/test_readiness.py
+@@ -110,9 +110,9 @@
+ 
+     def test_dynamic_or_new_static_TF_is_rejected(self):
+         v=Validator(CONFIG,converted)
+-        with self.assertRaises(c.Hold):v.sample('/tf',b'x',NS(transforms=[]),0,0,'writer')
++        with self.assertRaisesRegex(c.Hold,'dynamic TF message'):v.sample('/tf',b'x',NS(transforms=[]),0,0,gid('/tf'))
+         tf=NS(header=header(0,'map'),child_frame_id='odom',transform=NS(translation=xyz([0.,0.,0.]),rotation=quat([0.,0.,0.,1.])))
+-        with self.assertRaises(c.Hold):v.sample('/tf_static',b'x',NS(transforms=[tf]),0,0,'writer')
++        with self.assertRaisesRegex(c.Hold,'unexpected static TF'):v.sample('/tf_static',b'x',NS(transforms=[tf]),0,0,gid('/tf_static'))
+ 
+     def test_camera_static_rotation_matches_independent_mount_times_optical_matrix(self):
+         v=Validator(CONFIG,converted);x,y,z,w=v.static_rules[('base_link','front_camera_optical')]['values'][3:]

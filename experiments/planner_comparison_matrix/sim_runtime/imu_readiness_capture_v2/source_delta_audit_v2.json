@@ -1,0 +1,30 @@
+{
+  "state": "PASS",
+  "check_count": 20,
+  "checks": {
+    "unchanged_runtime_readiness_capture.py": true,
+    "unchanged_runtime_readiness_contract.py": true,
+    "unchanged_runtime_readiness_observer.py": true,
+    "unchanged_runtime_owned_recorder.py": true,
+    "unchanged_runtime_imu_gate.py": true,
+    "unchanged_runtime_recording_deadline.py": true,
+    "unchanged_runtime_bag_summary.py": true,
+    "original_converter_function_AST_exact": true,
+    "unchanged_stamp": true,
+    "unchanged_vector": true,
+    "unchanged_quaternion": true,
+    "unchanged_static_expected": true,
+    "unchanged_validator_core": true,
+    "unchanged_validator_graph": true,
+    "unchanged_validator_check": true,
+    "sample_all_age_gate_GT_camera_clock_evidence_logic_unchanged": true,
+    "finish_all_non_IMU_report_and_window_logic_unchanged": true,
+    "original_v1_entire_freeze_preserved": true,
+    "exact_nine_v2_package_hashes": true,
+    "actual_failed_bag_preserved": true
+  },
+  "only_runtime_files_changed": [
+    "imu_converter.py",
+    "readiness_validator.py"
+  ]
+}

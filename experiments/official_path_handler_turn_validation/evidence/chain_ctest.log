@@ -1,0 +1,10 @@
+Internal ctest changing into directory: /home/charles/project/colcon_ws/analysis_outputs/upstream_nav2_interface_isolated_20261031/build
+Test project /home/charles/project/colcon_ws/analysis_outputs/upstream_nav2_interface_isolated_20261031/build
+    Start 1: exact_upstream_native_path_semantics
+1/2 Test #1: exact_upstream_native_path_semantics ...   Passed    0.02 sec
+    Start 2: complete_rotation_constraints
+2/2 Test #2: complete_rotation_constraints ..........   Passed    0.00 sec
+
+100% tests passed, 0 tests failed out of 2
+
+Total Test time (real) =   0.03 sec

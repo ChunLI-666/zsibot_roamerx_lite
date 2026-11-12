@@ -1,0 +1,105 @@
+{
+  "scope": "READ_ONLY_INPUT_EVIDENCE_NOT_LIVE_VERIFICATION",
+  "records": [
+    {
+      "path": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_imu_adapter_replacement_execution_v2/operation_v1/new_source_identity.json",
+      "sha256": "7d1bf930c585aaa40dfc7588e902ae1c4958620b93daac3b73881d95175865e1"
+    },
+    {
+      "path": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_imu_adapter_replacement_execution_v1/container_identity_readback.json",
+      "sha256": "c9f81cff106e8c600bdb70dd878df7c58c3fc93bf5180c9f8d167da1559d35d8"
+    },
+    {
+      "path": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_imu_adapter_replacement_execution_v2/operation_v1/result.json",
+      "sha256": "c1e513d11d325a9f05b5340dfe709511c1a00f57e08c63303097f65f4e46a3d3"
+    },
+    {
+      "path": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_imu_monotonic_gate_independent_review_solmax_v1/review.json",
+      "sha256": "4c074816a78457a1e6f6e6eaa95208c53a599364bb3070fe048298a606af2717"
+    }
+  ],
+  "source_identity_five_fields": {
+    "new_adapter": {
+      "pid": 4744,
+      "starttime_ticks": 10531107,
+      "cmdline_sha256": "e85b4fe64d9bc37e109104e834b7aeafb76db87e7726970ff14bd987c100de28",
+      "argv": [
+        "/usr/bin/python3",
+        "-u",
+        "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_imu_adapter_replacement_execution_v2/source/sim_imu_adapter.py",
+        "--execute",
+        "--runtime-config",
+        "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/samehost_runtime/frozen_inputs/runtime_config.json",
+        "--root-release",
+        "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/sim_imu_adapter_replacement_execution_v2/adapter_release.approved.json"
+      ],
+      "boot_id": "c3697337-f336-48f4-8127-4af9e461035d"
+    },
+    "bridge24": {
+      "pid": 24,
+      "starttime_ticks": 4460159,
+      "cmdline_sha256": "1b108714643627137dce26b9e9ae2b96ece4c1bc86b230abf7c376b42296cf86",
+      "argv": [
+        "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/simulation_setup/zenoh_bridge_jazzy/install/lib/ue_zenoh_bridge/ue_zenoh_bridge",
+        "--endpoint",
+        "tcp/127.0.0.1:7447",
+        "--recording-mode",
+        "--wait-for-recorder-ms",
+        "0",
+        "--predeclare-topic",
+        "/front_lidar:=sensor_msgs/msg/PointCloud2",
+        "--predeclare-topic",
+        "/front_lidar/imu:=sensor_msgs/msg/Imu",
+        "--predeclare-topic",
+        "/odom:=nav_msgs/msg/Odometry",
+        "--predeclare-topic",
+        "/front_camera/image/compressed:=sensor_msgs/msg/CompressedImage"
+      ],
+      "boot_id": "c3697337-f336-48f4-8127-4af9e461035d"
+    },
+    "projector61": {
+      "pid": 61,
+      "starttime_ticks": 4460362,
+      "cmdline_sha256": "3cb9ba8d5927ba302a2551e90f25373f9e36c840d6d8046d9b98f7cc445833a3",
+      "argv": [
+        "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/projector_runtime/build/livox_scan_projector",
+        "--ros-args",
+        "-p",
+        "use_sim_time:=false",
+        "-p",
+        "lidar_x:=0.0",
+        "-p",
+        "lidar_y:=0.0",
+        "-p",
+        "lidar_z:=0.1",
+        "-p",
+        "lidar_pitch:=0.0",
+        "-p",
+        "lidar_roll:=0.0",
+        "-p",
+        "lidar_yaw:=0.0",
+        "-p",
+        "min_height:=-0.25",
+        "-p",
+        "max_height:=1.1",
+        "-p",
+        "sensor_qos_depth:=10",
+        "-p",
+        "max_sensor_age_sec:=0.3",
+        "-p",
+        "robot_min_x:=-0.35",
+        "-p",
+        "robot_max_x:=0.35",
+        "-p",
+        "robot_min_y:=-0.2",
+        "-p",
+        "robot_max_y:=0.2",
+        "-p",
+        "sensor_input_reliable:=true"
+      ],
+      "boot_id": "c3697337-f336-48f4-8127-4af9e461035d"
+    }
+  },
+  "no_agent_runtime_action": true,
+  "no_DDS_graph_read_performed": true
+}

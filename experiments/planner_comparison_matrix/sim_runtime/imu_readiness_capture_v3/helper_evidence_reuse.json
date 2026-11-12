@@ -1,0 +1,77 @@
+{
+  "reused_exact_bytes": true,
+  "helper_sha256": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+  "tests_sha256": "66b437b1712d66b7a276e3a50e64eddab6baa344d80d18509ba9b772f7e7c0e0",
+  "evidence_directory": "analysis_outputs/planner_comparison_20261105/native_waypoints_v1/deadline_process_tests_v1",
+  "existing_suite_passed": 18,
+  "rerun": false,
+  "records": {
+    "canonical_helper": {
+      "path": "src/zsibot/zsibot_roamerx_lite/experiments/planner_comparison_matrix/recording_deadline.py",
+      "sha256": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c"
+    },
+    "canonical_tests": {
+      "path": "src/zsibot/zsibot_roamerx_lite/experiments/planner_comparison_matrix/test_recording_deadline.py",
+      "sha256": "66b437b1712d66b7a276e3a50e64eddab6baa344d80d18509ba9b772f7e7c0e0"
+    },
+    "frozen_parent_helper": {
+      "path": "analysis_outputs/planner_comparison_20261105/full_scene_recording_owner_v1/recording_deadline.py",
+      "sha256": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c"
+    },
+    "original_tested_helper": {
+      "path": "analysis_outputs/planner_comparison_20261105/native_waypoints_v1/review_source_v1/experiments/planner_comparison_matrix/recording_deadline.py",
+      "sha256": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c"
+    },
+    "original_tested_tests": {
+      "path": "analysis_outputs/planner_comparison_20261105/native_waypoints_v1/review_source_v1/experiments/planner_comparison_matrix/test_recording_deadline.py",
+      "sha256": "66b437b1712d66b7a276e3a50e64eddab6baa344d80d18509ba9b772f7e7c0e0"
+    },
+    "committed_B_helper": {
+      "path": "analysis_outputs/planner_comparison_20261105/native_waypoints_v1/committed_source_B_v1/experiments/planner_comparison_matrix/recording_deadline.py",
+      "sha256": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c"
+    },
+    "committed_B_tests": {
+      "path": "analysis_outputs/planner_comparison_20261105/native_waypoints_v1/committed_source_B_v1/experiments/planner_comparison_matrix/test_recording_deadline.py",
+      "sha256": "66b437b1712d66b7a276e3a50e64eddab6baa344d80d18509ba9b772f7e7c0e0"
+    },
+    "retained_process_test_helper": {
+      "path": "analysis_outputs/planner_comparison_20261105/native_waypoints_v1/deadline_process_tests_v1/test_gate_never_orphans_recording_if_parent_exits_immediately_after_popen/run/recording_deadline.py",
+      "sha256": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c"
+    },
+    "handoff": {
+      "path": "analysis_outputs/planner_comparison_20261105/native_waypoints_v1/handoff_final_v1.json",
+      "sha256": "6a2ff557573ec86522bd40084357114da34bbaefd85967cc4f5236cb8242024b"
+    },
+    "independent_suite_stderr": {
+      "path": "analysis_outputs/planner_comparison_20261105/native_waypoints_v1/independent_review_v1/supplied_deadline_v1.stderr",
+      "sha256": "c2e6e06c56604e8eae721076ae02e29ee2c45d82669d91de0b1b190ec88f770b"
+    }
+  },
+  "test_case_directories": [
+    "test_blocked_launcher_falls_back_to_exact_registered_children",
+    "test_changed_run_manifest_never_signals_original_or_other_process",
+    "test_cleanup_exception_does_not_orphan_registered_children",
+    "test_deadline_interrupts_busy_loop_once_and_does_not_repeat_during_finalization",
+    "test_direct_shebang_command_contract_matches_kernel_cmdline",
+    "test_gate_never_orphans_recording_if_parent_exits_immediately_after_popen",
+    "test_gate_registers_and_stops_recording_when_parent_blocks_immediately_after_popen",
+    "test_launcher_ast_preserves_close_order_and_marks_closed_before_audit",
+    "test_normal_launcher_exit_ends_watchdog_without_a_signal",
+    "test_normal_shutdown_disarms_before_slow_finalization",
+    "test_parent_session_can_exit_before_detached_deadline",
+    "test_pidfd_cannot_signal_another_process_after_target_exits_at_send",
+    "test_runtime_validation_rejects_unbounded_or_over_budget_values",
+    "test_shutdown_started_does_not_cancel_the_cutoff",
+    "test_starttime_or_commandline_mismatch_never_signals_target",
+    "test_startup_time_counts_toward_the_fixed_deadline",
+    "test_unacknowledged_gate_reaches_deadline_without_starting_real_process",
+    "test_waypoint_follower_is_bound_and_stopped_in_command_producer_phase"
+  ],
+  "existing_independent_terminal_evidence": [
+    "",
+    "----------------------------------------------------------------------",
+    "Ran 18 tests in 25.870s",
+    "",
+    "OK"
+  ]
+}

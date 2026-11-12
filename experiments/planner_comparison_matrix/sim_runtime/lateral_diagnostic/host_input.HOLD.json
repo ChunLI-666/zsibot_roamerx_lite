@@ -1,0 +1,199 @@
+{
+  "scope": "LATERAL_CALIBRATION_HOST_PREFLIGHT_ONLY",
+  "root_inputs_reviewed": false,
+  "expected_host": {
+    "hostname": "charles-pc",
+    "uid": 1000,
+    "euid": 1000,
+    "boot_id": "c3697337-f336-48f4-8127-4af9e461035d",
+    "machine_id_sha256": "b24d87551d7c04ace4366018da84ed77878d097d3a0e8e7aacb5e0e31337f059",
+    "pid_namespace": "pid:[4026531836]"
+  },
+  "expected_container_id": "b5ebab492d5dbc3994fd859605d24e0bcba2f11ea094e7c7e59e07d5be2dc468",
+  "expected_container_init": {
+    "pid": 29319,
+    "starttime_ticks": 4449058,
+    "cmdline_sha256": "21e7b0eb0fbfc14a8eab229ae46632be62b33a26ffc0692960b9786c4008934b",
+    "argv": [
+      "sleep",
+      "infinity"
+    ],
+    "boot_id": "c3697337-f336-48f4-8127-4af9e461035d",
+    "uid": [
+      1000,
+      1000,
+      1000,
+      1000
+    ],
+    "gid": [
+      1000,
+      1000,
+      1000,
+      1000
+    ],
+    "namespace_pids": [
+      29319,
+      1
+    ],
+    "pid_namespace": "pid:[4026532746]",
+    "mount_namespace": "mnt:[4026532742]",
+    "executable": "/usr/bin/sleep",
+    "cwd": "/",
+    "cgroup_sha256": "9fa70efda0abd3441e0b7c893e0e5f4fd7022c0dd0dd38b0de414cadd634d4e9"
+  },
+  "expected_scene_identity": {
+    "pid": 1172665,
+    "starttime_ticks": 9427026,
+    "cmdline_sha256": "6e67b4b335a63f5f1cb06b34d0d592d6dd235529a1fcc0b81113626766e8661e",
+    "argv": [
+      "/mnt/data/matrix_v1.1.2_migration_20261030/runtime/MATRiX_v1.1.2/UeSim/Binaries/Linux/UeSim",
+      "UeSim",
+      "/Game/Maps/SceneWorld",
+      "-windowed",
+      "-ResX=1280",
+      "-ResY=720",
+      "-nosound",
+      "-unattended",
+      "-log",
+      "-Abslog=/mnt/data/planner_comparison_20261105/whole_scene_geometry_recovery_20261106/attempt_v1/SceneWorld_attempt_v1.log"
+    ],
+    "boot_id": "c3697337-f336-48f4-8127-4af9e461035d",
+    "uid": [
+      1000,
+      1000,
+      1000,
+      1000
+    ],
+    "gid": [
+      1000,
+      1000,
+      1000,
+      1000
+    ],
+    "namespace_pids": [
+      1172665
+    ],
+    "pid_namespace": "pid:[4026531836]",
+    "mount_namespace": "mnt:[4026531841]",
+    "executable": "/mnt/data/matrix_v1.1.2_migration_20261030/runtime/MATRiX_v1.1.2/UeSim/Binaries/Linux/UeSim",
+    "cwd": "/mnt/data/matrix_v1.1.2_migration_20261030/runtime/MATRiX_v1.1.2/UeSim/Binaries/Linux",
+    "cgroup_sha256": "fbf84cf7338e342871c7319fa00b4b1a92043a129ce4d355dfd41f0300b5f6c5"
+  },
+  "retired_workers": [
+    {
+      "role": "63",
+      "identity": {
+        "pid": 31987,
+        "starttime_ticks": 4460362,
+        "cmdline_sha256": "4acf861c91671b7fa4ca8e30a08425f3c0fc3904f90c5e3b2d21d3131a4a1be2",
+        "argv": [
+          "/usr/bin/python3",
+          "/home/charles/project/colcon_ws/src/zsibot/zsibot_roamerx_lite/experiments/planner_comparison_matrix/sim_runtime/sim_command_adapter.py",
+          "--relay-mode",
+          "local",
+          "--max-policy-vx",
+          "0.4",
+          "--max-policy-wz",
+          "0.3"
+        ],
+        "boot_id": "c3697337-f336-48f4-8127-4af9e461035d",
+        "uid": [
+          1000,
+          1000,
+          1000,
+          1000
+        ],
+        "gid": [
+          1000,
+          1000,
+          1000,
+          1000
+        ],
+        "namespace_pids": [
+          31987,
+          63
+        ],
+        "pid_namespace": "pid:[4026532746]",
+        "mount_namespace": "mnt:[4026532742]",
+        "executable": "/usr/bin/python3.12",
+        "cwd": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/samehost_runtime/pipeline_v1",
+        "cgroup_sha256": "9fa70efda0abd3441e0b7c893e0e5f4fd7022c0dd0dd38b0de414cadd634d4e9"
+      }
+    },
+    {
+      "role": "123",
+      "identity": {
+        "pid": 32047,
+        "starttime_ticks": 4460473,
+        "cmdline_sha256": "5e5c41ee5e60dc10231e253ff6547a738a4c7fc4351bea75ede28adf7ea930be",
+        "argv": [
+          "/usr/bin/python3",
+          "/home/charles/project/colcon_ws/src/zsibot/zsibot_roamerx_lite/experiments/planner_comparison_matrix/sim_runtime/sim_udp_relay.py"
+        ],
+        "boot_id": "c3697337-f336-48f4-8127-4af9e461035d",
+        "uid": [
+          1000,
+          1000,
+          1000,
+          1000
+        ],
+        "gid": [
+          1000,
+          1000,
+          1000,
+          1000
+        ],
+        "namespace_pids": [
+          32047,
+          123
+        ],
+        "pid_namespace": "pid:[4026532746]",
+        "mount_namespace": "mnt:[4026532742]",
+        "executable": "/usr/bin/python3.12",
+        "cwd": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/samehost_runtime/pipeline_v1",
+        "cgroup_sha256": "9fa70efda0abd3441e0b7c893e0e5f4fd7022c0dd0dd38b0de414cadd634d4e9"
+      }
+    },
+    {
+      "role": "2689",
+      "identity": {
+        "pid": 149863,
+        "starttime_ticks": 5630520,
+        "cmdline_sha256": "c5bdad26c0d01dc0fe06ccb112901b0ca7e2849e24f406275f14294b7425fe60",
+        "argv": [
+          "/home/charles/project/colcon_ws/analysis_outputs/project_smoke_20261030/install/libexec/lightning/run_loc_online",
+          "--config",
+          "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/samehost_runtime/pipeline_tbb4_v1/localization.yaml"
+        ],
+        "boot_id": "c3697337-f336-48f4-8127-4af9e461035d",
+        "uid": [
+          1000,
+          1000,
+          1000,
+          1000
+        ],
+        "gid": [
+          1000,
+          1000,
+          1000,
+          1000
+        ],
+        "namespace_pids": [
+          149863,
+          2689
+        ],
+        "pid_namespace": "pid:[4026532746]",
+        "mount_namespace": "mnt:[4026532742]",
+        "executable": "/home/charles/project/colcon_ws/analysis_outputs/project_smoke_20261030/install/libexec/lightning/run_loc_online",
+        "cwd": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/samehost_runtime/pipeline_tbb4_v1/lightning_cwd",
+        "cgroup_sha256": "9fa70efda0abd3441e0b7c893e0e5f4fd7022c0dd0dd38b0de414cadd634d4e9"
+      }
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "/mnt/data/matrix_v1.1.2_migration_20261030/runtime/MATRiX_v1.1.2/UeSim/Content/model/config/config.json",
+      "sha256": "38aab54b3a6ca49570feaaa8e983f4f9bc9ee197060066b186478a70f92ea023"
+    }
+  ]
+}

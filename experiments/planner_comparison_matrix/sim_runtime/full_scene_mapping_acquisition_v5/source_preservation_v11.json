@@ -1,0 +1,18 @@
+{
+  "base_source10_manifest_sha256": "123d805a794eeada616d7f21526d577df673858583d0337f97880d117811cf01",
+  "source03_actual_export_main_sha256": "d0f9823bbf135173e952962e0de680cadc8c32339d4d8a36f3a7a869889d68fa",
+  "base_main_equals_source03_actual_export": true,
+  "other_six_runtime_exact": {
+    "full_scene_mapping_contract.py": true,
+    "mapping_lateral_relay.py": true,
+    "lateral_capability.py": true,
+    "imu_gate.py": true,
+    "dependencies/waypoint_contract.py": true,
+    "dependencies/map_coverage.py": true
+  },
+  "entire_main_AST_exact_after_restoring_only_constructor_move": true,
+  "constructor_class_and_all_functions_except_execute_unchanged": true,
+  "passive_constructor_no_Popen_or_socket": true,
+  "source_gap_root_cause_proved": false,
+  "root_inputs_modified": false
+}

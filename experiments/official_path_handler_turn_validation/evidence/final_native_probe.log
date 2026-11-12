@@ -1,0 +1,13 @@
+PASS straight_not_segmented
+PASS rotation_crops_future_translation
+PASS constraint_requires_position
+PASS constraint_requires_yaw_progress
+PASS official_prefix_endpoint_is_releasable
+OBS prefix_yaw_deg=30 requested_turn_deg=90 constraint_index=3
+PASS snapshot_releases_before_entire_rotation_end
+PASS rotation_flag_defaults_matter
+PASS wraparound_rotation_detected
+PASS two_pose_rotation_not_cropped_in_this_snapshot
+PASS single_pose_not_a_rotation_segment
+PASS same_frame_closest_segment_native_method
+SCOPE exact upstream source native component tests with explicit lifecycle adapter; no plugin activation or closed loop

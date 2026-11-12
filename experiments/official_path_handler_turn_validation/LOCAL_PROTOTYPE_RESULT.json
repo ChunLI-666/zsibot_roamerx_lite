@@ -1,0 +1,189 @@
+{
+  "stage": "Isolated local official-interface prototype developed and verified; not production integration or deployment",
+  "source_basis": {
+    "runtime_official_commit": "f3406e246cda1e7c28052409a098313fbc1761fe",
+    "snapshot_package_label": "1.4.0",
+    "Jazzy_underlay": "1.3.13",
+    "current_main_files": "separate blob-pinned component/API inspection only, not full current-main stack"
+  },
+  "artifacts": {
+    "run_script": "run_isolated.sh",
+    "upstream_variant": "build/official_runtime_probe",
+    "complete_rotation_variant": "build/official_runtime_corrected_probe",
+    "small_patch": "evidence/complete_rotation_constraint.patch"
+  },
+  "scope_of_changes": {
+    "canonical_repository_changes": false,
+    "shared_build_install_changes": false,
+    "commits_created": 0,
+    "board_access": false,
+    "official_files_verified": 23,
+    "upstream_variant_algorithm_edits": 0,
+    "Jazzy_node_and_publisher_compatibility_headers": {
+      "files": 2,
+      "lines": 28
+    },
+    "legacy_goal_bridge_class_lines": 27,
+    "complete_rotation_variant_patch": {
+      "functions_changed": 1,
+      "added_lines": 13,
+      "removed_lines": 24,
+      "purpose": "Keep all coincident-position rotation poses through the end of the rotation run before exposing subsequent translation."
+    },
+    "counts_are": "Measured prototype glue/patch counts; not an estimate of complete production integration, lifecycle, launch, or regression work."
+  },
+  "behavior_and_wire_checks": {
+    "upstream": {
+      "returncode": 0,
+      "elapsed_s": 1.3680630460148677,
+      "summaries": [
+        {
+          "summary": "same_xy_180",
+          "success": 1,
+          "first_depart_yaw_deg": -1,
+          "resume_yaw_deg": -1
+        },
+        {
+          "summary": "near_terminal110",
+          "success": 1,
+          "first_depart_yaw_deg": -1,
+          "resume_yaw_deg": -1
+        },
+        {
+          "summary": "midway_90",
+          "success": 1,
+          "first_depart_yaw_deg": 84.5329,
+          "resume_yaw_deg": 84.8915
+        },
+        {
+          "summary": "door_straight",
+          "success": 1,
+          "first_depart_yaw_deg": -1,
+          "resume_yaw_deg": -1
+        },
+        {
+          "summary": "cancel_and_new_goal",
+          "success": 1,
+          "first_depart_yaw_deg": -1,
+          "resume_yaw_deg": -1
+        },
+        {
+          "scenario": "blocked_rotation",
+          "rejected": true,
+          "tick": 16
+        },
+        {
+          "summary": "blocked_rotation",
+          "success": 0,
+          "first_depart_yaw_deg": -1,
+          "resume_yaw_deg": -1
+        },
+        {
+          "wire_test": "legacy_invalid_goal_rejected",
+          "success": true
+        },
+        {
+          "wire_test": "legacy_goal_feedback_result",
+          "success": true,
+          "feedback_count": 93
+        },
+        {
+          "wire_test": "legacy_cancel_result",
+          "success": true
+        }
+      ]
+    },
+    "complete_rotation": {
+      "returncode": 0,
+      "elapsed_s": 1.1674356249859557,
+      "summaries": [
+        {
+          "summary": "same_xy_180",
+          "success": 1,
+          "first_depart_yaw_deg": -1,
+          "resume_yaw_deg": -1
+        },
+        {
+          "summary": "near_terminal110",
+          "success": 1,
+          "first_depart_yaw_deg": -1,
+          "resume_yaw_deg": -1
+        },
+        {
+          "summary": "midway_90",
+          "success": 1,
+          "first_depart_yaw_deg": 88.1407,
+          "resume_yaw_deg": 88.9771
+        },
+        {
+          "summary": "door_straight",
+          "success": 1,
+          "first_depart_yaw_deg": -1,
+          "resume_yaw_deg": -1
+        },
+        {
+          "summary": "cancel_and_new_goal",
+          "success": 1,
+          "first_depart_yaw_deg": -1,
+          "resume_yaw_deg": -1
+        },
+        {
+          "scenario": "blocked_rotation",
+          "rejected": true,
+          "tick": 11
+        },
+        {
+          "summary": "blocked_rotation",
+          "success": 0,
+          "first_depart_yaw_deg": -1,
+          "resume_yaw_deg": -1
+        },
+        {
+          "wire_test": "legacy_invalid_goal_rejected",
+          "success": true
+        },
+        {
+          "wire_test": "legacy_goal_feedback_result",
+          "success": true,
+          "feedback_count": 65
+        },
+        {
+          "wire_test": "legacy_cancel_result",
+          "success": true
+        }
+      ]
+    }
+  },
+  "regression": {
+    "ctest_passed": 2,
+    "native_assertions": 18,
+    "codacy": "Tool unavailable; not run"
+  },
+  "parameters_requiring_alignment": {
+    "handler_xy_tolerance_m": 0.05,
+    "checker_xy_tolerance_m": 0.04,
+    "handler_yaw_tolerance_rad": 0.03,
+    "RPP_stateful": false,
+    "rotation_detection_and_heading_threshold_rad": 0.0872665,
+    "negative_control": "Handler XY tolerance 0.01 m with checker tolerance 0.04 m stalls at intermediate turn; retained in runtime_tolerance_comparison.json"
+  },
+  "strict_turn_metric_deg": {
+    "requested_turn": 90,
+    "upstream_resume_translation_yaw": 84.8915,
+    "complete_rotation_resume_translation_yaw": 88.9771
+  },
+  "boundaries": [
+    "Actual ROS lifecycle node, Jazzy Costmap2DROS, official RPP/collision checker, and FollowPath action transport were used in independent domain 218 with localhost discovery.",
+    "Body execution is ideal kinematic integration; synthetic reference paths and synthetic costmap, not real sensor localization, real office map, SDK, or physical motion.",
+    "Synthetic body is 0.8 m by 0.36 m; doorway width is 0.46 m. These are test fixtures, not verified robot installation dimensions.",
+    "Node and publisher wrapper compatibility is not equivalence of the full newer nav2_ros_common package.",
+    "No claim that latest upstream main as a full stack has passed; complete runtime uses the coherent fixed official revision."
+  ],
+  "remaining_integration_work": [
+    "Preserve explicit rotation segments from actual planner and any smoother; this prototype does not run a global planner.",
+    "Validate real localization/odometry time and TF, velocity relay/smoother/gate and command timeout/cancel/preemption together.",
+    "Validate compatible replans during an active rotation, lifecycle transitions, clock pauses, and unavailable costmaps.",
+    "Create reviewed production packaging and launch selection after comparing with the concurrently developed main-line candidate; no canonical or field switch performed.",
+    "ARM build and physical testing remain unperformed for this side prototype."
+  ]
+}

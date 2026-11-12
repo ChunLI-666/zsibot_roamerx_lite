@@ -21,6 +21,16 @@ def write_raw_playback_qos(output, sensors):
     return path
 
 
+def localization_environment(args):
+    env = os.environ.copy()
+    pangolin = Path(__file__).resolve().parents[8] / 'lightning-lm/thirdparty/Pangolin-0.9.3/build'
+    # Preserve the ordinary legacy fallback; headless ARM validation must use
+    # only the selected overlay's runtime dependencies.
+    if not getattr(args, 'arm_runtime', False) and pangolin.is_dir():
+        env['LD_LIBRARY_PATH'] = str(pangolin) + ':' + env.get('LD_LIBRARY_PATH', '')
+    return env
+
+
 def shutdown_navigation_once(monitor, processes, navigation_finalized=False):
     """Do not send SHUTDOWN again after the full-source tail has failed.
 
@@ -114,6 +124,7 @@ def main():
          '--ros-args', '-p', 'use_sim_time:=true', '-p',
          'enable_debug_observations:=' + str(not args.observations_off).lower()], effective)
     write_json(args.output / 'replay_inputs.json', dict(bag=str(args.bag),
+        arm_runtime=args.arm_runtime,
         metadata_sha256=sha256(args.bag / 'metadata.yaml'), sensors=sensors,
         map=str(args.map), map_sha256=sha256(args.map), source_config=str(args.config),
         source_config_sha256=sha256(args.config), effective_config_sha256=sha256(effective),
@@ -136,6 +147,7 @@ def main():
     monitor, processes = Monitor(args), Processes(args.output)
     processes.pump = lambda: rclpy.spin_once(monitor, timeout_sec=.01)
     result = dict(success=False, mode='sensor_only_open_loop', arrival='N/A', hardware_io=False,
+        arm_runtime=args.arm_runtime,
         goal_input=args.goal_input, default_environment=os.environ.get('LOCNAV_PROFILE', '0') != '1',
         profiling_enabled=os.environ.get('LOCNAV_PROFILE', '0') == '1',
         composition_enabled=not args.no_composition)
@@ -148,13 +160,7 @@ def main():
             raise RuntimeError('Selected ROS domain is occupied: ' + str(others))
         if args.full_bag_mode:
             monitor.watch_raw_sources(sensors, types)
-        env = os.environ.copy()
-        pangolin = Path(__file__).resolve().parents[8] / 'lightning-lm/thirdparty/Pangolin-0.9.3/build'
-        # The selected overlay should supply runtime paths. Legacy Pangolin is
-        # added only when available in this canonical workspace.
-        if pangolin.is_dir():
-            env['LD_LIBRARY_PATH'] = str(pangolin) + ':' + env.get('LD_LIBRARY_PATH', '')
-        processes.start('localization', localization_launch, env=env)
+        processes.start('localization', localization_launch, env=localization_environment(args))
         player = processes.start('player', player_command(args, sensors))
         monitor.spin_until(lambda: monitor.get_clock().now().nanoseconds > 0,
             15., 'historical bag /clock before recorder startup', processes)

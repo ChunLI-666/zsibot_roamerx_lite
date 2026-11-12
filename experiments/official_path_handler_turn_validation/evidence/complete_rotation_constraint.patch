@@ -1,0 +1,46 @@
+--- upstream_constraint_functions.cpp
++++ complete_rotation_constraints.cpp
+@@ -62,30 +62,19 @@
+       float accumulated_rotation = 0.0f;
+       unsigned int end_idx = idx;
+ 
+-      // Continue checking while translation remains small
+-      // until accumulated rotation is larger than threshold
+-      while (end_idx < path.poses.size() - 1) {
+-        float current_yaw = tf2::getYaw(path.poses[end_idx].pose.orientation);
+-        float next_yaw = tf2::getYaw(path.poses[end_idx + 1].pose.orientation);
+-        accumulated_rotation += fabs(angles::shortest_angular_distance(current_yaw, next_yaw));
+-        if (accumulated_rotation > rotation_threshold) {
+-          rotation_idx = end_idx + 1;
+-          break;
+-        }
+-        if (end_idx + 2 < path.poses.size()) {
+-          float ndx = path.poses[end_idx + 2].pose.position.x -
+-            path.poses[end_idx + 1].pose.position.x;
+-          float ndy = path.poses[end_idx + 2].pose.position.y -
+-            path.poses[end_idx + 1].pose.position.y;
+-          // Stop if translation resumes
+-          if (hypot(ndx, ndy) > 1e-4) {
+-            break;
+-          }
+-        } else {
+-          // We have reached the end of the path
+-          break;
+-        }
+-        end_idx++;
++      // Keep the complete zero-translation rotation run in the current prefix.
++      // The first pose AFTER the final rotation pose is the exclusive cut index.
++      while (end_idx + 1 < path.poses.size()) {
++        const auto & current = path.poses[end_idx].pose;
++        const auto & next = path.poses[end_idx + 1].pose;
++        if (hypot(next.position.x - current.position.x,
++          next.position.y - current.position.y) > 1e-4) {break;}
++        accumulated_rotation += fabs(angles::shortest_angular_distance(
++          tf2::getYaw(current.orientation), tf2::getYaw(next.orientation)));
++        ++end_idx;
++      }
++      if (accumulated_rotation > rotation_threshold) {
++        rotation_idx = end_idx + 1;
+       }
+     }
+   }

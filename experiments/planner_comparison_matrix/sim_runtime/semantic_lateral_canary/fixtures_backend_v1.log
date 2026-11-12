@@ -1,0 +1,22 @@
+test_close_error_never_reports_completed (test_semantic_tool_timed.BackendFixtures.test_close_error_never_reports_completed) ... ok
+test_default_hold_without_contract_socket_or_output (test_semantic_tool_timed.BackendFixtures.test_default_hold_without_contract_socket_or_output) ... ok
+test_each_sign_one_socket_twenty_packets_five_zeros_and_hashes (test_semantic_tool_timed.BackendFixtures.test_each_sign_one_socket_twenty_packets_five_zeros_and_hashes) ... ok
+test_every_packet_proof_loss_stops_and_always_five_zeros (test_semantic_tool_timed.BackendFixtures.test_every_packet_proof_loss_stops_and_always_five_zeros) ... ok
+test_failed_first_zero_still_attempts_remaining_zeros_and_close (test_semantic_tool_timed.BackendFixtures.test_failed_first_zero_still_attempts_remaining_zeros_and_close) ... ok
+test_initial_proof_failure_never_creates_socket (test_semantic_tool_timed.BackendFixtures.test_initial_proof_failure_never_creates_socket) ... ok
+test_invalid_duration_rejected_before_factory (test_semantic_tool_timed.BackendFixtures.test_invalid_duration_rejected_before_factory) ... ok
+test_keyboard_interrupt_exception_still_sends_five_zeros (test_semantic_tool_timed.BackendFixtures.test_keyboard_interrupt_exception_still_sends_five_zeros) ... ok
+test_logging_failure_still_attempts_zero_sends (test_semantic_tool_timed.BackendFixtures.test_logging_failure_still_attempts_zero_sends) ... ok
+test_motion_send_exception_cannot_skip_zero_cleanup (test_semantic_tool_timed.BackendFixtures.test_motion_send_exception_cannot_skip_zero_cleanup) ... ok
+test_parent_lease_150ms_identity_and_deadline_fail_closed (test_semantic_tool_timed.BackendFixtures.test_parent_lease_150ms_identity_and_deadline_fail_closed) ... ok
+test_parent_proof_delegates_unchanged_header_receipt_gate (test_semantic_tool_timed.BackendFixtures.test_parent_proof_delegates_unchanged_header_receipt_gate) ... ok
+test_send_syscall_crossing_deadline_is_explicit_failure (test_semantic_tool_timed.BackendFixtures.test_send_syscall_crossing_deadline_is_explicit_failure) ... ok
+test_sigint_and_repeated_cleanup_signal_do_not_interrupt_five_zeros (test_semantic_tool_timed.BackendFixtures.test_sigint_and_repeated_cleanup_signal_do_not_interrupt_five_zeros) ... ok
+test_slow_guard_does_not_create_catchup_bursts (test_semantic_tool_timed.BackendFixtures.test_slow_guard_does_not_create_catchup_bursts) ... ok
+test_slow_proof_never_sends_nonzero_after_deadline (test_semantic_tool_timed.BackendFixtures.test_slow_proof_never_sends_nonzero_after_deadline) ... ok
+test_whitelist_rejects_axis_other_sign_extra_and_nonfinite (test_semantic_tool_timed.BackendFixtures.test_whitelist_rejects_axis_other_sign_extra_and_nonfinite) ... ok
+
+----------------------------------------------------------------------
+Ran 17 tests in 0.004s
+
+OK

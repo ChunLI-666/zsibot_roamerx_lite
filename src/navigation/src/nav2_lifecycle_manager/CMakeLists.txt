@@ -26,6 +26,7 @@ include_directories(
 set(library_name ${PROJECT_NAME}_core)
 
 add_library(${library_name} SHARED
+  src/bounded_transition.cpp
   src/lifecycle_manager.cpp
   src/lifecycle_manager_client.cpp
 )

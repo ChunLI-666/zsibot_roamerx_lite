@@ -1,0 +1,55 @@
+cmake_minimum_required(VERSION 3.16)
+project(official_lattice_rpp_adapter)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+find_package(ament_cmake REQUIRED)
+set(dependencies rclcpp rclcpp_lifecycle nav2_core nav2_util nav2_costmap_2d
+  nav2_regulated_pure_pursuit_controller nav_msgs geometry_msgs tf2_ros tf2_geometry_msgs pluginlib angles)
+foreach(dep IN LISTS dependencies)
+  find_package(${dep} REQUIRED)
+endforeach()
+add_library(official_lattice_rpp_adapter SHARED src/feasible_path_handler.cpp
+  src/rotation_constraints.cpp src/terminal_goal_binding.cpp src/plugins.cpp)
+target_include_directories(official_lattice_rpp_adapter PRIVATE include
+  ${CMAKE_CURRENT_SOURCE_DIR}/../robot_feasible_navigation/include)
+ament_target_dependencies(official_lattice_rpp_adapter ${dependencies})
+pluginlib_export_plugin_description_file(nav2_core plugins.xml)
+install(TARGETS official_lattice_rpp_adapter LIBRARY DESTINATION lib)
+install(FILES upstream_provenance.json DESTINATION share/${PROJECT_NAME})
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../../../../experiments/official_path_handler_turn_validation/inputs/global_planner/diagnostic_small_radius_same_actions.json
+  DESTINATION share/${PROJECT_NAME}/params RENAME stop_turn_1cm_h16_small_radius.json)
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../robot_feasible_navigation/vendor/nav2_smac_planner/LICENSE.Apache-2.0
+  DESTINATION share/${PROJECT_NAME})
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  find_package(class_loader REQUIRED)
+  ament_add_gtest(test_command_limits test/test_command_limits.cpp)
+  target_include_directories(test_command_limits PRIVATE include ${CMAKE_CURRENT_SOURCE_DIR}/../robot_feasible_navigation/include)
+  ament_target_dependencies(test_command_limits nav2_costmap_2d geometry_msgs)
+  ament_add_gtest(test_terminal_track_drift test/test_terminal_track_drift.cpp)
+  target_include_directories(test_terminal_track_drift PRIVATE include)
+  ament_add_gtest(test_rotation_constraints test/test_rotation_constraints.cpp src/rotation_constraints.cpp)
+  target_include_directories(test_rotation_constraints PRIVATE include)
+  ament_target_dependencies(test_rotation_constraints nav_msgs angles tf2_geometry_msgs)
+  ament_add_gtest(test_planner_goal_contract test/test_planner_goal_contract.cpp)
+  target_include_directories(test_planner_goal_contract PRIVATE include)
+  ament_target_dependencies(test_planner_goal_contract nav2_costmap_2d nav_msgs angles tf2_geometry_msgs)
+  ament_add_gtest(test_terminal_goal_binding test/test_terminal_goal_binding.cpp src/terminal_goal_binding.cpp)
+  target_include_directories(test_terminal_goal_binding PRIVATE include)
+  ament_target_dependencies(test_terminal_goal_binding nav2_costmap_2d nav_msgs angles tf2_geometry_msgs)
+  ament_add_gtest(test_initial_goal_rotation test/test_initial_goal_rotation.cpp src/terminal_goal_binding.cpp)
+  target_include_directories(test_initial_goal_rotation PRIVATE include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../robot_feasible_navigation/include)
+  ament_target_dependencies(test_initial_goal_rotation nav2_costmap_2d nav_msgs angles tf2_geometry_msgs)
+  ament_add_gtest(test_plugin_reentry test/test_plugin_reentry.cpp)
+  target_compile_definitions(test_plugin_reentry PRIVATE
+    RFN_REENTRY_ADAPTER_LIBRARY="$<TARGET_FILE:official_lattice_rpp_adapter>")
+  ament_target_dependencies(test_plugin_reentry ${dependencies} class_loader)
+  add_dependencies(test_plugin_reentry official_lattice_rpp_adapter)
+  set_tests_properties(test_plugin_reentry PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
+  set_tests_properties(test_command_limits test_terminal_track_drift test_rotation_constraints
+    test_planner_goal_contract test_terminal_goal_binding test_initial_goal_rotation
+    test_plugin_reentry PROPERTIES ENVIRONMENT
+    "ROS_DOMAIN_ID=190;ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST;ROS_LOG_DIR=${CMAKE_CURRENT_BINARY_DIR}/ros_logs;LD_LIBRARY_PATH=/opt/ros/jazzy/lib:/opt/ros/jazzy/lib/${CMAKE_LIBRARY_ARCHITECTURE}")
+endif()
+ament_package()

@@ -1,0 +1,72 @@
+{
+  "source": "Official default branch fetched live via GitHub connector; per-file blob identities, not atomic repository snapshot",
+  "files": [
+    {
+      "path": "nav2_util/src/path_utils.cpp",
+      "sha": "632d1054c2e5ec698bc248e259a52530dc82f1ba",
+      "url": "https://github.com/ros-navigation/navigation2/blob/main/nav2_util/src/path_utils.cpp",
+      "transport_trailing_lfs_removed": 1,
+      "sha256": "c42045043ea532b21fd6d24b84cdb541c6e4ef50498ade6a2be9e516d66ab1db"
+    },
+    {
+      "path": "nav2_controller/plugins/feasible_path_handler.cpp",
+      "sha": "bc3088af12288a83644a0c202a64ac6f229c3796",
+      "url": "https://github.com/ros-navigation/navigation2/blob/main/nav2_controller/plugins/feasible_path_handler.cpp",
+      "transport_trailing_lfs_removed": 1,
+      "sha256": "8da81af0e7d1f7467e3b2ffea23d358d186be7598a733bbd546a05c29650a403"
+    },
+    {
+      "path": "nav2_controller/include/nav2_controller/plugins/feasible_path_handler.hpp",
+      "sha": "415ed8b57ce7d0eae0a1dc2967fe7402c721dce5",
+      "url": "https://github.com/ros-navigation/navigation2/blob/main/nav2_controller/include/nav2_controller/plugins/feasible_path_handler.hpp",
+      "transport_trailing_lfs_removed": 1,
+      "sha256": "3df7b982da02f7355c96d68e4b15a7ac86b93fa55e78d63f8b95a3adbc6f3c3f"
+    },
+    {
+      "path": "nav2_regulated_pure_pursuit_controller/include/nav2_regulated_pure_pursuit_controller/regulated_pure_pursuit_controller.hpp",
+      "sha": "a2bbcffaaad16dac95797311a9df2a675f9cd42a",
+      "url": "https://github.com/ros-navigation/navigation2/blob/main/nav2_regulated_pure_pursuit_controller/include/nav2_regulated_pure_pursuit_controller/regulated_pure_pursuit_controller.hpp",
+      "transport_trailing_lfs_removed": 1,
+      "sha256": "9b3cf877579d7f2b3a31bd07c27c1ab34e9f8f0962cd83e72e48145ecd692684"
+    },
+    {
+      "path": "nav2_core/include/nav2_core/controller.hpp",
+      "sha": "3d356ba82ecf19b7b97dbf3d8b3863ad5ed616b3",
+      "url": "https://github.com/ros-navigation/navigation2/blob/main/nav2_core/include/nav2_core/controller.hpp",
+      "transport_trailing_lfs_removed": 1,
+      "sha256": "d9e8b607532549763a6ad4beb386292a626a2d974c88ee26937f303dd26546f4"
+    },
+    {
+      "path": "nav2_core/include/nav2_core/goal_checker.hpp",
+      "sha": "a2601cd4394b6a6f3dadf0be0f6a4e3ee33bbcbd",
+      "url": "https://github.com/ros-navigation/navigation2/blob/main/nav2_core/include/nav2_core/goal_checker.hpp",
+      "transport_trailing_lfs_removed": 1,
+      "sha256": "922dd9551a492b3769ad44a0244e5f7970794e6a43f9ca6ddccf616e4305c09d"
+    },
+    {
+      "path": "nav2_msgs/action/FollowPath.action",
+      "sha": "30342f777695e61b98a9acb51060c972373fdaf4",
+      "url": "https://github.com/ros-navigation/navigation2/blob/main/nav2_msgs/action/FollowPath.action",
+      "transport_trailing_lfs_removed": 1,
+      "sha256": "138973e7cd062dafe83f82042351d9908c7679236b90a8f2d93e583aad206590"
+    },
+    {
+      "path": "nav2_regulated_pure_pursuit_controller/src/regulated_pure_pursuit_controller.cpp",
+      "sha": "9cfccdfe7cab4ce007864ae2acf0b4efb2bed5c8",
+      "url": "https://github.com/ros-navigation/navigation2/blob/main/nav2_regulated_pure_pursuit_controller/src/regulated_pure_pursuit_controller.cpp",
+      "transport_trailing_lfs_removed": 1,
+      "sha256": "1316c3ac1aef2e522a29e435ebea44e1e57f21094b7a51dec07153aac96e13f8"
+    },
+    {
+      "path": "nav2_util/include/nav2_util/path_utils.hpp",
+      "sha": "8db9cade119d2e5bd7da3a7cc06c4d7342ebe9c2",
+      "url": "https://github.com/ros-navigation/navigation2/blob/main/nav2_util/include/nav2_util/path_utils.hpp",
+      "transport_trailing_lfs_removed": 1,
+      "sha256": "501be36f90f85155e90c25a7c0ec6c66a11d3f6ee57e9e658571645581f30ec3"
+    }
+  ],
+  "constraint_functions_identical_to_compiled_frozen_snapshot": {
+    "findFirstPathConstraint": true,
+    "removePosesAfterFirstConstraint": true
+  }
+}

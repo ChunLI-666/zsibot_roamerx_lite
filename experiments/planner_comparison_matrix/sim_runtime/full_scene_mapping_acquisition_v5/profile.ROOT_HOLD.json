@@ -1,0 +1,25 @@
+{
+  "state": "SOURCE_CANDIDATE_ROOT_SELECTION_AND_NEW_RELEASE_PENDING",
+  "root_approved": false,
+  "executable": false,
+  "scope": "MAPPING_ACQUISITION_LATERAL_RECT_V5_ONLY",
+  "root_release_additions": {
+    "allow_fine_forward_profile": false,
+    "fine_forward_subcapability": null,
+    "selected_fine_forward_mps": null
+  },
+  "root_optin_example_only": {
+    "allow_fine_forward_profile": true,
+    "fine_forward_subcapability": "sim_acquisition_forward_terminal_fine_v1",
+    "selected_fine_forward_mps": 0.2
+  },
+  "forward_terminal_example_only": {
+    "kind": "coarse_stop_then_fine_v1",
+    "coarse_stop_remaining_m": 0.1,
+    "max_corrections": 2,
+    "max_extra_work_sec": 20.0,
+    "fine_forward_mps": 0.2
+  },
+  "engineering_motion_model_approved": false,
+  "runtime_capability_approved": false
+}

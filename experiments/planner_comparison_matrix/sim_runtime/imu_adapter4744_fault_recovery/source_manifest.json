@@ -1,0 +1,17 @@
+{
+  "scope": "SIM_IMU_ADAPTER4744_FAULT_RECOVERY_ONLY",
+  "state": "SOURCE_ONLY_DEFAULT_HOLD",
+  "base_driver_sha256": "065b9bb3a565cdaa4b8af859cf482108d3e5e2934d38f55b29c98244e9810027",
+  "files_sha256": {
+    "README.txt": "b55b5f93da8bb34f0c2f3ab473fe2a3f12fe70063530c414ea60d83baee3faef",
+    "fixtures.log": "bc001dd8c455eb68d17d953bc58fda46c364e7fef51dc0c1022a8c673f963626",
+    "driver_delta.diff": "6cba1f8a9766b1cdf8664ae956e769a46dba1495a00963b8dd93c53e3128a1e7",
+    "replace_adapter4744.py": "3bc21f250d16a47049446ea41e6d6a18b05a3034e70002fdd81f800de5a1746f",
+    "replacement_plan.HOLD.json": "c4434e1369d5e576889ea1324765207b428643dae7f3f372043ad78df03d4e3c",
+    "root_replacement_release.HOLD.json": "9bab90b24e7d5901303dcc5088b6dbcab897e8425a18a2931a211e193edfd95b",
+    "test_replace_plan.py": "78929230b74b6d9986bedd510ceb8911ff7d0f0550d1a3f0d08c02b7f9f86b21"
+  },
+  "pure_methods": 4,
+  "pure_lifecycle_scenarios": 7,
+  "no_runtime_actions": true
+}

@@ -1,0 +1,19 @@
+{
+  "state": "PASS_SOURCE_ONLY_PENDING_REVIEW",
+  "pure_fixtures": 53,
+  "changed_runtime_files": [
+    "readiness_capture.py",
+    "readiness_contract.py",
+    "readiness_validator.py"
+  ],
+  "validator_AST_exact": true,
+  "observer_exact": true,
+  "actual_new_readiness_pass": false,
+  "no_runtime_actions": true,
+  "discovery_sec": 10,
+  "core_sec": 10,
+  "max_age_sec": 0.3,
+  "max_watch_gap_sec": 0.1,
+  "parent_deadline_sec": 45,
+  "recorder_fallback_sec": 60
+}

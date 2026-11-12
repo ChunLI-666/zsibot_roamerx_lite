@@ -1,0 +1,28 @@
+{
+  "base_source12_manifest_sha256": "2f68fe54e4d50b92e9bec75a4616d2697acec5bd4150b0aab553d333b6237a08",
+  "other_five_runtime_exact": {
+    "mapping_lateral_relay.py": true,
+    "lateral_capability.py": true,
+    "imu_gate.py": true,
+    "dependencies/waypoint_contract.py": true,
+    "dependencies/map_coverage.py": true
+  },
+  "critical_main_AST_exact": {
+    "health": true,
+    "tick": true,
+    "final_guard": true,
+    "observe_stop": true,
+    "stable": true,
+    "rotate_to": true,
+    "finalize_owned_relay": true,
+    "OwnedRelay": true,
+    "BoundedCallbacks": true,
+    "PrearmImuQualification": true,
+    "qualify_prearm_zero": true
+  },
+  "original_tests_76_copied_exact": true,
+  "default_path_no_pulse_retained": true,
+  "no_amplitude_protocol_or_guard_changes": true,
+  "canonical_modified": false,
+  "root_inputs_modified": false
+}

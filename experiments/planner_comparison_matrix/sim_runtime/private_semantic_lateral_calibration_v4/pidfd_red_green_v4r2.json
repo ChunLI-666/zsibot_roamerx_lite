@@ -1,0 +1,104 @@
+{
+  "mock_only": true,
+  "old_v4": {
+    "error": "pure fd failure",
+    "pid": 123,
+    "wait_calls": 0,
+    "still_live": true,
+    "signals": 0,
+    "cleanup_receipts": [],
+    "retained_failure": null
+  },
+  "new_v4r2": {
+    "error": "pure fd failure",
+    "pid": 123,
+    "wait_calls": 1,
+    "still_live": true,
+    "signals": 0,
+    "cleanup_receipts": [
+      "child.spawn_cleanup.json"
+    ],
+    "retained_failure": {
+      "pid": 123,
+      "expected_argv": [
+        "/usr/bin/python3",
+        "-u",
+        "/pure_backend.py"
+      ],
+      "birth3": {
+        "pid": 123,
+        "starttime_ticks": 456,
+        "boot_id": "pure-boot"
+      },
+      "argv_ready": false,
+      "observed_identity": null,
+      "initial_snapshot": {
+        "pid": 123,
+        "birth3": {
+          "pid": 123,
+          "starttime_ticks": 456,
+          "boot_id": "pure-boot"
+        },
+        "observed_argv": null
+      },
+      "original_error_type": "OSError",
+      "original_error": "pure fd failure",
+      "pidfd_attempts": [
+        {
+          "purpose": "initial",
+          "birth_before": {
+            "pid": 123,
+            "starttime_ticks": 456,
+            "boot_id": "pure-boot"
+          },
+          "same_birth_verified": false,
+          "error_type": "OSError",
+          "error": "pure fd failure"
+        },
+        {
+          "purpose": "cleanup_recovery_once",
+          "birth_before": {
+            "pid": 123,
+            "starttime_ticks": 456,
+            "boot_id": "pure-boot"
+          },
+          "same_birth_verified": false,
+          "error_type": "OSError",
+          "error": "pure fd failure"
+        }
+      ],
+      "wait_attempted": true,
+      "exited": false,
+      "still_live": true,
+      "returncode": null,
+      "errors": [
+        {
+          "stage": "pidfd_recovery",
+          "error_type": "OSError",
+          "error": "pure fd failure"
+        },
+        {
+          "stage": "wait",
+          "error_type": "TimeoutExpired",
+          "error": "Command '['/usr/bin/python3', '-u', '/pure_backend.py']' timed out after 3.0 seconds"
+        }
+      ],
+      "sigint_sent": false,
+      "final_snapshot": {
+        "pid": 123,
+        "birth3": {
+          "pid": 123,
+          "starttime_ticks": 456,
+          "boot_id": "pure-boot"
+        },
+        "proc_state": "S",
+        "observed_identity": null,
+        "identity_error": {
+          "error_type": "ProcessLookupError",
+          "error": "pure empty argv"
+        }
+      },
+      "state": "HOLD_OWNED_CHILD_OUTSTANDING"
+    }
+  }
+}

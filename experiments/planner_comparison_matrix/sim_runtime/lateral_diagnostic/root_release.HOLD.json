@@ -1,0 +1,29 @@
+{
+  "scope": "MAPPING_LATERAL_DIAGNOSTIC_ONLY",
+  "allow_execute": false,
+  "release_id": null,
+  "case_sha256": null,
+  "output_directory": null,
+  "package_sha256": {
+    "lateral_once.py": "d9544d7ea8a11a10c5641c4473ab73b1bed759009f3aaa791117d34df223b1e2",
+    "lateral_contract.py": "851bf34337151048a581d625553a210c1331430ba0abe0211f1d906b2baf124d",
+    "official_tool_timed.py": "d4ce96d1b845b6b6fe9c8934f06f2e55476650159ea9206fc660932233bb4fab",
+    "host_preflight.py": "40bbe7b032c0eb3c7a11b618732645bdeccde5c3c9072d8f020b45e5c3f4b447",
+    "matrix_mc_udp_test.py": "5a31cd800317f9d280a453424143312584332caf7f38da5144b0730e25284eb3",
+    "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+    "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792"
+  },
+  "boot_id": null,
+  "uid": 1000,
+  "network_namespace": null,
+  "controller_pid_namespace": null,
+  "host_preflight": {
+    "mode": "root_external_host_attestation",
+    "path": null,
+    "sha256": null,
+    "max_age_sec": 30.0
+  },
+  "root_unique_velocity_owner_approved": false,
+  "host_unique_velocity_owner_assumption": "Root holds every other command writer stopped; external host proof is not continuous monitoring.",
+  "root_static_patch_and_engineering_stop_reserve_approved": false
+}

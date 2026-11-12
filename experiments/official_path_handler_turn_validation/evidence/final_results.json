@@ -1,0 +1,34 @@
+{
+  "native_probe": {
+    "returncode": 0
+  },
+  "ctest": {
+    "returncode": 0
+  },
+  "installed_api": {
+    "returncode": 0,
+    "values": {
+      "controller_compute_arguments": 3,
+      "goal_checker_arguments": 3,
+      "new_path_received": 0,
+      "installed_followpath_has_handler_id": 0
+    }
+  },
+  "new_api": {
+    "returncode": 0,
+    "values": {
+      "controller_compute_arguments": 5,
+      "goal_checker_arguments": 4,
+      "new_path_received": 1,
+      "installed_followpath_has_handler_id": 0
+    }
+  },
+  "ldd": {
+    "returncode": 0
+  },
+  "upstream_exact_blobs": {
+    "matched": 13,
+    "total": 13
+  },
+  "scope": "Native component and type probes only; no ROS graph, controller activation, closed loop, board, or physical test."
+}

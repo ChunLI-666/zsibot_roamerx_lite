@@ -1,0 +1,7 @@
+{
+  "files": {
+    "pilot.py": "72d5a7d812f8cbb57856e54aefae9ef6457a22be1eaa0430eceddcb991ee7f2a",
+    "validate_pilot_guards.py": "73727a1ef1f03abc8136d6d600abf85ccef296bfc46ce79343c96044062c3041"
+  },
+  "scope": "Continuous-preflight revision exercised with offline virtual-clock and original-guard tests; no live goal yet. Earlier analysis pilot and original per-attempt snapshots remain authoritative for earlier attempts."
+}

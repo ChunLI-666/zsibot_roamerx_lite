@@ -1,0 +1,15 @@
+SOURCE ONLY / DEFAULT HOLD. No runtime/calibration release.
+Only contract+backend changed; parent/Observer/ImuGate/e850/helper5 remain exact v4r2.
+case andRootrelease: allow_camera_stale_lease_retry_v1 must be matching strictbool; absent=False.
+Enabledmode retries only past-stale camera snapshots for<=30ms/32reads;1ms waits.
+All six original sensor/header/receipt.3s andfuture-.05,GT/IMU/lidar/body/speed/source/identity,
+parentlease150ms/hostTTL/recorder/1.5..4s active deadline remain strict.
+Everyreread redoes fullproof. No newnonzero until all originalchecks+finaldeadline pass.
+No catchup; original5zero/socketclose path preserved. Defaultdisabled uses originalproofbody.
+Evidence is boundedmemory only whileactive, persisted under backendresult independent auditfield
+camera_stale_lease_retry_events AFTER fivezero/close; successfulretries do not enter errors.
+Synchronousproof/evidence/OS scheduling is not preemptible;30ms is a decision/wait cap,
+not an absolute walltime/actuation-stop guarantee. Crossingcap aftercheck/evidence refuses nonzero.
+53purePASS(original45+new8). Originalparenttest ResourceWarning retained,not fixedoutside scope.
+This does not solve independent5sGTstop-tail reset orprove physical sustainedpair/fullmap acceptance.
+Codacy tool unavailable; no dependencyinstallation/canonical/remote/ROS/SDK action.

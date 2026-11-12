@@ -1,0 +1,44 @@
+{
+  "schema": "locnav.mapping.active_heading_center.source22.freeze.v2",
+  "state": "SOURCE_ONLY_REVIEW_PENDING_RUNTIME_HOLD",
+  "scope": "MAPPING_ACQUISITION_LATERAL_RECT_V5_ONLY",
+  "base_source21_manifest_sha256": "842fbc097dede1a12bcc744534d56bf73a4a8f139774efbb7efb757dbc84b49b",
+  "runtime_package_sha256": {
+    "full_scene_mapping.py": "c957ea74f6364e3b7a7f7bb50a7089a2206c8ec1e4169bf388460d88645cc217",
+    "full_scene_mapping_contract.py": "ffeeec104586f56934ed2c554e5f22d26cc02cc13ff941fc6d07fb1b95100e07",
+    "mapping_lateral_relay.py": "604a7b3882d353b0e9f4b75c4a0c1f41009382309c875286e4943e8f56885f5b",
+    "lateral_capability.py": "e291c29d62f23f049f2e1aa1bd7180cabd087b903a3b4bd32055e7883c279f6a",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "dependencies/waypoint_contract.py": "7258d6c9f5f56bf08930356187505628b446cfd74d02ec41b4c1851faacb4624",
+    "dependencies/map_coverage.py": "bd5f8b855e10d1cb6ad19955fc8b8c5283d31cb543e98dc988c78d9eb1e9f80b"
+  },
+  "changed_runtime": [
+    "full_scene_mapping.py"
+  ],
+  "only_changed_function": "execute.rotate_to active phase",
+  "other_module_AST_exact21": true,
+  "outer_tolerance_joint_stop8s_call_budget_model_unchanged": true,
+  "active_inner_switch_fraction": 0.5,
+  "near_target_sign_cross_bound_rad": "pi/2 both errors",
+  "positive_command_deadline": "earliest nonNone(call, terminal), bound to original tick final_guard",
+  "same_primitive_magnitudes": true,
+  "pure_tests_PASS": 139,
+  "new_tests": 7,
+  "updated_existing_test": "v9 call-only deadline now expects zero issued packets too; earlier expected1 exposed inherited gap",
+  "prior_blocked_snapshot": "../blocked_review_source_v22_v1",
+  "runtime_authorized": false,
+  "UUID": null,
+  "files_sha256": {
+    "full_scene_mapping.py": "c957ea74f6364e3b7a7f7bb50a7089a2206c8ec1e4169bf388460d88645cc217",
+    "full_scene_mapping_contract.py": "ffeeec104586f56934ed2c554e5f22d26cc02cc13ff941fc6d07fb1b95100e07",
+    "mapping_lateral_relay.py": "604a7b3882d353b0e9f4b75c4a0c1f41009382309c875286e4943e8f56885f5b",
+    "lateral_capability.py": "e291c29d62f23f049f2e1aa1bd7180cabd087b903a3b4bd32055e7883c279f6a",
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "dependencies/waypoint_contract.py": "7258d6c9f5f56bf08930356187505628b446cfd74d02ec41b4c1851faacb4624",
+    "dependencies/map_coverage.py": "bd5f8b855e10d1cb6ad19955fc8b8c5283d31cb543e98dc988c78d9eb1e9f80b",
+    "test_heading_center_v22.py": "433fda411bcb51868083b9cdd3a32aae9f506d7b146b4ad3ccfa641b9565a846",
+    "test_forward_terminal_v9.py": "925f1f776fceda56245689dec30884e37bcc13bf847d8530c94c4939791d6128",
+    "fixtures_all_v22_v2.log": "ecb149a86372e6f70d5e485561e11daa87f72d4160c9489690b499226a31b9cb",
+    "source21_to_source22_v2.diff": "c506c637b2355e7ea7ff370e09df4a1de02ef043f544bdbd75eba0ddec085a1c"
+  }
+}

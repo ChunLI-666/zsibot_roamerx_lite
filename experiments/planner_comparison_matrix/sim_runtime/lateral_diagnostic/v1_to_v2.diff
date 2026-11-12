@@ -1,0 +1,239 @@
+--- v1/lateral_once.py
++++ v2/lateral_once.py
+@@ -62,34 +62,58 @@
+     def close(self):self.stream.flush();self.stream.close();self.node.destroy_node();self.rclpy.shutdown()
+ 
+ 
++def stat_birth(pid):
++    fields=(Path('/proc')/str(pid)/'stat').read_text().rsplit(')',1)[1].split()
++    return dict(pid=pid,starttime_ticks=int(fields[19]),boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip())
++
++
+ def child(argv,log,env,check=None):
+     with log.open('x') as stream:
+         process=subprocess.Popen(argv,cwd='/',stdin=subprocess.DEVNULL,stdout=stream,stderr=subprocess.STDOUT,env=env,close_fds=True)
+     descriptor=os.pidfd_open(process.pid)
+-    owned=dict(process=process,fd=descriptor,birth=None,signalled=False)
++    owned=dict(process=process,fd=descriptor,birth=None,birth3=None,argv_ready=False,signalled=False)
+     try:
++        # Stable across exec even when /proc/cmdline is momentarily empty.
++        # Retain this before any watch callback; complete argv is a separate gate.
++        owned['birth3']=stat_birth(process.pid)
+         until=time.monotonic()+2.
+         while time.monotonic()<until:
+             if select.select([descriptor],[],[],0)[0]:return owned
+-            try:owned['birth']=deadline.process_identity(process.pid)
++            try:
++                actual=deadline.process_identity(process.pid)
++                if any(actual[k]!=owned['birth3'][k] for k in ['pid','starttime_ticks','boot_id']) or actual['argv'] not in [list(argv),deadline.command_argv(argv)]:raise c.Hold('unexpected owned child exec identity')
++                owned['birth']=actual;owned['argv_ready']=True
+             except ProcessLookupError:pass
+             if check is not None:check()
+-            if owned['birth'] is not None:return owned
++            if owned['argv_ready']:return owned
+             time.sleep(.005)
+         raise c.Hold('owned child identity unavailable')
+-    except BaseException:
++    except BaseException as original:
+         # A guard failure during spawn/exec must not lose the newly owned tool.
++        cleanup=dict(birth3=owned['birth3'],argv_ready=owned['argv_ready'],original_error=str(original))
+         try:
+             interrupt(owned,[list(argv),deadline.command_argv(argv)])
+-            process.wait(timeout=3.)
+-        finally:os.close(descriptor)
++        except BaseException as exc:cleanup['signal_error']=str(exc)
++        finally:
++            try:process.wait(timeout=3.)
++            except BaseException as exc:cleanup['wait_error']=str(exc)
++            cleanup.update(sigint_sent=owned['signalled'],exited=process.poll() is not None)
++            try:deadline.atomic_json(log.with_suffix('.spawn_cleanup.json'),cleanup)
++            finally:os.close(descriptor)
+         raise
+ 
+ 
+ def interrupt(owned,allowed_argv):
+     if owned is None or owned['signalled'] or select.select([owned['fd']],[],[],0)[0]:return
+-    actual=deadline.process_identity(owned['process'].pid);birth=owned['birth']
+-    if birth is None or any(actual[k]!=birth[k] for k in ['pid','starttime_ticks','boot_id']) or actual['argv'] not in allowed_argv:raise c.Hold('owned-child identity changed; no signal')
++    birth3=owned['birth3'];actual3=stat_birth(owned['process'].pid)
++    if birth3 is None or actual3!=birth3:raise c.Hold('owned-child stat birth changed; no signal')
++    try:actual=deadline.process_identity(owned['process'].pid)
++    except ProcessLookupError:
++        if owned['argv_ready']:raise c.Hold('admitted owned-child argv unavailable; no signal')
++        # This is only the immediately retained Popen pidfd, before admission.
++        # An exec-empty cmdline cannot turn it into another process instance.
++    else:
++        if any(actual[k]!=birth3[k] for k in ['pid','starttime_ticks','boot_id']) or actual['argv'] not in allowed_argv:raise c.Hold('owned-child argv changed; no signal')
+     signal.pidfd_send_signal(owned['fd'],signal.SIGINT);owned['signalled']=True
+ 
+ 
+@@ -108,11 +132,16 @@
+     delta=None
+     if len(records)>=2:
+         delta=list(c.body_xy(records[-1]['position'][0]-records[0]['position'][0],records[-1]['position'][1]-records[0]['position'][1],c.rpy(records[0]['quaternion'])[2]))
+-    stop_start=None
++    stop_start=None;stop_continuity_error=None
+     if neutral:
+-        tracker=None
++        tracker=None;previous_stamp=None
+         for row in history:
+             if row['stamp_ns']<neutral['send_before_unix_ns']:continue
++            if previous_stamp is not None:
++                gap=row['stamp_ns']-previous_stamp
++                if gap<=0:stop_continuity_error='nonadvancing original GT';break
++                if gap>100_000_000:tracker=None
++            previous_stamp=row['stamp_ns']
+             zero=math.sqrt(sum(v*v for v in row['linear']))<=.03 and math.sqrt(sum(v*v for v in row['angular']))<=.05 and row.get('position_speed_mps',0.)<=.03
+             if not zero:tracker=None;continue
+             if tracker is None:tracker=row
+@@ -127,6 +156,7 @@
+         first_motion_send_interval_ns=[first['send_before_unix_ns'],first['send_after_unix_ns']],
+         first_neutral_send_interval_ns=[neutral['send_before_unix_ns'],neutral['send_after_unix_ns']] if neutral else None,
+         gt_first_stopped_header_ns=stop_start,
++        gt_stop_continuity_error=stop_continuity_error,
+         gt_stopped_after_neutral_send_sec_interval=[(stop_start-neutral['send_after_unix_ns'])/1e9,(stop_start-neutral['send_before_unix_ns'])/1e9] if stop_start and neutral and motion_ok else None,
+         timing_basis='Original GT header deltas and midpoint original body yaw. Send syscall interval is not simulator actuation time.',
+         stop_definition='linear3Dnorm<=.03m/s, angular3Dnorm<=.05rad/s, stable position/yaw and advancing original GT >=.3s',
+@@ -215,8 +245,11 @@
+         result.update(state='HOLD_DIAGNOSTIC_FAILED',error_type=type(exc).__name__,error=str(exc))
+     finally:
+         if tool is not None:
+-            try:interrupt(tool,[tool_argv]);tool['process'].wait(timeout=3.)
++            try:interrupt(tool,[tool_argv])
+             except Exception as exc:result['tool_close_error']=str(exc)
++            finally:
++                try:tool['process'].wait(timeout=3.)
++                except BaseException as exc:result['tool_wait_error']=str(exc)
+             result['tool_sigint_sent']=tool['signalled'];result['tool_exited']=tool['process'].poll() is not None
+             os.close(tool['fd'])
+         if observer is not None:
+@@ -238,8 +271,11 @@
+             except BaseException as exc:result['helper_shutdown_error']=str(exc)
+         if recorder is not None:
+             try:
+-                plan=guard.children['recorder'];interrupt(recorder,[plan['wrapper_argv'],plan['executed_argv']]);recorder['process'].wait(timeout=15.)
++                plan=guard.children['recorder'];interrupt(recorder,[plan['wrapper_argv'],plan['executed_argv']])
+             except BaseException as exc:result['recorder_close_error']=str(exc)
++            finally:
++                try:recorder['process'].wait(timeout=15.)
++                except BaseException as exc:result['recorder_wait_error']=str(exc)
+             result['recorder_exited']=recorder['process'].poll() is not None;result['recorder_sigint_sent']=recorder['signalled'];os.close(recorder['fd'])
+         if guard and (recorder is None or recorder['process'].poll() is not None):
+             guard.recording_closed(result['state'])
+--- v1/host_preflight.py
++++ v2/host_preflight.py
+@@ -53,12 +53,13 @@
+     return rows
+ 
+ 
+-def forbidden_live():
++def forbidden_live(proc=Path('/proc')):
+     names={'run_loc_online','sim_command_adapter.py','sim_udp_relay.py','full_scene_mapping.py','matrix_navigation.py',
+         'map_server','planner_server','controller_server','bt_navigator','behavior_server','velocity_smoother',
+-        'nav_safety_gate.py','waypoint_follower','waypoint_batch.py'}
++        'nav_safety_gate.py','waypoint_follower','waypoint_batch.py',
++        'matrix_mc_udp_test.py','official_tool_timed.py','lateral_once.py','sim_udp_relay_frozen.py'}
+     bad=[]
+-    for path in Path('/proc').iterdir():
++    for path in proc.iterdir():
+         if not path.name.isdigit():continue
+         try:
+             status=(path/'status').read_text().splitlines()
+--- v1/test_lateral_once.py
++++ v2/test_lateral_once.py
+@@ -17,6 +17,7 @@
+ import lateral_contract as c
+ import lateral_once as driver
+ import official_tool_timed as timed
++import host_preflight
+ 
+ 
+ def gt(stamp=1_000_000_000,steady=None):
+@@ -160,5 +161,72 @@
+                 self.assertEqual(result['state'],'HOLD_DIAGNOSTIC_FAILED');self.assertEqual(result['probes'],[])
+                 self.assertTrue(result['recorder_exited']);self.assertTrue(result['recorder_sigint_sent']);self.assertEqual(events,['closing','closed'])
+ 
++    def test_host_proc_fixture_catches_actual_calibration_writers(self):
++        names=['matrix_mc_udp_test.py','official_tool_timed.py','lateral_once.py','sim_udp_relay_frozen.py']
++        with tempfile.TemporaryDirectory() as directory:
++            proc=Path(directory)
++            for i,name in enumerate(names+['benign_matrix_mc_udp_test.py']):
++                p=proc/str(70+i);p.mkdir();(p/'status').write_text('Uid:\t1000\t1000\t1000\t1000\n')
++                (p/'stat').write_text(str(70+i)+' (python3) S '+' '.join(['0']*18+['123'])+'\n')
++                (p/'cmdline').write_bytes(b'/usr/bin/python3\0-u\0'+('/safe/'+name).encode()+b'\0')
++            found=host_preflight.forbidden_live(proc)
++            self.assertEqual({Path(p['argv'][-1]).name for p in found},set(names))
++
++    def test_exec_empty_birth_is_retained_and_wait_is_unconditional(self):
++        base=dict(pid=77,starttime_ticks=123,boot_id='fixture');valid=dict(base,argv=['python','owned'],cmdline_sha256='a'*64)
++        for mode in ['empty_then_valid','empty_twice','wrong_argv','wrong_birth']:
++            with self.subTest(mode=mode),tempfile.TemporaryDirectory() as directory:
++                root=Path(directory);events=[]
++                class Process:
++                    pid=77;returncode=None
++                    def poll(self):return self.returncode
++                    def wait(self,timeout):events.append('wait');self.returncode=0;return 0
++                process=Process();second=copied=dict(valid)
++                if mode=='wrong_argv':second=dict(valid,argv=['python','different'])
++                identities=[ProcessLookupError('exec empty'),ProcessLookupError('exec empty') if mode=='empty_twice' else second]
++                births=[base,dict(base,starttime_ticks=999) if mode=='wrong_birth' else base]
++                def fail():events.append('watch');raise c.Hold('fixture stale')
++                with mock.patch.object(driver.subprocess,'Popen',return_value=process),mock.patch.object(driver.os,'pidfd_open',return_value=999),\
++                    mock.patch.object(driver.select,'select',return_value=([],[],[])),mock.patch.object(driver,'stat_birth',side_effect=births),\
++                    mock.patch.object(driver.deadline,'process_identity',side_effect=identities),mock.patch.object(driver.deadline,'command_argv',return_value=['python','owned']),\
++                    mock.patch.object(driver.signal,'pidfd_send_signal',side_effect=lambda fd,sig:events.append(('signal',fd,sig))),\
++                    mock.patch.object(driver.os,'close',side_effect=lambda fd:events.append(('close',fd))):
++                    with self.assertRaises(c.Hold):driver.child(['python','owned'],root/'tool.log',{},check=fail)
++                sent=any(isinstance(e,tuple) and e[0]=='signal' for e in events)
++                self.assertEqual(sent,mode in ['empty_then_valid','empty_twice']);self.assertIn('wait',events)
++                self.assertEqual(events[-1],('close',999));self.assertEqual(process.returncode,0)
++                report=c.read(root/'tool.spawn_cleanup.json');self.assertTrue(report['exited']);self.assertEqual(report['sigint_sent'],sent)
++
++    def test_admitted_child_does_not_gain_stat_only_signal_permission(self):
++        base=dict(pid=77,starttime_ticks=123,boot_id='fixture');process=SimpleNamespace(pid=77)
++        owned=dict(process=process,fd=999,birth3=base,argv_ready=True,signalled=False)
++        with mock.patch.object(driver.select,'select',return_value=([],[],[])),mock.patch.object(driver,'stat_birth',return_value=base),\
++            mock.patch.object(driver.deadline,'process_identity',side_effect=ProcessLookupError('empty')),\
++            mock.patch.object(driver.signal,'pidfd_send_signal') as send:
++            with self.assertRaises(c.Hold):driver.interrupt(owned,[['python','owned']])
++            send.assert_not_called()
++
++    def test_stop_metrics_reject_gapped_or_nonadvancing_GT(self):
++        with tempfile.TemporaryDirectory() as directory:
++            trace=Path(directory)/'send.jsonl'
++            sends=[]
++            for stamp,lx in [(1_000_000_000,-.2),(1_500_000_000,-.2),(1_600_000_000,0.)]:
++                sends.append(dict(command={'LX':lx},send_before_unix_ns=stamp,send_after_unix_ns=stamp+1,
++                    send_before_steady_ns=stamp,send_after_steady_ns=stamp+1))
++            trace.write_text(''.join(json.dumps(row)+'\n' for row in sends))
++            moving=[]
++            for i in range(6):
++                row=gt(1_000_000_000+i*100_000_000);row['position'][1]=i*.03;moving.append(row)
++            for kind in ['continuous','gapped','duplicate']:
++                if kind=='continuous':stamps=[1_610_000_000+i*10_000_000 for i in range(35)]
++                elif kind=='gapped':stamps=[1_650_000_000+i*150_000_000 for i in range(4)]
++                else:stamps=[1_650_000_000,1_700_000_000,1_700_000_000,2_000_000_000]
++                stopped=[]
++                for stamp in stamps:
++                    row=gt(stamp);row['position'][1]=.15;stopped.append(row)
++                result=driver.metrics(moving+stopped,trace)
++                self.assertEqual(result['state']=='MEASURED_SHORT_PROBE',kind=='continuous')
++                self.assertEqual(result['gt_first_stopped_header_ns'] is not None,kind=='continuous')
++
+ 
+ if __name__=='__main__':unittest.main(verbosity=2)
+--- v1/root_release.HOLD.json
++++ v2/root_release.HOLD.json
+@@ -5,10 +5,10 @@
+   "case_sha256": null,
+   "output_directory": null,
+   "package_sha256": {
+-    "lateral_once.py": "8f5a890fc57199e1948af5f22f322481ec805af485e56783224e903b5c9915ff",
++    "lateral_once.py": "d9544d7ea8a11a10c5641c4473ab73b1bed759009f3aaa791117d34df223b1e2",
+     "lateral_contract.py": "851bf34337151048a581d625553a210c1331430ba0abe0211f1d906b2baf124d",
+     "official_tool_timed.py": "d4ce96d1b845b6b6fe9c8934f06f2e55476650159ea9206fc660932233bb4fab",
+-    "host_preflight.py": "2d55aa6bf5138c3bc8d65a373f34c90643e06e75b4677020cf8d30e515f822ee",
++    "host_preflight.py": "40bbe7b032c0eb3c7a11b618732645bdeccde5c3c9072d8f020b45e5c3f4b447",
+     "matrix_mc_udp_test.py": "5a31cd800317f9d280a453424143312584332caf7f38da5144b0730e25284eb3",
+     "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c",
+     "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792"

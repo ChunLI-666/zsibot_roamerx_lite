@@ -1,0 +1,67 @@
+# Current source revision v16 / protocol v5 — ROOT HOLD
+
+Calibration admission selects one complete reviewed source family: the original loopback pair or the private-network v4r2 pair on the attested simulation endpoint. Every actual case, source artifact, trace, result, measurement, current adapter identity and namespace must agree with that family. Original evidence is preserved; it cannot be relabelled for a new adapter. Parent and child pass the same validated endpoint and namespaces to proof validation. Motion guards and payload remain unchanged. A new actual private pair, measurements and Root model selection are still required. No full-map or native acceptance.
+
+# Historical source revision v15 / protocol v5 — ROOT HOLD
+
+An explicit SIM host endpoint option permits only Root-bound 192.168.1.219:7447, with the original scene attestation and UE process identity. The default remains loopback. Parent, frozen child admission, READY, every command and cleanup zero must agree on the endpoint; the child also verifies its frozen contract. Timing, full-body checks, source freshness, ownership audit and control behavior remain. A new private network and new sensor identities require separate Root releases and runtime validation. No full-map or native acceptance.
+
+# Historical source revision v14 / protocol v5 — ROOT HOLD
+
+Pulse events use pulse_index while the actual execution wrapper retains the route point index. The three event payload keys are the only runtime change; all control, stop, input, deadline and geometry behavior remains Source13. The real wrapper and terminal helper are now tested together. The original Source13 runtime failure remains archived; motion and full-map acceptance remain pending.
+
+# Historical source revision v13 / protocol v5 — ROOT HOLD
+
+An optional terminal pulse policy uses one to three ticks of the existing forward command, then requires the original measured stable stop before another burst. The shared pulse count and original 20 second deadline never renew; original target, radial and along acceptance, full-body collision, source, ownership and armed gates remain. Low-forward profiles and pulse mode are mutually exclusive. Default behavior is unchanged. This is source validation only; physical pulse convergence and full-map/native acceptance remain pending.
+
+# Historical source revision v12 / protocol v5 — ROOT HOLD
+
+An explicit Root flag may select zero-only startup input qualification: at most three accepted-header-gap epoch reopens within one fixed 40 second limit. Every new lease requires the original 10 second measured stop and continuous original-header/receipt spans; cross-epoch high-water prevents replay. No nonzero request is authorized before arming. After arming, original gap/fatal latches remain permanent. Historical CDR, rejected windows and lifetime counters remain, alongside the active epoch. Gate bytes, health/model/geometry/clock/stop thresholds remain unchanged; the default flag is false. This source is not runtime, map or native navigation acceptance.
+
+# Historical source revision v11 / protocol v5 — ROOT HOLD
+
+Passive relay file preparation now finishes before ROS initialization and sensor subscription. Process start remains after the original fresh standing and raw-fault checks, with callback pumping during READY. The other six runtime files and all timing, model, geometry and stop thresholds remain exact Source10. This removes one synchronous preparation window from the subscription interval; the new source has no runtime or full-map acceptance.
+
+# Historical source revision v10 / protocol v5 — ROOT HOLD
+
+A separate Root-bound fine-forward subcapability may select fixed policy velocity .2 or .3 m/s (semantic raw .1 or .15) only during explicit terminal fine/correction phases. The default, coarse, lateral and yaw profiles retain their earlier whitelist. Release, route, frozen admission and child parser must agree; traces record the actual applied values. The initial cleanup zero attempt retains its successful parent-pipe issue receipt, with no SDK/engine dispatch claim. Existing body, timestamp, collision, stop and deadline gates remain. No new plant model or runtime acceptance is selected by this source.
+
+# Historical source revision v9r2 / protocol v5 — ROOT HOLD
+
+An explicit `forward_terminal` policy enables coarse stop, measured-stop fine approach and at most two same-leg forward corrections within one 20 second budget. Every packet retains the existing ownership, freshness, full-body collision and stop checks; the same deadline also gates any final yaw packet. Original radial and along endpoint limits remain mandatory before a turn and after final stop. Overshoot cannot trigger reverse correction. The actual source-v8 rebound failure remains preserved; this code has no full-map or native navigation acceptance. Omitted policies retain prior behavior. See `READOUT.txt` and `source_manifest_v9r2.json`.
+
+# Historical source revision v8 / protocol v5 — ROOT HOLD
+
+Fixed-heading forward legs may additionally require `along_endpoint_tolerance_m`, bounded by the unchanged original radial tolerance. Completion requires the original radial condition AND the absolute along error condition, using the frozen leg start and heading. The same helper applies before stop and after measured stop; original progress checks remain. Omitted fields and all lateral behavior retain their previous semantics. This is an optional stricter capture condition, not a new motion model or a successful full-map result.
+
+# Historical source revision v7 / protocol v5 — ROOT HOLD
+
+The live checkpoint is now a complete `runtime_ready` receipt in the bounded events stream and MCAP; enqueue does not imply durable evidence. Writer close/error/drop checks remain authoritative. Every health entry services the existing bounded executor before reading the original sensor stamps and rechecks stop requests. All original age, renewal, collision, model, ownership and stop gates remain. Runtime bytes match source revision7 freeze; only the canonical unit fixture locator additionally finds its historical baseline through workspace `analysis_outputs`.
+
+# Mapping acquisition protocol v5 — source revision v6 / ROOT HOLD
+
+Current implementation is selected by `CURRENT_SOURCE.json`. Revision v6 keeps the v5 scope, calibration capability, full-body geometry, source freshness, ownership and stop thresholds. It services the existing callback executor while waiting for the owned relay READY and latches fatal IMU input without throwing from its callback, allowing independent strict GT cleanup. See `READOUT.txt` and `test_startup_v6.py`.
+
+Original v5 manifests/bundles below remain historical freezes; their main-source digest is not the current implementation. Exact original v5 files and failed rehearsal evidence remain under `analysis_outputs/planner_comparison_20261105`. No full-scene acquisition or native navigation acceptance has been achieved.
+
+# Mapping acquisition owner v5 — SOURCE ONLY / ROOT HOLD
+
+Scope: `MAPPING_ACQUISITION_LATERAL_RECT_V5_ONLY`. This is an offline source candidate for a bounded static-SIM acquisition rehearsal. No model values, route, release, runtime capability or full-warehouse control acceptance are selected by this package. Canonical repositories and all old freezes remain unchanged.
+
+Runtime package: the same seven source roles as v4. The IMU gate and both existing geometry/evidence helpers are exact v4 bytes. The private persistent executor / fixed timeout zero / 10 ms and 32 dispatched callback budget remains exact v4. Original source/header/frame/freshness, ownership, independent audit, filled-cell SAT, 3600 s total deadline, once marker and owned relay cleanup gates remain.
+
+The oracle selects `footprint_mode`, `body_half_xy_m`, `padding_m` and `body_envelope_proof`. Default mode is `legacy_square`, half [.74,.74], padding .15. `footprint.ROOT_HOLD.json` is a non-executable shape fragment. Rectangle mode requires the exact full-geometry manifest, arbitrary-hinge proof and independent mathematical GO receipt, included in the complete oracle artifact inventory, plus all 18 original asset hashes. The certified minimum is [.647,.530]; padding .15 remains independent. The entire motion and stop interval must remain within the mathematical RP condition <=.25, with any stricter Root model cap enforced. Optional footprint metadata in the model must agree with the oracle. The rectangular hx/hy reaches filled-cell SAT, swept corner radius, hit guard and nominal route audit. Orientation reserve remains the conservative radius-times-angle form; it is not replaced by an optimized formula.
+
+The new per-sign model fields are `bias_vx_mps`, `nominal_vy_mps`, `k_cross_per_sec`, and `max_yaw_rate_rps`. They remain null in the HOLD model. Compensation uses cardinal + sign*atan2(bias + gain*body-forward-offset, abs(vy)); body-forward-offset is -sign*travel-left cross error. Only the already measured pure lateral, forward and in-place yaw primitives are permitted. There is no mixed-axis command, reverse, amplitude change or silent target clamp. Lateral cardinal tracking band may be <=.12 rad; the straight-forward band remains <=.08.
+
+Recovery is triggered by error to the computed target, not error to cardinal. It first commands and measures stop, then uses the ordinary filled-body turn guard and returns to the same lateral leg. A soft cross error need not disappear during an in-place turn. With hard tube margin and attained target, the owner allows at most 1 s or .20 m of progress to observe at least .001 m cross improvement; otherwise HOLD. At most four turns and 20 s cumulative correction work are allowed per leg, within the original global deadline. This is a candidate feedback rule, not a verified long-leg plant model. The Root route should use independently audited short legs. Timing/packet/UDP/OS/UE bounds remain controlled-SIM engineering assumptions, not hard physical guarantees.
+
+The lateral yaw-rate cap checks both original GT twist.z and adjacent original GT Header position-orientation yaw derivative during lateral commands and their active zero tail. Ordinary turning retains the global yaw-rate bound. Cleanup now retains the Root GT age cap after an exception and rechecks stopped height/RP before declaring stop. The complete original stop thresholds are preserved.
+
+The actual source-precheck envelope is accepted only if state PASS, all three original `sources` exactly equal the frozen calibration case, and its new adapter critical-five identity exactly equals the release. This admits the original actual 5237 evidence while refusing the historical 4744 identity. Hash membership in the frozen measurement input inventory remains mandatory. Original case3 `HOLD_DIAGNOSTIC_FAILED`, auxiliary camera interruption and limited-probe evidence boundaries are preserved.
+
+Only min-leg and endpoint-accuracy numeric comparisons have a 1e-9 m float guard; .3-1e-14 passes and .299 fails. No footprint/collision bound uses that tolerance.
+
+Validation: `python3 -m unittest -v test_v4_core test_v5_delta` — 32 pure fixtures. Fixtures include real pinned mathematical evidence and real Root finite-pair proof, plus fake clock/socket/process-free counterexamples. `source_preservation_v5.json` records unchanged gates. Root candidate model flags are read-only and remain false. No ROS context, business process, UDP, signal, remote operation, build, deployment or commit was performed. Codacy MCP is unavailable; no Codacy PASS is claimed and no dependency was installed.
+
+Root must separately select the model/footprint/route, bind the actual scene/sources/recorder, obtain source review and issue a new once-only runtime release. Importing or testing this package does not authorize motion.

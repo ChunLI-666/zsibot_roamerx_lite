@@ -1,0 +1,16 @@
+test_adapter_reject_does_not_observe_clock_and_IO_failure_is_explicit (__main__.Tests.test_adapter_reject_does_not_observe_clock_and_IO_failure_is_explicit) ... ok
+test_age_future_receipt_and_gap_fault_before_commit (__main__.Tests.test_age_future_receipt_and_gap_fault_before_commit) ... ok
+test_clock_reset_and_continuous_old_packets_do_not_revive (__main__.Tests.test_clock_reset_and_continuous_old_packets_do_not_revive) ... ok
+test_default_HOLD_does_not_import_ROS_implementation (__main__.Tests.test_default_HOLD_does_not_import_ROS_implementation) ... ok
+test_last_accepted_not_last_received (__main__.Tests.test_last_accepted_not_last_received) ... ok
+test_nan_and_changed_frame_fault_keep_original_header (__main__.Tests.test_nan_and_changed_frame_fault_keep_original_header) ... ok
+test_non_IMU_behavior_and_converter_unchanged (__main__.Tests.test_non_IMU_behavior_and_converter_unchanged) ... ok
+test_observer_nan_frame_and_reject_IO_failure_are_faults (__main__.Tests.test_observer_nan_frame_and_reject_IO_failure_are_faults) ... ok
+test_observer_reject_keeps_latest_receipt_then_freshness_expires (__main__.Tests.test_observer_reject_keeps_latest_receipt_then_freshness_expires) ... ok
+test_other_topic_nonadvancing_still_latches_error (__main__.Tests.test_other_topic_nonadvancing_still_latches_error) ... ok
+test_reject_cdr_is_exact_and_no_receipt_refresh (__main__.Tests.test_reject_cdr_is_exact_and_no_receipt_refresh) ... ok
+
+----------------------------------------------------------------------
+Ran 11 tests in 0.113s
+
+OK

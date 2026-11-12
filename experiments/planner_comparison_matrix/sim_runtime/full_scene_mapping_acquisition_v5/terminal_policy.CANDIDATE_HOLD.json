@@ -1,0 +1,20 @@
+{
+  "state": "CANDIDATE_ONLY_ROOT_SELECTION_PENDING",
+  "root_approved": false,
+  "executable": false,
+  "scope": "MAPPING_ACQUISITION_LATERAL_RECT_V5_ONLY",
+  "revision": "optional_forward_terminal_v9r2",
+  "leg_policy": {
+    "kind": "straight_fixed_heading",
+    "travel_yaw_rad": 0.0,
+    "max_yaw_error_rad": 0.06,
+    "max_cross_track_m": 0.075,
+    "along_endpoint_tolerance_m": 0.025,
+    "forward_terminal": {
+      "kind": "coarse_stop_then_fine_v1",
+      "coarse_stop_remaining_m": 0.1,
+      "max_corrections": 2,
+      "max_extra_work_sec": 20.0
+    }
+  }
+}

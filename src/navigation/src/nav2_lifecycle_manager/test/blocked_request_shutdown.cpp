@@ -76,7 +76,8 @@ int exercise(const std::string & mode)
   std::atomic<bool> request_taken{false};
   std::atomic<uint8_t> target_state{lifecycle_msgs::msg::State::PRIMARY_STATE_UNCONFIGURED};
   const bool bond_recovery = mode == "bond_recovery_shutdown";
-  const bool bond_active = mode == "bond_active" || bond_recovery;
+  const bool unconfirmed_activate = mode == "bond_unconfirmed_activate";
+  const bool bond_active = mode == "bond_active" || bond_recovery || unconfirmed_activate;
   const bool bond_release = mode == "bond_owner_release";
   std::atomic<bool> reset_request_taken{false};
   std::atomic<bool> recovery_during_pre{false};
@@ -136,6 +137,10 @@ int exercise(const std::string & mode)
             return;
           }
           counterpart->start();
+          if (unconfirmed_activate) {
+            request_taken.store(true);
+            return;  // Actual ACTIVE + real bond, deliberately no ACTIVATE reply.
+          }
         }
         auto response = std::make_shared<Change::Response>();
         response->success = true;
@@ -255,7 +260,7 @@ int main(int argc, char ** argv)
   const std::string mode = argv[1];
   if (mode != "ownership" && mode != "startup" && mode != "shutdown" &&
     mode != "bond_active" && mode != "bond_owner_release" &&
-    mode != "bond_recovery_shutdown") {return 2;}
+    mode != "bond_recovery_shutdown" && mode != "bond_unconfirmed_activate") {return 2;}
   rclcpp::init(0, nullptr);
   try {
     return exercise(mode);

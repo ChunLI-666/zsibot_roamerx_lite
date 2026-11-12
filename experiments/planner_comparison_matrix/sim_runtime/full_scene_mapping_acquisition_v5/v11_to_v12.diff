@@ -1,0 +1,255 @@
+--- source11/full_scene_mapping.py
++++ source12/full_scene_mapping.py
+@@ -6,6 +6,8 @@
+ used only for acquisition feedback; no Nav TF/pose/status/seed is published.
+ """
+ import argparse
++import base64
++import copy
+ from collections import deque
+ import fcntl
+ import json
+@@ -61,6 +63,7 @@
+ 
+ 
+ def validate_release(release,route,route_path,oracle_path,output):
++    prearm_requalification_enabled(release)
+     if release.get('scope')!=contract.SCOPE or release.get('mode')!=contract.MODE or release.get('allow_execute') is not True:
+         raise contract.Hold('root release absent or not executable')
+     contract.validate_fine_route(release,route)
+@@ -172,6 +175,8 @@
+             self.close();raise
+ 
+     def send(self,vx=0.,wz=0.,preflight=None,lateral_raw=0.,fine_phase=False):
++        qualification=getattr(self,'prearm_qualification',None)
++        if qualification is not None:qualification.require_command(vx,wz,lateral_raw)
+         if type(fine_phase) is not bool:raise contract.Hold('fine phase must be exact boolean')
+         if self.process.poll() is not None or contract.process_identity(self.process.pid)!=self.identity:raise contract.Hold('owned relay exited/changed')
+         if (vx or wz or lateral_raw) and preflight is None:raise contract.Hold('positive relay command requires final input guard')
+@@ -263,6 +268,12 @@
+         executor=SingleThreadedExecutor(context=node.context);executor.add_node(node);callbacks=BoundedCallbacks(executor)
+         if node.get_parameter('use_sim_time').value is not False:raise contract.Hold('wall/source clock mode must remain false')
+         raw_imu_gate=ImuMonotonicGate();active_lateral=None;imu_gate_fault=None
++        if prearm_requalification_enabled(release):
++            def qualification_context():
++                return dict(command=list(relay.command),request=[last_request.get(k,0.) for k in ['vx','wz','lateral_raw']] if last_request else [0.,0.,0.],
++                    latest_inputs={key:{k:v for k,v in value.items() if k!='message'} for key,value in latest.items()})
++            raw_imu_gate=PrearmImuQualification(qualification_context)
++            relay.prearm_qualification=raw_imu_gate
+         latest={};history=deque(maxlen=1000);clouds=deque(maxlen=5);scans=deque(maxlen=5);subs=[];cloud_cache=None;last_send=None;clock_pair=None
+         event_pub=node.create_publisher(String,'/experiment/full_scene_mapping/events',50)
+         writer=AsyncEvidenceWriter(output,publish_event=lambda line:event_pub.publish(String(data=line)))
+@@ -293,7 +304,7 @@
+             receipt_ns,steady_ns=time.time_ns(),time.monotonic_ns()
+             event=raw_imu_gate.inspect(bytes(raw),receipt_ns,steady_ns)
+             if not event['accepted']:
+-                if event['fatal']:
++                if event['fatal'] and not event.get('prearm_epoch_reopened',False):
+                     if imu_gate_fault is None:imu_gate_fault=event
+                 emit('raw_imu_rejected',event=event)
+                 return
+@@ -379,6 +390,8 @@
+             return truth,yaw,cloud_cache,(now_ns-truth['stamp_ns'])/1e9
+         def tick(vx=0.,wz=0.,bridge=None,lateral_raw=0.,terminal_deadline_steady=None,fine_phase=False):
+             nonlocal last_send,last_request,active_lateral
++            qualification=getattr(relay,'prearm_qualification',None)
++            if qualification is not None:qualification.require_command(vx,wz,lateral_raw)
+             if fine_phase is not False:
+                 if fine_phase is not True or terminal_deadline_steady is None:raise contract.Hold('fine phase requires fixed terminal deadline')
+                 fine_profile=contract.fine_command_profile(release,bridge,vx)
+@@ -388,6 +401,10 @@
+             until=time.monotonic()+contract.PERIOD
+             while time.monotonic()<until:callbacks.spin()
+             if stopped:raise InterruptedError('mapping stop requested')
++            if qualification is not None:
++                reset=qualification.reanchor_zero(last_send,(vx,wz,lateral_raw),relay.command)
++                if reset is not None:
++                    emit('prearm_zero_reanchor',snapshot=reset);last_send=None
+             if last_send is not None and time.monotonic()-last_send>contract.CONTROL_RENEWAL_LIMIT:raise contract.Hold('control-loop gap; no stale positive command is renewed')
+             guard_started=time.monotonic();truth,yaw,cloud,age=health()
+             age_cap=contract.truth_age_limit(model);age_upper=contract.command_age_upper(age,age_cap)
+@@ -438,6 +455,7 @@
+             if time.monotonic()-last_send>contract.CONTROL_RENEWAL_LIMIT:raise contract.Hold('command write/dispatch exceeded renewal bound; issued anchor retained')
+             accepted=writer.submit('state_trace',dict(unix_ns=time.time_ns(),scope=contract.SCOPE,truth=truth,lidar_stamp_ns=cloud['stamp_ns'],
+               lidar_gt_association=cloud['pose'],command=packet,policy_vx=vx,policy_wz=wz,policy_lateral_raw=lateral_raw,primitive=kind,
++              input_qualification_epoch=getattr(qualification,'epoch',None),input_qualification_armed=getattr(qualification,'armed',None),
+               fine_forward_phase=fine_phase,applied_forward_policy_mps=vx,applied_command=dict(version=1,action='walk',forward=packet['forward'],lateral=packet['lateral'],yaw=packet['yaw']),
+               applied_command_basis='owner pipe write accepted; not child UDP or actuation proof',
+               lateral_stop_envelope_retained=bool(lateral_context),
+@@ -455,18 +473,32 @@
+                 if checker.update(truth,relay.command,time.time_ns(),time.monotonic(),seconds):
+                     active_lateral=None;return truth,yaw
+             raise contract.Hold('fresh truth/zero-command stable stop not observed')
+-        # Warm data before requesting a continuous 10s stopped interval.
+-        deadline=time.monotonic()+40.
+-        while True:
+-            try:truth,yaw=tick();break
+-            except contract.Hold as exc:
+-                if imu_gate_fault is not None:raise
+-                relay.send()
+-                if 'first_warm_hold' not in locals():
+-                    first_warm_hold=str(exc);emit('first_warm_hold',reason=first_warm_hold)
+-                if audit['checked_steady'] and not audit['valid']:raise
+-                if time.monotonic()>=deadline:raise
+-        truth,yaw=stable(contract.START_STABLE,max(0.,deadline-time.monotonic()))
++        if isinstance(raw_imu_gate,PrearmImuQualification):
++            def prearm_waiting_allowed(exc):
++                evidence=writer.summary()
++                if evidence['dropped'] or evidence['worker_error'] is not None or imu_gate_fault is not None:return False
++                if audit['first_violation'] is not None or (audit['checked_steady'] and (not audit['valid'] or time.monotonic()-audit['checked_steady']>.3)):return False
++                return str(exc) in {'missing input','stale/future input header or callback receipt','no fresh accepted original IMU progress',
++                    'no fresh original-stamp raw/derived lidar+GT association','velocity-owner audit missing/stale/violated: not_checked',
++                    'control-loop gap; no stale positive command is renewed','guard computation exceeded command renewal bound','command write/dispatch exceeded renewal bound; issued anchor retained'}
++            def prearm_arming_allowed():
++                evidence=writer.summary()
++                return (not evidence['dropped'] and evidence['worker_error'] is None and imu_gate_fault is None
++                    and audit['valid'] and audit['first_violation'] is None and time.monotonic()-audit['checked_steady']<=.3)
++            truth,yaw=qualify_prearm_zero(raw_imu_gate,tick,relay,model,emit,prearm_waiting_allowed,arming_allowed=prearm_arming_allowed)
++        else:
++            # Warm data before requesting a continuous 10s stopped interval.
++            deadline=time.monotonic()+40.
++            while True:
++                try:truth,yaw=tick();break
++                except contract.Hold as exc:
++                    if imu_gate_fault is not None:raise
++                    relay.send()
++                    if 'first_warm_hold' not in locals():
++                        first_warm_hold=str(exc);emit('first_warm_hold',reason=first_warm_hold)
++                    if audit['checked_steady'] and not audit['valid']:raise
++                    if time.monotonic()>=deadline:raise
++            truth,yaw=stable(contract.START_STABLE,max(0.,deadline-time.monotonic()))
+         anchor=route['start_anchor_truth']
+         if math.hypot(truth['xyz'][0]-anchor[0],truth['xyz'][1]-anchor[1])>.1 or abs(contract.wrap(yaw-anchor[2]))>.08:raise contract.Hold('fresh truth start differs from frozen root anchor')
+         emit('runtime_ready',receipt=dict(scope=contract.SCOPE,mode=contract.MODE,run_id=release['release_id'],
+@@ -475,7 +507,8 @@
+           sources_sha256=release['sources_sha256'],lateral_admission=lateral_admission,output_directory=str(output),truth=truth,start_stable_seconds=contract.START_STABLE,
+           actual_truth_age_cap_sec=contract.truth_age_limit(model),lateral_magnitude=contract.MAX_LATERAL_RAW,
+           scene_identity_basis='root external host attestation; no direct host UE monitoring',controller_pid_namespace=release['controller_pid_namespace'],scene_identity_proof=release['scene_identity_proof'],
+-          checked_unix_ns=time.time_ns(),checked_steady_ns=time.monotonic_ns(),boundary='Preflight evidence only; no additional motion permission.'))
++          checked_unix_ns=time.time_ns(),checked_steady_ns=time.monotonic_ns(),boundary='Preflight evidence only; no additional motion permission.'),
++          prearm_qualification=getattr(getattr(relay,'prearm_qualification',None),'arm_receipt',None))
+         def rotate_to(target,tolerance=.08,deadline_steady=None,terminal_deadline_steady=None):
+             while True:
+                 if deadline_steady is not None and time.monotonic()>=deadline_steady:raise contract.Hold('bounded heading correction deadline expired')
+@@ -675,6 +708,121 @@
+         # The preceding stop and rotate_to both verified a real zero-command stop.
+ 
+ 
++def prearm_requalification_enabled(release):
++    value=release.get('allow_prearm_imu_gap_requalification',False)
++    if type(value) is not bool:raise contract.Hold('prearm IMU gap requalification flag must be strict boolean')
++    return value
++
++
++class PrearmImuQualification:
++    """Local zero-only lease epochs; original Gate code and limits are unchanged."""
++    def __init__(self,context,clock=time):
++        self.context=context;self.clock=clock;self.deadline=clock.monotonic()+40.;self.armed=False;self.ever_armed=False
++        self.ever_nonzero_requested=False;self.fault=None;self.high_water=None;self.receipt_high_water=None
++        self.epochs=[];self.invalid_snapshots=[];self.arm_receipt=None;self._new_epoch()
++    def _new_epoch(self):
++        self.gate=ImuMonotonicGate()
++        self.epochs.append(dict(gate=self.gate,raw_received=0,accepted=0,rejected=0,reject_reasons={},first_header_ns=None,
++            first_receipt_steady_ns=None,last_header_ns=None,last_receipt_steady_ns=None))
++    @property
++    def epoch(self):return len(self.epochs)-1
++    @staticmethod
++    def zero(values):return isinstance(values,(tuple,list)) and len(values)==3 and all(type(v) in (int,float) and v==0. for v in values)
++    def snapshot(self,kind,**extra):
++        value=dict(kind=kind,epoch=self.epoch,steady_ns=self.clock.monotonic_ns(),context=copy.deepcopy(self.context()),**extra)
++        self.invalid_snapshots.append(value);return value
++    def require_command(self,vx=0.,wz=0.,lateral_raw=0.):
++        if not any(v!=0. for v in [vx,wz,lateral_raw]):return
++        self.ever_nonzero_requested=True
++        if not self.armed or self.fault is not None:raise contract.Hold('prearm qualification forbids nonzero before armed or after fatal')
++    def inspect(self,raw,receipt_unix_ns,receipt_steady_ns,now_unix_ns=None,now_steady_ns=None):
++        # Candidate inspection first preserves all original decode/frame/finite/
++        # clock checks. Discarding an old-epoch candidate never submits its accept.
++        stats=self.epochs[-1];gate=copy.copy(self.gate) if stats['first_header_ns'] is None and self.high_water is not None else self.gate
++        event=gate.inspect(raw,receipt_unix_ns,receipt_steady_ns,now_unix_ns,now_steady_ns)
++        if event['accepted'] and stats['first_header_ns'] is None and self.high_water is not None and (
++            event['header_ns']<=self.high_water or receipt_steady_ns<self.receipt_high_water):
++            original=copy.deepcopy(event);event=dict(event,accepted=False,reason='prearm_epoch_header_not_above_high_water',fatal=False,
++                original_gate_candidate_event=original,original_cdr_base64=base64.b64encode(bytes(raw)).decode('ascii'))
++            if receipt_steady_ns<self.receipt_high_water:event.update(reason='receipt_clock_regression',fatal=True)
++        else:self.gate=gate;stats['gate']=gate
++        stats['raw_received']+=1
++        if event['accepted']:
++            stats['accepted']+=1
++            if stats['first_header_ns'] is None:stats.update(first_header_ns=event['header_ns'],first_receipt_steady_ns=receipt_steady_ns)
++            stats.update(last_header_ns=event['header_ns'],last_receipt_steady_ns=receipt_steady_ns)
++        else:
++            stats['rejected']+=1;reason=event['reason'];stats['reject_reasons'][reason]=stats['reject_reasons'].get(reason,0)+1
++        event=dict(event,qualification_epoch=self.epoch,qualification_lifetime_raw_index=sum(e['raw_received'] for e in self.epochs)-1)
++        if event['fatal']:
++            context=self.context()
++            eligible=(event['reason']=='accepted_header_gap_exceeded' and not self.ever_armed and not self.ever_nonzero_requested
++                and self.fault is None and self.zero(context['command']) and self.zero(context['request'])
++                and self.epoch<3 and self.clock.monotonic()<self.deadline)
++            if eligible:
++                previous=dict(stats);previous.pop('gate')
++                invalid=self.snapshot('accepted_header_gap_epoch_invalidated',event=copy.deepcopy(event),epoch_counters=previous)
++                self.high_water=max(v for v in [self.high_water,event['header_ns'],event['last_accepted_header_ns']] if v is not None)
++                self.receipt_high_water=max(receipt_steady_ns,self.receipt_high_water or 0)
++                self._new_epoch();event=dict(event,prearm_epoch_reopened=True,invalidated_epoch=self.epoch-1,new_epoch=self.epoch,
++                    cross_epoch_header_high_water_ns=self.high_water)
++            elif self.fault is None:self.fault=copy.deepcopy(event)
++        return event
++    def fresh(self,now_unix_ns,now_steady_ns):return self.gate.fresh(now_unix_ns,now_steady_ns)
++    def spans(self):
++        e=self.epochs[-1]
++        return dict(header_span_ns=0 if e['first_header_ns'] is None else e['last_header_ns']-e['first_header_ns'],
++            receipt_steady_span_ns=0 if e['first_receipt_steady_ns'] is None else e['last_receipt_steady_ns']-e['first_receipt_steady_ns'])
++    def arm(self,epoch,stop_ready,health_valid):
++        span=self.spans()
++        if (self.ever_armed or self.fault is not None or self.ever_nonzero_requested or epoch!=self.epoch or self.clock.monotonic()>=self.deadline
++            or not stop_ready or not health_valid or min(span.values())<10_000_000_000
++            or not self.fresh(self.clock.time_ns(),self.clock.monotonic_ns())):raise contract.Hold('prearm qualification not complete or permanently invalid')
++        self.armed=self.ever_armed=True
++        self.arm_receipt=dict(epoch=self.epoch,armed_unix_ns=self.clock.time_ns(),armed_steady_ns=self.clock.monotonic_ns(),**span,
++            old_epochs_not_motion_acceptance=True,qualification_new_lease_only=True)
++        return self.arm_receipt
++    def reanchor_zero(self,last_send,request,command):
++        if last_send is None or self.clock.monotonic()-last_send<=contract.CONTROL_RENEWAL_LIMIT:return None
++        if self.ever_armed or self.ever_nonzero_requested or self.fault is not None or not self.zero(request) or not self.zero(command):return None
++        return self.snapshot('prearm_expired_zero_anchor_cleared',old_issued_steady_sec=last_send,observed_gap_sec=self.clock.monotonic()-last_send,
++            replacement_anchor='None; only next original final preflight issue may create it')
++    def diagnostics(self,now_unix_ns,now_steady_ns):
++        reasons={};epochs=[]
++        for index,e in enumerate(self.epochs):
++            for k,v in e['reject_reasons'].items():reasons[k]=reasons.get(k,0)+v
++            epochs.append(dict({k:copy.deepcopy(v) for k,v in e.items() if k!='gate'},epoch=index,
++                original_gate=e['gate'].diagnostics(now_unix_ns,now_steady_ns)))
++        active=self.gate.diagnostics(now_unix_ns,now_steady_ns)
++        active.update(raw_received=sum(e['raw_received'] for e in self.epochs),accepted=sum(e['accepted'] for e in self.epochs),
++            rejected=sum(e['rejected'] for e in self.epochs),reject_reasons=reasons,epochs=epochs,active_epoch=self.epoch,
++            qualification_mode=True,armed=self.armed,ever_armed=self.ever_armed,ever_nonzero_requested=self.ever_nonzero_requested,permanent_fault=copy.deepcopy(self.fault),
++            warm_invalid_snapshots=copy.deepcopy(self.invalid_snapshots),arm_receipt=self.arm_receipt,
++            lifetime_counters_include_all_epochs=True,old_errors_not_erased=True)
++        return active
++
++
++def qualify_prearm_zero(qualification,tick,relay,model,emit,waiting_allowed,clock=time,arming_allowed=None):
++    """Every successful tick runs the original complete health/final zero guards."""
++    epoch=qualification.epoch;checker=contract.StableStop(contract.truth_age_limit(model))
++    while clock.monotonic()<qualification.deadline:
++        if qualification.fault is not None:raise contract.Hold('latched prearm raw IMU fatal: '+qualification.fault['reason'])
++        if epoch!=qualification.epoch:epoch=qualification.epoch;checker=contract.StableStop(contract.truth_age_limit(model))
++        try:truth,yaw=tick()
++        except contract.Hold as exc:
++            snapshot=qualification.snapshot('prearm_health_not_qualified',reason=str(exc),tracked_epoch=epoch,GT_stop_checker=copy.deepcopy(vars(checker)))
++            checker=contract.StableStop(contract.truth_age_limit(model));epoch=qualification.epoch
++            emit('prearm_qualification_invalid',snapshot=snapshot)
++            if qualification.fault is not None or not waiting_allowed(exc):raise
++            relay.send()  # Still zero; never issues a new last_send preflight anchor.
++            continue
++        if epoch!=qualification.epoch:epoch=qualification.epoch;checker=contract.StableStop(contract.truth_age_limit(model))
++        stopped=checker.update(truth,relay.command,clock.time_ns(),clock.monotonic(),contract.START_STABLE)
++        if stopped and min(qualification.spans().values())>=10_000_000_000:
++            qualification.arm(epoch,stopped,bool(arming_allowed is not None and arming_allowed()));return truth,yaw
++    raise contract.Hold('fixed40s prearm qualification expired')
++
++
+ def main():
+     parser=argparse.ArgumentParser(description=__doc__)
+     parser.add_argument('--execute',action='store_true');parser.add_argument('--route',type=Path)

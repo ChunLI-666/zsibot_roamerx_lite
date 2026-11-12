@@ -121,8 +121,9 @@ def main():
             'smoother_server is absent from the lifecycle set')
     require("package='nav2_smoother'" in navigation_launch,
             'nav2_smoother server is not launched')
-    require('namespace=namespace' in navigation_launch,
-            'standalone nav2_smoother does not follow the navigation namespace')
+    # test_smac_planner_launch resolves the actual inherited namespace for the
+    # upstream servers. Requiring namespace=namespace here duplicates the
+    # namespace already applied by bringup's PushRosNamespace.
     require(navigation_launch.count("package='nav2_smoother'") == 1,
             'nav2_smoother must stay in one ABI-isolated process')
     require("additional_env={'LD_LIBRARY_PATH': smoother_library_path}" in navigation_launch,

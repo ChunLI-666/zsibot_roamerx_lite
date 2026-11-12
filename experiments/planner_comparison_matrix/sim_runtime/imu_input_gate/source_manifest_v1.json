@@ -1,0 +1,115 @@
+{
+  "scope": "SIM_ONLY_IMU_MONOTONIC_GATE",
+  "state": "FROZEN_SOURCE_ONLY_ROOT_HOLD",
+  "sources_sha256": {
+    "imu_gate.py": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+    "adapter_with_gate.py": "be6c4863a0616e2d2b861a9e31e559f0d60f4cde18fa85093042b2198a5df53c",
+    "sim_imu_adapter.py": "8b21f321ed7fe79042d28202ebf1fb4ec848ceacb720a4066fd21dbbba52edc2",
+    "calibration_observer.py": "c1713ef3e8190b8d903087085365efad76bd12c8615e47336c5d2db9c1db86b9",
+    "matrix_sensor_contract.py": "3159610e54ae74e50312979103cb37e6634b24a6c47dcf74a32685d130e9dc7a"
+  },
+  "baseline_all_hashes_unchanged": true,
+  "raw_bag_sha256": "666dfe6484757ea8a13dbf6731d10e075a71832bb32295d94e4af4f911425aa6",
+  "real_CDR_offline_replay": "actual_replay_v2/result.json",
+  "pure_CDR_fixtures": 11,
+  "files": {
+    "README.md": {
+      "sha256": "88adead3d344705553a200a7b74f776b31a8f534d2ac859c502d34a5c1e91b14",
+      "bytes": 3772
+    },
+    "actual_replay_v2/front_lidar_imu_accepted.csv": {
+      "sha256": "81956cada16af4a935bb4f92c07ae2e3e1ba16c07ea7ca8866394d8688700eda",
+      "bytes": 270545
+    },
+    "actual_replay_v2/front_lidar_imu_rejects.json": {
+      "sha256": "986ac83555841773f98497125e710c3b118cf1134ba7104bac37019db376dbb6",
+      "bytes": 957
+    },
+    "actual_replay_v2/livox_imu_accepted.csv": {
+      "sha256": "93b4c23c10fa39eed37ae8e7fcaf7e1ecf182ea5ffa44273112e4b6d1c988e19",
+      "bytes": 270878
+    },
+    "actual_replay_v2/livox_imu_rejects.json": {
+      "sha256": "4387a56f63d1eaa0847f4355b334b783067bb72985f3f3e86701467bedb47b7e",
+      "bytes": 970
+    },
+    "actual_replay_v2/result.json": {
+      "sha256": "d41513d67137f8a80dde3d5e05bfb19f19cab96cd35ecee07cf39425dc518e7f",
+      "bytes": 3451
+    },
+    "actual_replay_v2.log": {
+      "sha256": "68ffe35449b15cb8d1c96c62779feb0cd408c9c8b96cac133edc817fd3105dca",
+      "bytes": 654
+    },
+    "adapter_delta.diff": {
+      "sha256": "d002ccaaf81b9070d00f986b9318a18cd31f67a9aa2a7a4e995374bf1315bc79",
+      "bytes": 4635
+    },
+    "adapter_release.HOLD.json": {
+      "sha256": "e22c570c3cffe110cf8de82b55f5090969f61a7e92332e3d82fdc4471ecab170",
+      "bytes": 945
+    },
+    "adapter_with_gate.py": {
+      "sha256": "be6c4863a0616e2d2b861a9e31e559f0d60f4cde18fa85093042b2198a5df53c",
+      "bytes": 6960
+    },
+    "baseline/lateral_once.py": {
+      "sha256": "d9544d7ea8a11a10c5641c4473ab73b1bed759009f3aaa791117d34df223b1e2",
+      "bytes": 20784
+    },
+    "baseline/live_sensor_adapter.py": {
+      "sha256": "e8e7c2fb24db5ef08b4cdc0ee53392575f9b3f67a6265d8cfdbe240f42f48b06",
+      "bytes": 5342
+    },
+    "baseline/matrix_sensor_contract.py": {
+      "sha256": "3159610e54ae74e50312979103cb37e6634b24a6c47dcf74a32685d130e9dc7a",
+      "bytes": 3248
+    },
+    "baseline_manifest.json": {
+      "sha256": "2f5b146ce161795f91d92541f5ec5143a808e952f248febbaedf78b740fa39ee",
+      "bytes": 618
+    },
+    "calibration_contract_frozen.py": {
+      "sha256": "851bf34337151048a581d625553a210c1331430ba0abe0211f1d906b2baf124d",
+      "bytes": 9969
+    },
+    "calibration_observer.py": {
+      "sha256": "c1713ef3e8190b8d903087085365efad76bd12c8615e47336c5d2db9c1db86b9",
+      "bytes": 4217
+    },
+    "fixtures_v1.log": {
+      "sha256": "274d00c3d0ccae9d9198251e3caffada359b9d34a4e22c7c881b13c607594839",
+      "bytes": 1543
+    },
+    "future_semantic_case.HOLD.json": {
+      "sha256": "da222dc6e804c69b183445df187572c283f1a4fae9f3225d2b61d2953583e901",
+      "bytes": 1030
+    },
+    "imu_gate.py": {
+      "sha256": "0b451821b94eb8182ff2f8df8d5e7faf359a24486455c90b629478f944023f66",
+      "bytes": 4771
+    },
+    "matrix_sensor_contract.py": {
+      "sha256": "3159610e54ae74e50312979103cb37e6634b24a6c47dcf74a32685d130e9dc7a",
+      "bytes": 3248
+    },
+    "replay_actual.py": {
+      "sha256": "8e84bcfc7ac041a8183a809c1e3140bbf9bd54589cb9cc571bf7bea450a70615",
+      "bytes": 5192
+    },
+    "sim_imu_adapter.py": {
+      "sha256": "8b21f321ed7fe79042d28202ebf1fb4ec848ceacb720a4066fd21dbbba52edc2",
+      "bytes": 3384
+    },
+    "test_gate.py": {
+      "sha256": "786b4071b5d33bca2d912edf5c318dde133c3b29ad4ed2bd51919d2212e66728",
+      "bytes": 9535
+    }
+  },
+  "default_ROOT_HOLD": true,
+  "no_ROS_Node_remote_UDP_mapper_or_source_replacement": true,
+  "root_exact_adapter60_replacement_and_sole_publisher_audit_still_required": true,
+  "bridge24_projector61_untouched": true,
+  "upstream_timestamp_cause_fixed": false,
+  "codacy": "MCP tool unavailable; no installation/pass claimed"
+}

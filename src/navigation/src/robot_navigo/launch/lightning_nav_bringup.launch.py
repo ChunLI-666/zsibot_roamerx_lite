@@ -81,10 +81,14 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time')
     map_yaml_file = LaunchConfiguration('map')
     params_file = LaunchConfiguration('params_file')
+    planner_backend = LaunchConfiguration('planner_backend')
+    smac_planner_params_file = LaunchConfiguration('smac_planner_params_file')
+    smac_lattice_file = LaunchConfiguration('smac_lattice_file')
     autostart = LaunchConfiguration('autostart')
     use_composition = LaunchConfiguration('use_composition')
     use_bounded_component_container = LaunchConfiguration('use_bounded_component_container')
     component_executor_threads = LaunchConfiguration('component_executor_threads')
+    enable_waypoint_follower = LaunchConfiguration('enable_waypoint_follower')
     nav2_delay = LaunchConfiguration('nav2_delay')
     nav_cmd_timeout_ms = LaunchConfiguration('nav_cmd_timeout_ms')
 
@@ -111,6 +115,15 @@ def generate_launch_description():
         'params_file',
         default_value=os.path.join(pkg_dir, 'params', 'navigo_params.yaml'),
         description='Full path to the ROS2 parameters file to use')
+    declare_planner_backend_cmd = DeclareLaunchArgument(
+        'planner_backend', default_value='fork_navfn', choices=['fork_navfn', 'smac_lattice', 'smac_hybrid'],
+        description='Select the legacy fork or opt-in independent upstream Smac planner')
+    declare_smac_planner_params_cmd = DeclareLaunchArgument(
+        'smac_planner_params_file',
+        default_value=os.path.join(pkg_dir, 'params', 'smac_planner.yaml'))
+    declare_smac_lattice_file_cmd = DeclareLaunchArgument(
+        'smac_lattice_file',
+        default_value=os.path.join(pkg_dir, 'params', 'smac', 'omni_5cm_r050.json'))
 
     declare_autostart_cmd = DeclareLaunchArgument(
         'autostart',
@@ -151,6 +164,9 @@ def generate_launch_description():
 
     declare_waypoint_follower_package_cmd = DeclareLaunchArgument(
         'waypoint_follower_package', default_value='navigo_waypoint_follower')
+    declare_enable_waypoint_follower_cmd = DeclareLaunchArgument(
+        'enable_waypoint_follower', default_value='true',
+        description='Start and lifecycle-manage the optional waypoint follower')
     declare_waypoint_follower_executable_cmd = DeclareLaunchArgument(
         'waypoint_follower_executable', default_value='waypoint_follower')
     declare_waypoint_follower_plugin_cmd = DeclareLaunchArgument(
@@ -239,10 +255,14 @@ def generate_launch_description():
                     'use_sim_time': use_sim_time,
                     'map': map_yaml_file,
                     'params_file': params_file,
+                    'planner_backend': planner_backend,
+                    'smac_planner_params_file': smac_planner_params_file,
+                    'smac_lattice_file': smac_lattice_file,
                     'autostart': autostart,
                     'use_composition': use_composition,
                     'use_bounded_component_container': use_bounded_component_container,
                     'component_executor_threads': component_executor_threads,
+                    'enable_waypoint_follower': enable_waypoint_follower,
                     'waypoint_follower_package': waypoint_follower_package,
                     'waypoint_follower_executable': waypoint_follower_executable,
                     'waypoint_follower_plugin': waypoint_follower_plugin,
@@ -268,6 +288,9 @@ def generate_launch_description():
     ld.add_action(declare_use_sim_time_cmd)
     ld.add_action(declare_map_yaml_cmd)
     ld.add_action(declare_params_file_cmd)
+    ld.add_action(declare_planner_backend_cmd)
+    ld.add_action(declare_smac_planner_params_cmd)
+    ld.add_action(declare_smac_lattice_file_cmd)
     ld.add_action(declare_autostart_cmd)
     ld.add_action(declare_use_composition_cmd)
     ld.add_action(declare_use_bounded_container_cmd)
@@ -277,6 +300,7 @@ def generate_launch_description():
     ld.add_action(declare_enable_livox_converter_cmd)
     ld.add_action(declare_enable_laserscan_cmd)
     ld.add_action(declare_waypoint_follower_package_cmd)
+    ld.add_action(declare_enable_waypoint_follower_cmd)
     ld.add_action(declare_waypoint_follower_executable_cmd)
     ld.add_action(declare_waypoint_follower_plugin_cmd)
     ld.add_action(declare_waypoint_task_executor_plugin_cmd)

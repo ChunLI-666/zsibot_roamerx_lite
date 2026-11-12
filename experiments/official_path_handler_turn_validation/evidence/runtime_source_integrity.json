@@ -1,0 +1,190 @@
+{
+  "files": [
+    {
+      "path": "nav2_controller/plugins/feasible_path_handler.cpp",
+      "expected_git_blob": "7fc324ec280621651821d52067c0782c6b9cb931",
+      "normalized_git_blob": "7fc324ec280621651821d52067c0782c6b9cb931",
+      "matches": true,
+      "compiled_file_sha256": "8e547ae3e330a330919c9b5d871a1c6a7c7c5c3eb9bc35fe61e696bc57d570ef",
+      "transport_extra_trailing_lfs": 0
+    },
+    {
+      "path": "nav2_core/include/nav2_core/path_handler.hpp",
+      "expected_git_blob": "8873ba466484224c3390564866a36554c00f6279",
+      "normalized_git_blob": "8873ba466484224c3390564866a36554c00f6279",
+      "matches": true,
+      "compiled_file_sha256": "490e1d4241edaaaa106faf3ca212b50650b2510b644df3b9c819331c1ee3885b",
+      "transport_extra_trailing_lfs": 0
+    },
+    {
+      "path": "nav2_controller/plugins/simple_goal_checker.cpp",
+      "expected_git_blob": "1fa963af9c6c28330f0da34659bc6d2bb9247662",
+      "normalized_git_blob": "1fa963af9c6c28330f0da34659bc6d2bb9247662",
+      "matches": true,
+      "compiled_file_sha256": "b7e35ce9c47ad26a0bffa5d8b130a21c6c30b21099df995890b9bd73c7b9a29e",
+      "transport_extra_trailing_lfs": 0
+    },
+    {
+      "path": "nav2_core/include/nav2_core/controller.hpp",
+      "expected_git_blob": "7f7bd111059df789a1a99685b03be5890cf121ac",
+      "normalized_git_blob": "7f7bd111059df789a1a99685b03be5890cf121ac",
+      "matches": true,
+      "compiled_file_sha256": "056da29d550927da3438eb0c6ddcd240a397255e3aac5256dddb7e31b7efcbed",
+      "transport_extra_trailing_lfs": 0
+    },
+    {
+      "path": "nav2_core/include/nav2_core/goal_checker.hpp",
+      "expected_git_blob": "2fde1fad80a6204aa084e50eea347a531e305206",
+      "normalized_git_blob": "2fde1fad80a6204aa084e50eea347a531e305206",
+      "matches": true,
+      "compiled_file_sha256": "709efddef19f9dccef7b24ce6e09230e141dbaed3edb5f881bf8c620d8bb98ac",
+      "transport_extra_trailing_lfs": 0
+    },
+    {
+      "path": "nav2_controller/include/nav2_controller/plugins/feasible_path_handler.hpp",
+      "expected_git_blob": "a9e9352809c21adfe7110da5d82e2470da9e3fe1",
+      "normalized_git_blob": "a9e9352809c21adfe7110da5d82e2470da9e3fe1",
+      "matches": true,
+      "compiled_file_sha256": "67f36094ec78a59c830d568bb62e354d8afb0bfcc7c8109b63ea1d749ade8883",
+      "transport_extra_trailing_lfs": 0
+    },
+    {
+      "path": "nav2_controller/src/controller_server.cpp",
+      "expected_git_blob": "ac4a3a8db73dd1c65ce0b40e93dc1abeac515474",
+      "normalized_git_blob": "ac4a3a8db73dd1c65ce0b40e93dc1abeac515474",
+      "matches": true,
+      "compiled_file_sha256": "466f97a21b659b5b91e74bc7f0affb875bfe1b6566e0dc72dcf0e8556e1b62f7",
+      "transport_extra_trailing_lfs": 0
+    },
+    {
+      "path": "nav2_msgs/action/FollowPath.action",
+      "expected_git_blob": "ccf66dd7a5d83f3dc161e4e20bdbf131b0cf069d",
+      "normalized_git_blob": "ccf66dd7a5d83f3dc161e4e20bdbf131b0cf069d",
+      "matches": true,
+      "compiled_file_sha256": "640f654d52d91d51bbcce437001ca5f3010ebec7113b1806a4733245c5688bd3",
+      "transport_extra_trailing_lfs": 0
+    },
+    {
+      "path": "nav2_util/include/nav2_util/path_utils.hpp",
+      "expected_git_blob": "11a51d850f6ff0cdfb9815eae9791b1103dae29d",
+      "normalized_git_blob": "11a51d850f6ff0cdfb9815eae9791b1103dae29d",
+      "matches": true,
+      "compiled_file_sha256": "734be73e8e3944961fa3de039829eab7734627d35e86b1908d7833b5e3eb545a",
+      "transport_extra_trailing_lfs": 0
+    },
+    {
+      "path": "nav2_util/src/path_utils.cpp",
+      "expected_git_blob": "17e3f59a5b3142cc9edf6c3b2f84e26e8706c530",
+      "normalized_git_blob": "17e3f59a5b3142cc9edf6c3b2f84e26e8706c530",
+      "matches": true,
+      "compiled_file_sha256": "69a89699dd101a5dbcf54e5d68dcd35e96e4516405feaca075ccc6bb3e59f4ff",
+      "transport_extra_trailing_lfs": 0
+    },
+    {
+      "path": "nav2_regulated_pure_pursuit_controller/src/regulated_pure_pursuit_controller.cpp",
+      "expected_git_blob": "7d0cafdb58de6e4c02b9b581360450bc7185e6d5",
+      "normalized_git_blob": "7d0cafdb58de6e4c02b9b581360450bc7185e6d5",
+      "matches": true,
+      "compiled_file_sha256": "fb9c29fa33077e583284273034968e9b9d113d70e1c1ffdf8acc66a10385c731",
+      "transport_extra_trailing_lfs": 0
+    },
+    {
+      "path": "nav2_mppi_controller/src/controller.cpp",
+      "expected_git_blob": "7ad1e5976e9c27befa6a7ba39f1483140109446b",
+      "normalized_git_blob": "7ad1e5976e9c27befa6a7ba39f1483140109446b",
+      "matches": true,
+      "compiled_file_sha256": "b7f5d025e12316387baac7b886b96ae9c7f7b8b44751f6a45930e4361c0f0c04",
+      "transport_extra_trailing_lfs": 0
+    },
+    {
+      "path": "nav2_controller/package.xml",
+      "expected_git_blob": "376e82b715245e5ce5e9d6669d0a80c0e0ff54ce",
+      "normalized_git_blob": "376e82b715245e5ce5e9d6669d0a80c0e0ff54ce",
+      "matches": true,
+      "compiled_file_sha256": "b6c3d96c9c47d90aabbfb1de3a100a31461134e0cbffc093fda95f2e41e899e7",
+      "transport_extra_trailing_lfs": 0
+    },
+    {
+      "path": "nav2_regulated_pure_pursuit_controller/include/nav2_regulated_pure_pursuit_controller/regulated_pure_pursuit_controller.hpp",
+      "expected_git_blob": "3fa50258c74366b3d33041eab11fffd9acc54eae",
+      "normalized_git_blob": "3fa50258c74366b3d33041eab11fffd9acc54eae",
+      "matches": true,
+      "compiled_file_sha256": "130ee49672a87663e7dd90d43403da29a8a19346884be4f83daaa4fd56a59881",
+      "transport_extra_trailing_lfs": 1
+    },
+    {
+      "path": "nav2_regulated_pure_pursuit_controller/include/nav2_regulated_pure_pursuit_controller/parameter_handler.hpp",
+      "expected_git_blob": "190216ffd7618e9f1870556341fd60aebfce23cc",
+      "normalized_git_blob": "190216ffd7618e9f1870556341fd60aebfce23cc",
+      "matches": true,
+      "compiled_file_sha256": "828ee5b0ce144a4a7691ecbada1b2b6dcd0253c45f3f3cd989ef7e1e1c0b4502",
+      "transport_extra_trailing_lfs": 1
+    },
+    {
+      "path": "nav2_regulated_pure_pursuit_controller/src/parameter_handler.cpp",
+      "expected_git_blob": "94aab6d5dcf0de9d32e0d7fc8c74b2eeb828f2d8",
+      "normalized_git_blob": "94aab6d5dcf0de9d32e0d7fc8c74b2eeb828f2d8",
+      "matches": true,
+      "compiled_file_sha256": "99485b3ad6b97e5a5bdab30ac7dac76fb225898cfb47921e90ea458be6fa1311",
+      "transport_extra_trailing_lfs": 1
+    },
+    {
+      "path": "nav2_regulated_pure_pursuit_controller/include/nav2_regulated_pure_pursuit_controller/collision_checker.hpp",
+      "expected_git_blob": "4b835ecf345459d57497493246c1e6aee80f4d1d",
+      "normalized_git_blob": "4b835ecf345459d57497493246c1e6aee80f4d1d",
+      "matches": true,
+      "compiled_file_sha256": "e4696ad15d9bcab7c925cff5f1c5f4fdbd9bd3d0129c71ab8d29bbed1605f9d4",
+      "transport_extra_trailing_lfs": 1
+    },
+    {
+      "path": "nav2_regulated_pure_pursuit_controller/src/collision_checker.cpp",
+      "expected_git_blob": "8340bb5a1ce8550c59a016e056a4f2a5d5351cc4",
+      "normalized_git_blob": "8340bb5a1ce8550c59a016e056a4f2a5d5351cc4",
+      "matches": true,
+      "compiled_file_sha256": "fa2f6e2b23b9d860d18e2c3e87ade979e5fd1ce58b538123d2ccfd9e8c164200",
+      "transport_extra_trailing_lfs": 1
+    },
+    {
+      "path": "nav2_regulated_pure_pursuit_controller/include/nav2_regulated_pure_pursuit_controller/regulation_functions.hpp",
+      "expected_git_blob": "37e99d076a59b878faa857b6c229c7eba093dbfc",
+      "normalized_git_blob": "37e99d076a59b878faa857b6c229c7eba093dbfc",
+      "matches": true,
+      "compiled_file_sha256": "2866afa7549dfc627f0acacf967cdb2e18d29ae85f2daa04015b5e1bd52043ca",
+      "transport_extra_trailing_lfs": 1
+    },
+    {
+      "path": "nav2_util/include/nav2_util/controller_utils.hpp",
+      "expected_git_blob": "be8c88c001311ad27e0d75c4f759699b2fb3bb4f",
+      "normalized_git_blob": "be8c88c001311ad27e0d75c4f759699b2fb3bb4f",
+      "matches": true,
+      "compiled_file_sha256": "8451411b49c7236c0469850405a5c1c620ca7801a4f25ff775dcf472b2383328",
+      "transport_extra_trailing_lfs": 1
+    },
+    {
+      "path": "nav2_util/src/controller_utils.cpp",
+      "expected_git_blob": "c15d3009ba058aa52bede112c7ed83d638f94b7c",
+      "normalized_git_blob": "c15d3009ba058aa52bede112c7ed83d638f94b7c",
+      "matches": true,
+      "compiled_file_sha256": "44b1b3a173ed2230ee070f6d85569c3706a32570315bc72a3880bb8bd7c01209",
+      "transport_extra_trailing_lfs": 1
+    },
+    {
+      "path": "nav2_util/include/nav2_util/parameter_handler.hpp",
+      "expected_git_blob": "12683104817aaf11da38a9e0ae8128216731ff86",
+      "normalized_git_blob": "12683104817aaf11da38a9e0ae8128216731ff86",
+      "matches": true,
+      "compiled_file_sha256": "492230464c0e79c150e6ee18f20a9398bfc8c217ab047d653c70af85559e41b9",
+      "transport_extra_trailing_lfs": 1
+    },
+    {
+      "path": "nav2_controller/include/nav2_controller/plugins/simple_goal_checker.hpp",
+      "expected_git_blob": "826391992f5735b1a5710d2b2e7791dfee3325e8",
+      "normalized_git_blob": "826391992f5735b1a5710d2b2e7791dfee3325e8",
+      "matches": true,
+      "compiled_file_sha256": "d9b4df994c404b7a1b9cb4d48c4c32a3718f190bbf51878fa916269fc60eb195",
+      "transport_extra_trailing_lfs": 1
+    }
+  ],
+  "algorithm_edits": 0,
+  "normalization": "For comparison only; built files retained unchanged. Only excess trailing transport LF excluded."
+}

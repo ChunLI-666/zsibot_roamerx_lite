@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "scope": "MAPPING_LATERAL_DIAGNOSTIC_ONLY",
+  "executable": false,
+  "max_runtime_sec": 60.0,
+  "probes": [
+    0.2,
+    -0.2
+  ],
+  "duration_sec": 1.0,
+  "between_sec": 3.0,
+  "tail_sec": 5.0,
+  "oracle_path": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/full_scene_lateral_calibration_v1/acquisition_oracle.npz",
+  "oracle_sha256": "eeb89b1687bb81988dab09e773428c2ccf6071dc2fa25b1b236049282655e9f6",
+  "patch_xyxy": [
+    -1.5,
+    -3.0,
+    1.5,
+    3.0
+  ],
+  "root_patch_approved": false,
+  "coordinate_verified_by_root": false,
+  "initial_truth_reference": [
+    0.0732879016613354,
+    -0.0006284014017499629,
+    0.001845
+  ],
+  "initial_xy_tolerance_m": 0.05,
+  "body_half_m": 0.74,
+  "padding_m": 0.15,
+  "cell_guard_m": 0.05,
+  "lateral_abort_m": 0.8,
+  "forward_drift_abort_m": 0.1,
+  "yaw_abort_rad": 0.08,
+  "speed_abort_mps": 1.0,
+  "stop_reserve_m": 1.0,
+  "sensor_config_artifact": {
+    "path": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/full_scene_lateral_calibration_v1/sensor_config.json",
+    "sha256": "38aab54b3a6ca49570feaaa8e983f4f9bc9ee197060066b186478a70f92ea023"
+  },
+  "coordinate_evidence_artifact": {
+    "path": "/home/charles/project/colcon_ws/analysis_outputs/planner_comparison_20261105/geometry_frame_validation_v2_standing/report.json",
+    "sha256": "ccea2cbdde4df5dadca50107504cefa6ee3342193480a5dbaf91aa543b709b56"
+  },
+  "expected_environment": {
+    "ROS_DOMAIN_ID": "185",
+    "RMW_IMPLEMENTATION": "rmw_fastrtps_cpp",
+    "ROS_LOCALHOST_ONLY": "0",
+    "ROS_AUTOMATIC_DISCOVERY_RANGE": "LOCALHOST"
+  },
+  "scene_instance_id": {
+    "pid": 1172665,
+    "starttime_ticks": 9427026,
+    "cmdline_sha256": "6e67b4b335a63f5f1cb06b34d0d592d6dd235529a1fcc0b81113626766e8661e",
+    "argv": [
+      "/mnt/data/matrix_v1.1.2_migration_20261030/runtime/MATRiX_v1.1.2/UeSim/Binaries/Linux/UeSim",
+      "UeSim",
+      "/Game/Maps/SceneWorld",
+      "-windowed",
+      "-ResX=1280",
+      "-ResY=720",
+      "-nosound",
+      "-unattended",
+      "-log",
+      "-Abslog=/mnt/data/planner_comparison_20261105/whole_scene_geometry_recovery_20261106/attempt_v1/SceneWorld_attempt_v1.log"
+    ],
+    "boot_id": "c3697337-f336-48f4-8127-4af9e461035d",
+    "uid": [
+      1000,
+      1000,
+      1000,
+      1000
+    ],
+    "gid": [
+      1000,
+      1000,
+      1000,
+      1000
+    ],
+    "namespace_pids": [
+      1172665
+    ],
+    "pid_namespace": "pid:[4026531836]",
+    "mount_namespace": "mnt:[4026531841]",
+    "executable": "/mnt/data/matrix_v1.1.2_migration_20261030/runtime/MATRiX_v1.1.2/UeSim/Binaries/Linux/UeSim",
+    "cwd": "/mnt/data/matrix_v1.1.2_migration_20261030/runtime/MATRiX_v1.1.2/UeSim/Binaries/Linux",
+    "cgroup_sha256": "fbf84cf7338e342871c7319fa00b4b1a92043a129ce4d355dfd41f0300b5f6c5"
+  },
+  "container_id": "b5ebab492d5dbc3994fd859605d24e0bcba2f11ea094e7c7e59e07d5be2dc468"
+}

@@ -1,0 +1,269 @@
+--- v9r2/full_scene_mapping.py
++++ v10/full_scene_mapping.py
+@@ -63,6 +63,7 @@
+ def validate_release(release,route,route_path,oracle_path,output):
+     if release.get('scope')!=contract.SCOPE or release.get('mode')!=contract.MODE or release.get('allow_execute') is not True:
+         raise contract.Hold('root release absent or not executable')
++    contract.validate_fine_route(release,route)
+     rid=release.get('release_id','')
+     if len(rid)!=32 or any(c not in '0123456789abcdef' for c in rid):raise contract.Hold('unique root release UUID required')
+     if release.get('route_sha256')!=contract.sha(route_path) or release.get('oracle_sha256')!=contract.sha(oracle_path):raise contract.Hold('root route/oracle hash mismatch')
+@@ -131,9 +132,10 @@
+         self.process=None;self.pidfd=None;self.identity=None;self.output=output;self.command=(0.,0.,0.);self.run_id=run_id;self.close_errors=[]
+         source=HERE/'mapping_lateral_relay.py';self.frozen=output/'mapping_lateral_relay_frozen.py';shutil.copy2(source,self.frozen)
+         shutil.copy2(HERE/'lateral_capability.py',output/'lateral_capability.py')
++        self.fine_forward_profile=lateral_capability.fine_profile_from_release(contract.read_json(root_release))
+         self.admission_path=output/'relay_admission.json'
+         contract.claim_once(self.admission_path,dict(root_release_path=str(root_release.resolve()),root_release_sha256=contract.sha(root_release),
+-            owner_identity=owner_identity,motion_model=model))
++            owner_identity=owner_identity,motion_model=model,fine_forward_profile=self.fine_forward_profile))
+         self.argv=[sys.executable,'-I',str(self.frozen),'--execute','--admission',str(self.admission_path),'--admission-sha256',contract.sha(self.admission_path)]
+         self.source_sha256=contract.sha(self.frozen)
+         self.log=(output/'relay.stderr').open('w')
+@@ -169,12 +171,14 @@
+         except BaseException:
+             self.close();raise
+ 
+-    def send(self,vx=0.,wz=0.,preflight=None,lateral_raw=0.):
++    def send(self,vx=0.,wz=0.,preflight=None,lateral_raw=0.,fine_phase=False):
++        if type(fine_phase) is not bool:raise contract.Hold('fine phase must be exact boolean')
+         if self.process.poll() is not None or contract.process_identity(self.process.pid)!=self.identity:raise contract.Hold('owned relay exited/changed')
+         if (vx or wz or lateral_raw) and preflight is None:raise contract.Hold('positive relay command requires final input guard')
+         issued_ns,steady=time.time_ns(),time.monotonic()
+         if preflight is not None:preflight(issued_ns,steady)
+-        packet=contract.primitive_packet(vx,wz,issued_ns,lateral_raw)
++        packet=(contract.primitive_packet(vx,wz,issued_ns,lateral_raw,fine_forward_profile=self.fine_forward_profile,fine_phase=True)
++            if fine_phase is True else contract.primitive_packet(vx,wz,issued_ns,lateral_raw))
+         payload=(json.dumps(packet)+'\n').encode()
+         if os.write(self.process.stdin.fileno(),payload)!=len(payload):raise contract.Hold('incomplete nonblocking owned-relay command write')
+         self.command=(vx,wz,lateral_raw)
+@@ -205,8 +209,12 @@
+     """Zero first, then observe; any observation failure still closes only ours."""
+     result=dict(stop_verified=False,relay_closed=False,relay_close_errors=[])
+     try:
+-        try:relay.send()
+-        except BaseException as exc:result['zero_error']=str(exc)
++        try:
++            packet=relay.send()
++            if not isinstance(packet,dict) or any(packet.get(k)!=0. for k in ['forward','lateral','yaw']) or type(packet.get('issued_unix_ns')) is not int:raise ValueError('successful cleanup zero did not return an issued zero packet')
++            result['initial_cleanup_zero_receipt']=dict(packet=packet,basis='parent_pipe_issue_not_SDK_or_engine_dispatch')
++        except BaseException as exc:
++            result['initial_cleanup_zero_receipt']=None;result['zero_error']=str(exc)
+         try:result['stop_verified']=bool(observe_stop())
+         except BaseException as exc:result['stop_observation_error']=str(exc)
+     finally:
+@@ -368,9 +376,13 @@
+             for topic in required:
+                 if (release['recorder_node_name'],release['recorder_node_namespace']) not in [(info.node_name,info.node_namespace) for info in node.get_subscriptions_info_by_topic(topic)]:raise contract.Hold('raw recorder subscription absent: '+topic)
+             return truth,yaw,cloud_cache,(now_ns-truth['stamp_ns'])/1e9
+-        def tick(vx=0.,wz=0.,bridge=None,lateral_raw=0.,terminal_deadline_steady=None):
++        def tick(vx=0.,wz=0.,bridge=None,lateral_raw=0.,terminal_deadline_steady=None,fine_phase=False):
+             nonlocal last_send,last_request,active_lateral
+-            contract.primitive_packet(vx,wz,time.time_ns(),lateral_raw)
++            if fine_phase is not False:
++                if fine_phase is not True or terminal_deadline_steady is None:raise contract.Hold('fine phase requires fixed terminal deadline')
++                fine_profile=contract.fine_command_profile(release,bridge,vx)
++                contract.primitive_packet(vx,wz,time.time_ns(),lateral_raw,fine_forward_profile=fine_profile,fine_phase=True)
++            else:contract.primitive_packet(vx,wz,time.time_ns(),lateral_raw)
+             last_request=dict(vx=vx,wz=wz,lateral_raw=lateral_raw,requested_unix_ns=time.time_ns())
+             until=time.monotonic()+contract.PERIOD
+             while time.monotonic()<until:callbacks.spin()
+@@ -420,11 +432,13 @@
+                 final_facts['cloud']=contract.fresh(dict(stamp_ns=cloud['stamp_ns'],received_steady=cloud['raw_received_steady']),issued_ns,steady)
+                 if last_send is not None and steady-last_send>contract.CONTROL_RENEWAL_LIMIT:raise contract.Hold('guard computation exceeded command renewal bound')
+                 if not audit['valid'] or audit['first_violation'] is not None or steady-audit['checked_steady']>.3:raise contract.Hold('owner audit expired during guard computation')
+-            packet=relay.send(vx,wz,preflight=final_guard,lateral_raw=lateral_raw);last_send=final_facts['issued_steady_sec']
++            packet=(relay.send(vx,wz,preflight=final_guard,lateral_raw=lateral_raw,fine_phase=True) if fine_phase is True else relay.send(vx,wz,preflight=final_guard,lateral_raw=lateral_raw));last_send=final_facts['issued_steady_sec']
+             if lateral_raw:active_lateral=lateral_context
+             if time.monotonic()-last_send>contract.CONTROL_RENEWAL_LIMIT:raise contract.Hold('command write/dispatch exceeded renewal bound; issued anchor retained')
+             accepted=writer.submit('state_trace',dict(unix_ns=time.time_ns(),scope=contract.SCOPE,truth=truth,lidar_stamp_ns=cloud['stamp_ns'],
+               lidar_gt_association=cloud['pose'],command=packet,policy_vx=vx,policy_wz=wz,policy_lateral_raw=lateral_raw,primitive=kind,
++              fine_forward_phase=fine_phase,applied_forward_policy_mps=vx,applied_command=dict(version=1,action='walk',forward=packet['forward'],lateral=packet['lateral'],yaw=packet['yaw']),
++              applied_command_basis='owner pipe write accepted; not child UDP or actuation proof',
+               lateral_stop_envelope_retained=bool(lateral_context),
+               actual_GT_stop_reference=stop_reference,
+               original_inputs={key:{k:v for k,v in value.items() if k!='message'} for key,value in latest.items()},
+@@ -556,6 +570,9 @@
+                     except BaseException:checker=contract.StableStop(contract.truth_age_limit(model))
+                 return False
+             closed=finalize_owned_relay(relay,observe_stop);result.update(closed);stop_verified=closed['stop_verified']
++            if writer is not None:
++                try:emit('initial_cleanup_zero_receipt',receipt=closed.get('initial_cleanup_zero_receipt'),zero_error=closed.get('zero_error'))
++                except BaseException as exc:result['cleanup_zero_receipt_emit_error']=str(exc)
+             result.update(relay_identity=relay.identity,relay_source_sha256=relay.source_sha256,relay_returncode=relay.process.poll() if relay.process is not None else None)
+             if not result['relay_closed']:result['classification']='HOLD_owned_relay_not_closed'
+             elif result['relay_close_errors']:result['classification']='HOLD_owned_relay_close_error'
+@@ -600,7 +617,7 @@
+     """Bounded optional terminal work. All packets use the original guarded tick."""
+     config=contract.forward_terminal_policy(start,target,policy)
+     if config is None:raise contract.Hold('forward terminal policy was not explicitly selected')
+-    bridge=(start,target,policy);deadline=None;corrections=0
++    bridge=(start,target,policy);deadline=None;corrections=0;fine_vx=config.get('fine_forward_mps',contract.MAX_VX)
+     tolerance=contract.translation_endpoint_tolerance(start,target)
+     def budget():
+         if deadline is not None and clock.monotonic()>=deadline:raise contract.Hold('forward terminal extra work deadline expired')
+@@ -628,11 +645,14 @@
+         tick(contract.MAX_VX,0.,bridge=bridge)
+     while True:
+         remaining,endpoint,pose=state(truth,yaw)
+-        emit('fine_started' if corrections==0 else 'correction_started',truth=truth,remaining_m=remaining,correction=corrections)
++        emit('fine_started' if corrections==0 else 'correction_started',truth=truth,remaining_m=remaining,correction=corrections,applied_forward_policy_mps=fine_vx,semantic_forward=fine_vx/2.)
+         while not endpoint['reached']:
+             if remaining<=endpoint['along_endpoint_tolerance_m']:
+                 raise contract.Hold('forward terminal radial miss cannot be repaired by forward-only correction')
+-            budget();tick(contract.MAX_VX,0.,bridge=bridge,terminal_deadline_steady=deadline);budget()
++            budget()
++            if 'fine_forward_mps' in config:tick(fine_vx,0.,bridge=bridge,terminal_deadline_steady=deadline,fine_phase=True)
++            else:tick(contract.MAX_VX,0.,bridge=bridge,terminal_deadline_steady=deadline)
++            budget()
+             truth,yaw=health()[:2];remaining,endpoint,pose=state(truth,yaw)
+         contract.require_translation_progress(start,target,entry,pose,tolerance)
+         truth,yaw=stop('fine_stopped')
+--- v9r2/full_scene_mapping_contract.py
++++ v10/full_scene_mapping_contract.py
+@@ -544,7 +544,15 @@
+     return dict(checked=True,legs=legs,sweep_samples=samples,semantics='Nominal filled-body translation/rotation and fixed-heading tube; original-age stopping reserve is checked before every live packet.')
+ 
+ 
+-def primitive_packet(vx,wz,now_ns,lateral_raw=0.):
++def primitive_packet(vx,wz,now_ns,lateral_raw=0.,fine_forward_profile=None,fine_phase=False):
++    if fine_phase is not False:
++        import lateral_capability as proof
++        if fine_phase is not True:raise Hold('fine phase must be exact boolean')
++        try:profile=proof.fine_profile(fine_forward_profile)
++        except ValueError as exc:raise Hold(str(exc)) from exc
++        if not finite([vx,wz,lateral_raw]) or vx!=profile['selected_fine_forward_mps'] or wz!=0. or lateral_raw!=0.:raise Hold('only root-selected exclusive fine forward may use this phase')
++        return dict(scope=SCOPE,capability=CAPABILITY,issued_unix_ns=now_ns,forward=vx/2.,lateral=0.,yaw=0.,
++            primitive_phase='forward_terminal_fine',fine_forward_subcapability=profile['subcapability'])
+     if (not finite([vx,wz,lateral_raw]) or vx not in (0.,MAX_VX) or wz not in (-MAX_WZ,0.,MAX_WZ)
+         or lateral_raw not in (-MAX_LATERAL_RAW,0.,MAX_LATERAL_RAW) or sum(v!=0 for v in [vx,wz,lateral_raw])>1):
+         raise Hold('only forward, inplace turn or pure measured lateral; no reverse/mixed/micro axes')
+@@ -608,10 +616,11 @@
+     value=policy['forward_terminal'];length=math.hypot(target[0]-start[0],target[1]-start[1])
+     keys={'kind','coarse_stop_remaining_m','max_corrections','max_extra_work_sec'}
+     along=policy.get('along_endpoint_tolerance_m');heading=policy.get('travel_yaw_rad')
+-    if (policy.get('kind')!='straight_fixed_heading' or not isinstance(value,dict) or set(value)!=keys
++    if (policy.get('kind')!='straight_fixed_heading' or not isinstance(value,dict) or set(value) not in (keys,keys|{'fine_forward_mps'})
+         or value.get('kind')!='coarse_stop_then_fine_v1' or not finite([*start,*target,along,heading])
+         or not 0<along<=min(.15,length/4) or abs(wrap(target[2]-heading))>.005):
+         raise Hold('forward terminal requires explicit valid fixed-heading along tolerance and unchanged target heading')
++    if 'fine_forward_mps' in value and (not finite([value['fine_forward_mps']]) or value['fine_forward_mps'] not in (.2,.3)):raise Hold('fine forward allows only explicit internal.2/.3; absent retainsMAX_VX')
+     coarse=value['coarse_stop_remaining_m'];budget=value['max_extra_work_sec'];count=value['max_corrections']
+     if (not finite([coarse,budget]) or not .05<=coarse<=min(.15,length/2) or coarse<=along
+         or not 0<budget<=20. or type(count) is not int or not 1<=count<=2):
+@@ -785,3 +794,26 @@
+         for pid in item['owners']:
+             if pid not in known or reader(pid)!=known[pid]:raise Hold('unknown or changed UDP writer identity: '+str(pid))
+     return True
++
++
++def fine_command_profile(release,bridge,vx):
++    import lateral_capability as proof
++    try:profile=proof.fine_profile_from_release(release)
++    except ValueError as exc:raise Hold(str(exc)) from exc
++    if bridge is None or profile is None:raise Hold('fine forward requires explicit root release and frozen leg')
++    config=forward_terminal_policy(*bridge)
++    if config is None or config.get('fine_forward_mps')!=profile['selected_fine_forward_mps'] or vx!=profile['selected_fine_forward_mps']:
++        raise Hold('fine forward route/value differs from root-selected subcapability')
++    return profile
++
++
++def validate_fine_route(release,route):
++    import lateral_capability as proof
++    try:profile=proof.fine_profile_from_release(release)
++    except ValueError as exc:raise Hold(str(exc)) from exc
++    start=route['start_anchor_truth']
++    for point in route['waypoints']:
++        target=point['pose_truth'];policy=point.get('leg_policy');config=forward_terminal_policy(start,target,policy)
++        if config is not None and 'fine_forward_mps' in config:fine_command_profile(release,(start,target,policy),config['fine_forward_mps'])
++        start=target
++    return profile
+--- v9r2/mapping_lateral_relay.py
++++ v10/mapping_lateral_relay.py
+@@ -27,8 +27,10 @@
+         argv=[p.decode(errors='backslashreplace') for p in raw.rstrip(b'\0').split(b'\0')],
+         boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip())
+ 
+-def validated_axes(msg,now_ns):
+-    if not isinstance(msg,dict) or set(msg)!={'scope','capability','issued_unix_ns','forward','lateral','yaw'}:
++def validated_axes(msg,now_ns,fine_forward_profile=None):
++    plain={'scope','capability','issued_unix_ns','forward','lateral','yaw'}
++    fine=isinstance(msg,dict) and set(msg)==plain|{'primitive_phase','fine_forward_subcapability'}
++    if not isinstance(msg,dict) or (set(msg)!=plain and not fine):
+         raise ValueError('exact scoped primitive required')
+     if msg['scope']!=SCOPE or msg['capability']!=CAPABILITY or type(msg['issued_unix_ns']) is not int:
+         raise ValueError('wrong acquisition capability/stamp')
+@@ -36,11 +38,15 @@
+     values=[msg[k] for k in ('forward','lateral','yaw')]
+     if not all(type(v) in (int,float) and math.isfinite(v) for v in values):raise ValueError('nonfinite/boolean axes')
+     f,l,y=values
+-    if f not in (0.,.2) or l not in (-.4,0.,.4) or y not in (-.3,0.,.3) or sum(v!=0 for v in values)>1:
++    if fine:
++        import lateral_capability as proof
++        selected=proof.fine_profile(fine_forward_profile)
++        if msg['primitive_phase']!='forward_terminal_fine' or msg['fine_forward_subcapability']!=selected['subcapability'] or f!=selected['selected_fine_forward_mps']/2. or l!=0. or y!=0.:raise ValueError('fine phase/value differs from exact root profile')
++    elif f not in (0.,.2) or l not in (-.4,0.,.4) or y not in (-.3,0.,.3) or sum(v!=0 for v in values)>1:
+         raise ValueError('only exclusive forward+.2/lateral±.4/yaw±.3; no reverse/mixed/micro axes')
+     return dict(version=1,action='walk',forward=f,lateral=l,yaw=y)
+ 
+-def run_loop(sock,stream,ready,clock=time,selector=select.select,parent_live=lambda:True):
++def run_loop(sock,stream,ready,clock=time,selector=select.select,parent_live=lambda:True,fine_forward_profile=None):
+     current=ZERO;issued_ns=None;last_valid=None;accepted=0;rejected=0;expired=0;clock_pair=None
+     def clock_check(unix_ns,steady):
+         nonlocal clock_pair
+@@ -59,7 +65,7 @@
+                 line=stream.readline()
+                 if not line:break
+                 try:
+-                    msg=json.loads(line);current=validated_axes(msg,clock.time_ns());issued_ns=msg['issued_unix_ns'];last_valid=clock.monotonic();accepted+=1
++                    msg=json.loads(line);current=validated_axes(msg,clock.time_ns(),fine_forward_profile);issued_ns=msg['issued_unix_ns'];last_valid=clock.monotonic();accepted+=1
+                 except (ValueError,TypeError,KeyError,json.JSONDecodeError):current=ZERO;issued_ns=None;rejected+=1
+             # Acceptance is not a fresh timestamp. Recheck original expiry and
+             # watchdog immediately before each positive send, including replay.
+@@ -79,6 +85,7 @@
+     import lateral_capability as proof
+     if not path.is_absolute() or proof.sha(path)!=digest:raise ValueError('frozen relay admission changed')
+     a=proof.read(path);release_path=Path(a['root_release_path']);r=proof.read(release_path)
++    proof.fine_admission_profile(a,r)
+     rid=r.get('release_id','')
+     if (proof.sha(release_path)!=a['root_release_sha256'] or r.get('allow_execute') is not True or r.get('scope')!=SCOPE
+         or r.get('mode')!='controlled_static_sim_scene' or r.get('lateral_capability')!=CAPABILITY
+@@ -106,7 +113,7 @@
+     with os.fdopen(descriptor,'w') as stream:
+         stream.write(json.dumps(dict(admission_sha256=args.admission_sha256,parent=a['owner_identity']))+'\n');stream.flush();os.fsync(stream.fileno())
+     sock=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);sock.settimeout(SOCKET_TIMEOUT_SEC)
+-    result=run_loop(sock,sys.stdin,lambda:print(READY,flush=True),parent_live=lambda:identity(os.getppid())==a['owner_identity'])
++    result=run_loop(sock,sys.stdin,lambda:print(READY,flush=True),parent_live=lambda:identity(os.getppid())==a['owner_identity'],fine_forward_profile=a.get('fine_forward_profile'))
+     print(json.dumps(result),flush=True);return 0
+ 
+ if __name__=='__main__':raise SystemExit(main())
+--- v9r2/lateral_capability.py
++++ v10/lateral_capability.py
+@@ -222,3 +222,27 @@
+         require(model['max_truth_speed_mps']>=actual['max_norm_speed_mps']
+             and model['max_truth_yaw_rate_rps']>=actual['max_yaw_rate_rps'],'global future-speed/yaw engineering bound below actual measurement')
+     return admission
++
++
++FINE_FORWARD_SUBCAPABILITY='sim_acquisition_forward_terminal_fine_v1'
++
++def fine_profile(value):
++    require(isinstance(value,dict) and set(value)=={'subcapability','selected_fine_forward_mps'}
++        and value.get('subcapability')==FINE_FORWARD_SUBCAPABILITY
++        and finite([value.get('selected_fine_forward_mps')]) and value['selected_fine_forward_mps'] in (.2,.3),
++        'exact root-selected fine-forward subcapability/value required')
++    return dict(value)
++
++def fine_profile_from_release(release):
++    allow=release.get('allow_fine_forward_profile',False)
++    if allow is False:
++        require(release.get('selected_fine_forward_mps') is None and release.get('fine_forward_subcapability') is None,
++            'disabled fine profile must not select a magnitude/subcapability')
++        return None
++    require(allow is True,'fine profile authorization must be explicit true')
++    return fine_profile(dict(subcapability=release.get('fine_forward_subcapability'),selected_fine_forward_mps=release.get('selected_fine_forward_mps')))
++
++def fine_admission_profile(admission,release):
++    value=fine_profile_from_release(release)
++    require(admission.get('fine_forward_profile')==value,'relay fine-forward admission differs from exact root release')
++    return value

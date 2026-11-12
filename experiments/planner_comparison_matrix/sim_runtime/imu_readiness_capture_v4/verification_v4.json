@@ -1,0 +1,19 @@
+{
+  "state": "PASS_SOURCE_ONLY_PENDING_INDEPENDENT_REVIEW",
+  "pure_fixtures": 33,
+  "changed_runtime_files": [
+    "readiness_validator.py"
+  ],
+  "unchanged_runtime_files": [
+    "readiness_capture.py",
+    "readiness_contract.py",
+    "readiness_observer.py",
+    "owned_recorder.py",
+    "imu_converter.py",
+    "imu_gate.py",
+    "recording_deadline.py",
+    "bag_summary.py"
+  ],
+  "actual_new_readiness_pass": false,
+  "no_runtime_actions": true
+}

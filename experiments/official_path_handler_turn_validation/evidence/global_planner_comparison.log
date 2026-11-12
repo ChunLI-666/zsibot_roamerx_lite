@@ -1,0 +1,121 @@
+[WARN] [1793447404.953300295] [rcl]: ROS_LOCALHOST_ONLY is deprecated but still honored if it is enabled. Use ROS_AUTOMATIC_DISCOVERY_RANGE and ROS_STATIC_PEERS instead.
+[WARN] [1793447404.953367911] [rcl]: 'localhost_only' is enabled, 'automatic_discovery_range' and 'static_peers' will be ignored.
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+[37;1m2026-10-31 19:50:04.956 [31;1m[[37;1mTRANSPORT_UDP[31;1m Error] [37mError creating socket: Operation not permitted[34;1m -> Function [36minit[m
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+[37;1m2026-10-31 19:50:04.956 [31;1m[[37;1mRTPS_PARTICIPANT[31;1m Error] [37mUser transport failed to register.[34;1m -> Function [36mRTPSParticipantImpl[m
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+[ERROR] [1793447405.178451834] [official_global_probe.global_planner_probe]: Inflation layer either not found or inflation is not set sufficiently for optimized non-circular collision checking capabilities. It is HIGHLY recommended to set the inflation radius to be at MINIMUM half of the robot's largest cross-section. See github.com/ros-planning/navigation2/tree/main/nav2_smac_planner#potential-fields for full instructions. This will substantially impact run-time performance.
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+[ERROR] [1793447405.563878615] [official_global_probe.global_planner_probe]: Inflation layer either not found or inflation is not set sufficiently for optimized non-circular collision checking capabilities. It is HIGHLY recommended to set the inflation radius to be at MINIMUM half of the robot's largest cross-section. See github.com/ros-planning/navigation2/tree/main/nav2_smac_planner#potential-fields for full instructions. This will substantially impact run-time performance.
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+[ERROR] [1793447407.679359924] [official_global_probe.global_planner_probe]: Inflation layer either not found or inflation is not set sufficiently for optimized non-circular collision checking capabilities. It is HIGHLY recommended to set the inflation radius to be at MINIMUM half of the robot's largest cross-section. See github.com/ros-planning/navigation2/tree/main/nav2_smac_planner#potential-fields for full instructions. This will substantially impact run-time performance.
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+[ERROR] [1793447407.992349932] [official_global_probe.global_planner_probe]: Inflation layer either not found or inflation is not set sufficiently for optimized non-circular collision checking capabilities. It is HIGHLY recommended to set the inflation radius to be at MINIMUM half of the robot's largest cross-section. See github.com/ros-planning/navigation2/tree/main/nav2_smac_planner#potential-fields for full instructions. This will substantially impact run-time performance.
+getifaddrs: Operation not permitted
+getifaddrs: Operation not permitted
+{"scene":"free_same_xy_180","planner":"Hybrid","poses":1,"path_length_m":0,"max_excursion_m":0,"inplace_rotation_deg":0,"body_collision_samples":0,"body_samples":0,"elapsed_s":0.377273}
+{"scene":"free_same_xy_180","planner":"Lattice","poses":1,"path_length_m":0,"max_excursion_m":0,"inplace_rotation_deg":0,"body_collision_samples":0,"body_samples":0,"elapsed_s":0.127421}
+{"scene":"free_same_xy_180","planner":"LatticeActions","poses":1,"path_length_m":0,"max_excursion_m":0,"inplace_rotation_deg":0,"body_collision_samples":0,"body_samples":0,"elapsed_s":0.0902665}
+{"scene":"free_near_110","planner":"Hybrid","poses":218,"path_length_m":3.4015,"max_excursion_m":1.27526,"inplace_rotation_deg":0,"body_collision_samples":0,"body_samples":1077,"elapsed_s":0.332175}
+{"scene":"free_near_110","planner":"Lattice","poses":938,"path_length_m":3.1992,"max_excursion_m":1.19384,"inplace_rotation_deg":63.2921,"body_collision_samples":0,"body_samples":2558,"elapsed_s":0.0950019}
+{"scene":"free_near_110","planner":"LatticeActions","poses":4881,"path_length_m":2.45812,"max_excursion_m":0.885268,"inplace_rotation_deg":333.292,"body_collision_samples":0,"body_samples":9760,"elapsed_s":1.41473}
+{"scene":"recorded_terminal110_static_map","planner":"Hybrid","poses":256,"path_length_m":4.95645,"max_excursion_m":1.0397,"inplace_rotation_deg":5,"body_collision_samples":2,"body_samples":1403,"elapsed_s":0.307468}
+{"scene":"recorded_terminal110_static_map","planner":"Lattice","poses":3538,"path_length_m":4.46621,"max_excursion_m":0.993758,"inplace_rotation_deg":259.695,"body_collision_samples":0,"body_samples":7736,"elapsed_s":0.150239}
+{"scene":"recorded_terminal110_static_map","planner":"LatticeActions","poses":863,"path_length_m":0.0447214,"max_excursion_m":0.0447216,"inplace_rotation_deg":116.565,"body_collision_samples":0,"body_samples":1724,"elapsed_s":0.255661}

@@ -1,0 +1,237 @@
+--- immutable_cal_v2/lateral_once.py
++++ combined_v1/lateral_once.py
+@@ -1,6 +1,7 @@
+ #!/usr/bin/python3
+ """ROOT_HOLD by default. Exactly two short lateral probes in one raw MCAP."""
+ import argparse
++import hashlib
+ import json
+ import math
+ import os
+@@ -16,50 +17,7 @@
+ import bag_summary
+ import lateral_contract as c
+ import recording_deadline as deadline
+-
+-
+-class Observer:
+-    def __init__(self,output):
+-        import rclpy
+-        from rclpy.signals import SignalHandlerOptions
+-        from rclpy.node import Node
+-        from rclpy.qos import qos_profile_sensor_data
+-        from rclpy.serialization import deserialize_message
+-        from nav_msgs.msg import Odometry
+-        from sensor_msgs.msg import PointCloud2,Imu,CompressedImage,CameraInfo
+-        rclpy.init(signal_handler_options=SignalHandlerOptions.NO);self.rclpy=rclpy;self.decode=deserialize_message
+-        self.node=Node('lateral_calibration_observer',enable_rosout=False,start_parameter_services=False)
+-        self.latest={};self.history=[];self.errors=[];self.counts={t:0 for t in c.TOPICS};self.stop=c.StableStop();self.stream=(output/'observations.jsonl').open('x')
+-        types=[Odometry,PointCloud2,Imu,CompressedImage,CompressedImage,CameraInfo];self.subscriptions=[]
+-        for topic,typ in zip(c.TOPICS,types):
+-            self.subscriptions.append(self.node.create_subscription(typ,topic,
+-                lambda raw,info,t=topic,cls=typ:self.capture(t,cls,raw),qos_profile_sensor_data,raw=True))
+-    def capture(self,topic,typ,raw):
+-        now,steady=time.time_ns(),time.monotonic_ns()
+-        try:
+-            message=self.decode(raw,typ);h=message.header
+-            stamp=int(h.stamp.sec)*1_000_000_000+int(h.stamp.nanosec)
+-            if topic in self.latest and stamp<=self.latest[topic]['stamp_ns']:raise c.Hold('nonadvancing original header: '+topic)
+-            sample=dict(topic=topic,stamp_ns=stamp,received_unix_ns=now,received_steady_ns=steady,frame=h.frame_id,
+-                raw_cdr_bytes=len(raw),payload_valid=True)
+-            if topic=='/odom':
+-                p=message.pose.pose;t=message.twist.twist
+-                sample.update(child=message.child_frame_id,position=[p.position.x,p.position.y,p.position.z],
+-                    quaternion=[p.orientation.x,p.orientation.y,p.orientation.z,p.orientation.w],
+-                    linear=[t.linear.x,t.linear.y,t.linear.z],angular=[t.angular.x,t.angular.y,t.angular.z])
+-                if self.history:
+-                    previous=self.history[-1];dt=(stamp-previous['stamp_ns'])/1e9
+-                    sample['position_speed_mps']=math.dist(sample['position'],previous['position'])/dt
+-                self.stop.update(sample);self.history.append(sample)
+-            elif topic=='/front_lidar':sample['payload_valid']=message.width>0 and len(message.data)==message.row_step*message.height
+-            elif topic.endswith('/compressed'):sample['payload_valid']=len(message.data)>100
+-            elif topic.endswith('/camera_info'):sample['payload_valid']=message.width>0 and message.height>0
+-            else:sample['payload_valid']=c.finite([message.angular_velocity.x,message.angular_velocity.y,message.angular_velocity.z,
+-                message.linear_acceleration.x,message.linear_acceleration.y,message.linear_acceleration.z])
+-            self.latest[topic]=sample;self.counts[topic]+=1;self.stream.write(json.dumps(sample)+'\n')
+-        except Exception as exc:self.errors.append(str(exc))
+-    def spin(self):self.rclpy.spin_once(self.node,timeout_sec=.02)
+-    def close(self):self.stream.flush();self.stream.close();self.node.destroy_node();self.rclpy.shutdown()
++from calibration_observer import Observer
+ 
+ 
+ def stat_birth(pid):
+@@ -117,12 +75,31 @@
+     signal.pidfd_send_signal(owned['fd'],signal.SIGINT);owned['signalled']=True
+ 
+ 
+-def metrics(history,trace_path):
++def semantic_sends(trace_path,sign):
+     sends=[json.loads(line) for line in trace_path.read_text().splitlines()]
+-    moving=[s for s in sends if s['command']['LX']]
++    previous=None;neutral_seen=False
++    for item in sends:
++        c.permitted_payload(item['command'],sign)
++        payload=json.dumps(item['command'],separators=(',',':'),allow_nan=False).encode()
++        clocks=[item[k] for k in ['send_before_unix_ns','send_after_unix_ns','send_before_steady_ns','send_after_steady_ns']]
++        if (item.get('event')!='actual_socket_sendto_interval_not_actuation' or item.get('send_success') is not True
++            or item.get('target')!=['127.0.0.1',7447] or item.get('bytes')!=len(payload)
++            or item.get('payload_sha256')!=hashlib.sha256(payload).hexdigest()
++            or any(type(v) is not int or v<0 for v in clocks)
++            or clocks[0]>clocks[1] or clocks[2]>clocks[3]
++            or previous is not None and clocks[2]<=previous):raise c.Hold('invalid/failed semantic send evidence')
++        if item['command']['lateral'] and neutral_seen:raise c.Hold('nonzero semantic send after cleanup neutral')
++        if not item['command']['lateral']:neutral_seen=True
++        previous=clocks[3]
++    return sends
++
++
++def metrics(history,trace_path,sign):
++    sends=semantic_sends(trace_path,sign)
++    moving=[s for s in sends if s['command']['lateral']]
+     if not moving:return dict(state='FAILED_NO_MOTION_SEND',hard_plant_guarantee=False)
+     first,last=moving[0],moving[-1]
+-    neutral=next((s for s in sends if not s['command']['LX'] and s['send_before_steady_ns']>last['send_after_steady_ns']),None)
++    neutral=next((s for s in sends if not s['command']['lateral'] and s['send_before_steady_ns']>last['send_after_steady_ns']),None)
+     records=[s for s in history if first['send_before_unix_ns']<=s['stamp_ns']<=last['send_after_unix_ns']]
+     velocities=[]
+     for a,b in zip(records,records[1:]):
+@@ -148,7 +125,7 @@
+             if math.dist(row['position'][:2],tracker['position'][:2])>.02 or abs(c.wrap(c.rpy(row['quaternion'])[2]-c.rpy(tracker['quaternion'])[2]))>.03:tracker=row
+             if row['stamp_ns']-tracker['stamp_ns']>=300_000_000:stop_start=tracker['stamp_ns'];break
+     percentile=lambda values,p:sorted(values)[min(len(values)-1,int((len(values)-1)*p))] if values else None
+-    sign=-float(first['command']['LX']);motion_ok=delta is not None and math.copysign(1.,sign)*delta[1]>.01
++    motion_ok=delta is not None and math.copysign(1.,sign)*delta[1]>.01
+     return dict(state='MEASURED_SHORT_PROBE' if motion_ok and stop_start else 'FAILED_NO_MEASURABLE_LATERAL_OR_STOP',
+         gt_original_stamp_samples=len(records),policy_lateral=sign,body_displacement_xy_m=delta,
+         body_vy_median_mps=statistics.median([v[1] for v in velocities]) if velocities else None,
+@@ -172,7 +149,7 @@
+     deadline.atomic_json(output/'patch_check.json',patch)
+     release_sha,case_sha=c.sha(release_path),c.sha(case_path)
+     result=dict(scope=c.SCOPE,state='HOLD_PREPARATION',source_signals_sent=0,host_signals_sent=0,probes=[],raw_cdr_reencoded=False)
+-    recorder=tool=guard=observer=None;anchor=None;stopped=[];tool_argv=None;tool_logs=[]
++    recorder=tool=guard=observer=None;anchor=None;stopped=[];tool_argv=None;tool_logs=[];probe_results={}
+     previous={n:signal.signal(n,lambda n,f:stopped.append(n)) for n in [signal.SIGINT,signal.SIGTERM]}
+     parent_identity=deadline.process_identity(os.getpid());lease_written_ns=0
+     def watch(require_sensor=True,force_lease=False):
+@@ -199,6 +176,15 @@
+                 if time.monotonic()-stable_since>=seconds:return
+             else:stable_since=None
+         raise c.Hold('fresh measured stop/tail gate timed out')
++    def record_probe(index):
++        try:item=dict(index=index,**metrics(observer.history,output/f'probe_{index}_send.jsonl',case['probes'][index]))
++        except BaseException as exc:item=dict(index=index,state='FAILED_METRICS',error=str(exc))
++        probe_results[index]=item
++        try:deadline.atomic_json(output/f'probe_{index}.acceptance.json',item)
++        except BaseException as exc:
++            item=dict(index=index,state='FAILED_METRICS',error='acceptance evidence write failed: '+str(exc),measurement=item)
++            probe_results[index]=item
++        return item
+     try:
+         guard=deadline.arm(output,60.)
+         argv=['/opt/ros/jazzy/bin/ros2','bag','record','-a','--include-hidden-topics','--node-name','lateral_raw_'+release['release_id'],
+@@ -225,20 +211,24 @@
+         anchor=(*gt['position'][:2],angles[2]);result['original_truth_anchor']=list(anchor)
+         for index in [0,1]:
+             wait_stop();c.host_proof(release,case)
+-            if c.package_hashes()!=release['package_sha256']:raise c.Hold('source changed before official tool')
++            if c.package_hashes()!=release['package_sha256']:raise c.Hold('source changed before semantic tool')
+             if guard.manifest['deadline_boottime_sec']-time.clock_gettime(time.CLOCK_BOOTTIME)<15.:raise c.Hold('insufficient capped recording reserve')
+-            c.claim(output/f'probe_{index}.planned.json',dict(release_id=release['release_id'],probe=index,original_gt_stamp_ns=observer.latest['/odom']['stamp_ns']))
++            if index==1 and probe_results.get(0,{}).get('state')!='MEASURED_SHORT_PROBE':raise c.Hold('positive semantic probe must pass before negative plan')
++            c.claim(output/f'probe_{index}.planned.json',dict(release_id=release['release_id'],probe=index,original_gt_stamp_ns=observer.latest['/odom']['stamp_ns'],
++                prior_positive_acceptance_sha256=c.sha(output/'probe_0.acceptance.json') if index==1 else None))
+             watch(force_lease=True)  # Original stamps; refreshed lease, never restamped data.
+-            tool_argv=[sys.executable,'-u',str(c.HERE/'official_tool_timed.py'),'--execute','--case',str(case_path),
++            tool_argv=[sys.executable,'-u',str(c.HERE/c.TOOL_FILENAME),'--execute','--case',str(case_path),
+                 '--root-release',str(release_path),'--ready',str(output/'recorder_ready.json'),'--ready-sha256',c.sha(output/'recorder_ready.json'),'--probe-index',str(index)]
+             tool=child(tool_argv,output/f'probe_{index}_stdout.receipt.log',dict(os.environ),check=watch);tool_logs.append(index)
+             until=time.monotonic()+3.
+             while tool['process'].poll() is None:
+                 watch()
+-                if time.monotonic()>until:raise c.Hold('official tool exceeded normal duration/finally budget')
+-            if tool['process'].returncode!=0:raise c.Hold('official tool failed/interrupted')
++                if time.monotonic()>until:raise c.Hold('semantic tool exceeded normal duration/finally budget')
++            if tool['process'].returncode!=0:raise c.Hold('semantic tool failed/interrupted')
+             os.close(tool['fd']);tool=None
+-            wait_stop(seconds=3. if index==0 else 0.)
++            wait_stop()
++            if record_probe(index)['state']!='MEASURED_SHORT_PROBE':raise c.Hold('semantic probe lacks correct-direction measurable GT response and strict stop')
++            if index==0:wait_stop(seconds=3.)
+         wait_stop(seconds=5.,limit=8.)
+         result['state']='COMPLETE_PROBES_STOPPED_PLUS5S_RAW_TAIL'
+     except BaseException as exc:
+@@ -260,9 +250,8 @@
+                 except BaseException as exc:result['failure_stop_and_tail_verified']=False;result['stop_tail_error']=str(exc)
+             for index in tool_logs:
+                 path=output/f'probe_{index}_send.jsonl'
+-                if path.exists():
+-                    try:result['probes'].append(dict(index=index,**metrics(observer.history,path)))
+-                    except BaseException as exc:result['probes'].append(dict(index=index,state='FAILED_METRICS',error=str(exc)))
++                if path.exists():record_probe(index)
++            result['probes']=[probe_results[index] for index in sorted(probe_results)]
+             result['observed_topic_counts']=observer.counts
+             try:observer.close()
+             except BaseException as exc:result['observer_close_error']=str(exc)
+--- immutable_cal_v2/lateral_contract.py
++++ combined_v1/lateral_contract.py
+@@ -7,11 +7,11 @@
+ import time
+ 
+ HERE=Path(__file__).resolve().parent
+-SCOPE='MAPPING_LATERAL_DIAGNOSTIC_ONLY'
+-TOOL_SHA='5a31cd800317f9d280a453424143312584332caf7f38da5144b0730e25284eb3'
++SCOPE='MAPPING_SEMANTIC_LATERAL_CANARY_ONLY'
++TOOL_FILENAME='semantic_tool_timed.py'
+ HELPER_SHA='e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c'
+-PACKAGE=('lateral_once.py','lateral_contract.py','official_tool_timed.py','host_preflight.py',
+-         'matrix_mc_udp_test.py','recording_deadline.py','bag_summary.py')
++PACKAGE=('lateral_once.py','lateral_contract.py',TOOL_FILENAME,'host_preflight.py',
++         'calibration_observer.py','imu_gate.py','recording_deadline.py','bag_summary.py')
+ TOPICS=('/odom','/front_lidar','/front_lidar/imu','/front_camera/image/compressed',
+         '/camera/front/image/compressed','/camera/front/camera_info')
+ 
+@@ -68,7 +68,7 @@
+     rid=release.get('release_id','')
+     if len(rid)!=32 or any(x not in '0123456789abcdef' for x in rid):raise Hold('unique release UUID required')
+     if release.get('case_sha256')!=sha(case_path) or release.get('output_directory')!=str(output):raise Hold('case/output binding differs')
+-    if release.get('package_sha256')!=package_hashes() or sha(HERE/'matrix_mc_udp_test.py')!=TOOL_SHA or sha(HERE/'recording_deadline.py')!=HELPER_SHA:raise Hold('frozen source differs')
++    if release.get('package_sha256')!=package_hashes() or sha(HERE/'recording_deadline.py')!=HELPER_SHA:raise Hold('frozen source differs')
+     if (release.get('uid')!=os.getuid() or os.getuid()!=1000 or release.get('boot_id')!=Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+         or release.get('network_namespace')!=os.readlink('/proc/self/ns/net')
+         or release.get('controller_pid_namespace')!=os.readlink('/proc/self/ns/pid')):raise Hold('same-host/container identity differs')
+@@ -130,7 +130,9 @@
+     def ready(self):return self.start is not None and self.stamp-self.start[0]>=300_000_000 and time.monotonic_ns()-self.start[1]>=300_000_000
+ 
+ def permitted_payload(command,sign):
+-    ordinary={'LX','LY','RX','RY','LT','RT','A','B','X','Y','LB','RB','VIEW','MENU','GUIDE','LS','RS'}
+-    if set(command)!=ordinary or not finite(command.values()):raise Hold('unexpected UDP fields')
+-    if any(command[k]!=0 for k in ordinary-{'LX','LB','B'}):raise Hold('forward/yaw/stand/other control forbidden')
+-    if command['LX'] not in (0.,-sign) or (command['LB'],command['B']) not in ((0,0),(1,1)) or command['LX'] and (command['LB'] or command['B']):raise Hold('only this lateral sign, neutral and official balance allowed')
++    if (type(sign) not in (int,float) or not math.isfinite(sign) or sign not in (.2,-.2)
++        or not isinstance(command,dict) or set(command)!={'version','action','forward','lateral','yaw'}
++        or type(command['version']) is not int or command['version']!=1 or command['action']!='walk'
++        or not finite([command['forward'],command['lateral'],command['yaw']])
++        or command['forward']!=0 or command['yaw']!=0 or command['lateral'] not in (0.,sign)):
++        raise Hold('only exact semantic version1/walk forward0/yaw0 and selected lateral sign or zero')
+--- immutable_cal_v2/host_preflight.py
++++ combined_v1/host_preflight.py
+@@ -57,7 +57,7 @@
+     names={'run_loc_online','sim_command_adapter.py','sim_udp_relay.py','full_scene_mapping.py','matrix_navigation.py',
+         'map_server','planner_server','controller_server','bt_navigator','behavior_server','velocity_smoother',
+         'nav_safety_gate.py','waypoint_follower','waypoint_batch.py',
+-        'matrix_mc_udp_test.py','official_tool_timed.py','lateral_once.py','sim_udp_relay_frozen.py'}
++        'matrix_mc_udp_test.py','official_tool_timed.py','semantic_tool_timed.py','lateral_once.py','sim_udp_relay_frozen.py'}
+     bad=[]
+     for path in proc.iterdir():
+         if not path.name.isdigit():continue
+--- immutable_gate_v1/calibration_observer.py
++++ combined_v1/calibration_observer.py
+@@ -2,7 +2,7 @@
+ import json
+ import math
+ import time
+-import calibration_contract_frozen as c
++import lateral_contract as c
+ from imu_gate import ImuMonotonicGate
+ 
+ class Observer:

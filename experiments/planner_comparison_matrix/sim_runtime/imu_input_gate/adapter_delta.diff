@@ -1,0 +1,82 @@
+--- baseline/live_sensor_adapter.py
++++ adapter_with_gate.py
+@@ -16,6 +16,9 @@
+ from geometry_msgs.msg import TransformStamped
+ from tf2_ros import StaticTransformBroadcaster
+ from matrix_sensor_contract import lidar_to_custom_cdr, imu_to_local
++from rclpy.serialization import deserialize_message
++from std_msgs.msg import String
++from imu_gate import ImuMonotonicGate
+ 
+ class Adapter(Node):
+     def __init__(self, config):
+@@ -24,6 +27,9 @@
+         qos=QoSProfile(depth=1024,reliability=ReliabilityPolicy.RELIABLE)
+         self.lidar_pub=self.create_publisher(CustomMsg,'/livox/lidar',30)
+         self.imu_pub=self.create_publisher(Imu,'/livox/imu',qos)
++        self.imu_gate=ImuMonotonicGate(expected_frame='map')
++        self.imu_reject_pub=self.create_publisher(String,'/simulation/sensor_adapter/imu_reject',qos)
++        self.imu_audit_fault=None
+         self.image_pub=self.create_publisher(CompressedImage,'/camera/front/image/compressed',30)
+         self.info_pub=self.create_publisher(CameraInfo,'/camera/front/camera_info',30)
+         self.clock_pub=self.create_publisher(Clock,'/clock',10)
+@@ -31,7 +37,7 @@
+         self.counts={'lidar':0,'imu':0,'camera':0,'errors':0}
+         self.ages={};self.conversion_ms=0;self.last_clock_ns=0
+         self.subs=[self.create_subscription(PointCloud2,'/front_lidar',self.lidar,30),
+-                   self.create_subscription(Imu,'/front_lidar/imu',self.imu,qos),
++                   self.create_subscription(Imu,'/front_lidar/imu',self.imu_raw,qos,raw=True),
+                    self.create_subscription(CompressedImage,'/front_camera/image/compressed',self.camera,30)]
+         self.tf=StaticTransformBroadcaster(self)
+         imu=TransformStamped();imu.header.frame_id='base_link';imu.child_frame_id='imu_link'
+@@ -63,6 +69,21 @@
+             self.counts['errors']+=1;self.get_logger().error(str(exc))
+         self.conversion_ms=(time.monotonic_ns()-start)*1e-6
+ 
++    def imu_raw(self,raw,info):
++        # Capture actual callback receipt before decoding; never reserialize raw.
++        receipt_unix_ns=time.time_ns();receipt_steady_ns=time.monotonic_ns()
++        event=self.imu_gate.inspect(bytes(raw),receipt_unix_ns,receipt_steady_ns)
++        if not event['accepted']:
++            try:
++                audit=String();audit.data=json.dumps(event,allow_nan=False,separators=(',',':'))
++                self.imu_reject_pub.publish(audit)
++            except Exception as exc:
++                self.imu_audit_fault=str(exc);self.counts['errors']+=1
++                raise RuntimeError('IMU reject audit failed; no silent continuation') from exc
++            if event['fatal']:self.counts['errors']+=1
++            return  # No observe(), accepted receipt, derived publish or clock update.
++        self.imu(deserialize_message(bytes(raw),Imu))
++
+     def imu(self,msg):
+         self.imu_pub.publish(imu_to_local(msg));ns=self.observe('imu',msg)
+         if ns-self.last_clock_ns >= 50_000_000:
+@@ -82,12 +103,22 @@
+     def diagnostics(self):
+         msg=DiagnosticArray();msg.header.stamp=self.get_clock().now().to_msg()
+         s=DiagnosticStatus();s.name='matrix_source_contract';s.hardware_id='simulation-only';s.level=DiagnosticStatus.OK if self.counts['errors']==0 else DiagnosticStatus.ERROR
+-        s.message='source stamps unchanged; snapshot lidar; isolated simulation'
++        gate=self.imu_gate.diagnostics(time.time_ns(),time.monotonic_ns())
++        if self.imu_audit_fault or not gate['accepted_input_fresh'] or self.counts['errors']:
++            s.level=DiagnosticStatus.ERROR
++        elif gate['rejected']:
++            s.level=DiagnosticStatus.WARN
++        s.message='source stamps unchanged; snapshot lidar; isolated simulation; SIM IMU acceptance gate'
+         values={**self.counts,**{k+'_age_s':v for k,v in self.ages.items()},'conversion_ms':self.conversion_ms}
++        values.update({'imu_gate_'+k:v for k,v in gate.items()})
+         s.values=[KeyValue(key=k,value=str(v)) for k,v in values.items()];msg.status=[s];self.diag_pub.publish(msg)
+ 
+-p=argparse.ArgumentParser();p.add_argument('--runtime-config',required=True);a=p.parse_args()
+-rclpy.init();node=Adapter(json.loads(Path(a.runtime_config).read_text()))
+-try:rclpy.spin(node)
+-except KeyboardInterrupt:pass
+-finally:node.destroy_node();rclpy.shutdown()
++def run(runtime_config):
++    rclpy.init();node=Adapter(json.loads(Path(runtime_config).read_text()))
++    try:rclpy.spin(node)
++    except KeyboardInterrupt:pass
++    finally:node.destroy_node();rclpy.shutdown()
++
++if __name__=='__main__':
++    print('ROOT_HOLD: use separately released sim_imu_adapter.py')
++

@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #include "nav2_lifecycle_manager/lifecycle_manager.hpp"
+#include "nav2_lifecycle_manager/bounded_transition.hpp"
 
 #include <chrono>
 #include <memory>
@@ -118,6 +119,7 @@ LifecycleManager::RclPreshutdownRegistration::~RclPreshutdownRegistration()
 
 LifecycleManager::~LifecycleManager()
 {
+  stopping_.store(true, std::memory_order_relaxed);
   rcl_preshutdown_registration_.reset();
   RCLCPP_INFO(get_logger(), "Destroying %s", get_name());
   service_thread_.reset();
@@ -264,10 +266,21 @@ LifecycleManager::changeStateForNode(const std::string & node_name, std::uint8_t
 {
   message(transition_label_map_[transition] + node_name);
 
-  if (!node_map_[node_name]->change_state(transition) ||
-    !(node_map_[node_name]->get_state() == transition_state_map_[transition]))
+  const auto result = request_transition(
+    *this, node_name, transition, transition_state_map_[transition], 30s, stopping_);
+  if (result.outcome == TransitionOutcome::Failed)
   {
-    RCLCPP_ERROR(get_logger(), "Failed to change state for node: %s", node_name.c_str());
+    RCLCPP_ERROR(get_logger(), "Failed to change state for node: %s: %s (state=%u, %.3fs)",
+      node_name.c_str(), result.reason.c_str(), result.state, result.elapsed_seconds);
+    return false;
+  }
+  if (result.outcome == TransitionOutcome::Reconciled) {
+    RCLCPP_WARN(get_logger(), "%s transition %u: RPC reply unconfirmed; fresh state %u verified after %.3fs; continuing normal bond checks",
+      node_name.c_str(), transition, result.state, result.elapsed_seconds);
+  }
+  if (stopping_.load(std::memory_order_relaxed) ||
+    !get_node_base_interface()->get_context()->is_valid())
+  {
     return false;
   }
 
@@ -478,6 +491,7 @@ LifecycleManager::destroyBondTimer()
 void
 LifecycleManager::onRclPreshutdown()
 {
+  stopping_.store(true, std::memory_order_relaxed);
   RCLCPP_INFO(
     get_logger(), "Running Nav2 LifecycleManager rcl preshutdown (%s)",
     this->get_name());

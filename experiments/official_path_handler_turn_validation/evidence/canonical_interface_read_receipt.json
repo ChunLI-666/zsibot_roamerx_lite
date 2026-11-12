@@ -1,0 +1,20 @@
+{
+  "repository": "/home/charles/project/colcon_ws/src/zsibot/zsibot_roamerx_lite",
+  "HEAD_at_read": "419f28b68b3713fbd5107a528dccec7222e9d663",
+  "branch_at_read": "fix/arm64-smac-planner",
+  "canonical_writes_by_this_task": false,
+  "files": [
+    {
+      "path": "src/navigation/src/navigo_core/include/navigo_core/controller.hpp",
+      "sha256": "35d81af09c00690c18af44e8401ca4af6a65de2376cee7517f0bd5f66cb5ad6f"
+    },
+    {
+      "path": "src/navigation/src/navigo_mppi_controller/src/path_handler.cpp",
+      "sha256": "7f865bfa1f8e81bbd2e7dacb8df5ea224bd9302eac40209e9bf56840765d05fb"
+    },
+    {
+      "path": "src/navigation/src/navigo_behavior_tree/include/navigo_behavior_tree/plugins/action/follow_path_action.hpp",
+      "sha256": "53bba79e2060790c3a646435029d0dfd589727b067bf65a5c488d5a60f79c749"
+    }
+  ]
+}

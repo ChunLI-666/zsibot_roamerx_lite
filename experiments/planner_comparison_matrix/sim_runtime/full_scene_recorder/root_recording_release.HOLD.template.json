@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "scope": "RAW_RECORDING_ONLY",
+  "allow_execute": false,
+  "recording_run_id": null,
+  "case_id": null,
+  "output_directory": "/absolute/unique_recording_run",
+  "config_sha256": null,
+  "boot_id": null,
+  "network_namespace": null,
+  "package_sha256": {
+    "full_scene_recording_owner.py": "67160b63b7b0519182c196d06e95a56190aac266c21172fe582bf03a6cfc7a59",
+    "mapping_result_adapter.py": "2cb4030e0f071017b7b21da6843c13bddd476133bdad777ac1240ec3d1f6397c",
+    "bag_summary.py": "1293667a9720e1538d67cc1966a8cbb0753854f94129997e11a78bb680f5e792",
+    "recording_deadline.py": "e850bc78bfe46d0678cfd1984995c688bf4f7ad76c1b806ccfb36c4bc944b80c"
+  }
+}

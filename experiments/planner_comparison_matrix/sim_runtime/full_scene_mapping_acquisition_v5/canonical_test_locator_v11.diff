@@ -1,0 +1,12 @@
+--- review_source_v11/test_passive_relay_v11.py
++++ canonical/test_passive_relay_v11.py
+@@ -27,7 +27,8 @@
+         self.assertEqual(ast.unparse(start.args[0]),'callbacks.spin')
+         fault=next(n for n in ast.walk(execute) if isinstance(n,ast.If) and ast.unparse(n.test)=='imu_gate_fault is not None' and standing.lineno<n.lineno<start.lineno)
+         self.assertIsInstance(fault.body[0],ast.Raise)
+-        base=next(p for p in HERE.parents if p.name=='planner_comparison_20261105')/'full_scene_mapping_fine_forward_profile_candidate_v10/review_source_v10/full_scene_mapping.py'
++        from test_v4_core import BASE as root
++        base=root/'full_scene_mapping_fine_forward_profile_candidate_v10/review_source_v10/full_scene_mapping.py'
+         old=ast.parse(base.read_text());old_owned=next(n for n in old.body if isinstance(n,ast.ClassDef) and n.name=='OwnedRelay');new_owned=next(n for n in tree.body if isinstance(n,ast.ClassDef) and n.name=='OwnedRelay')
+         self.assertEqual(ast.dump(old_owned,include_attributes=False),ast.dump(new_owned,include_attributes=False))
+     def test_early_Node_lying_or_rawfault_failure_never_starts_or_writes_SDK(self):

@@ -39,6 +39,8 @@ def main():
                 command += ['--config', str(args.config.resolve())]
             if args.no_composition:
                 command += ['--no-composition']
+            if args.arm_runtime:
+                command += ['--arm-runtime']
             if args.component_executor_threads is not None:
                 command += ['--component-executor-threads', str(args.component_executor_threads)]
             if args.observer_off:
@@ -59,7 +61,8 @@ def main():
                     code, payload = 1, dict(success=False, error=str(error))
             rows.append(dict(scenario=scenario, returncode=code, result=payload))
             write_json(args.output / 'result.json', dict(success=all(row['result']['success'] for row in rows),
-                cases=rows, hardware_io=False, model='SE2 planar kinematic plant; no SDK/dynamics validation'))
+                cases=rows, hardware_io=False, arm_runtime=args.arm_runtime,
+                model='SE2 planar kinematic plant; no SDK/dynamics validation'))
         return 0 if all(row['result']['success'] for row in rows) else 1
     params, profile = prepare_navigation(args)
     runtime_manifest(args, 'closed_loop')
@@ -69,6 +72,7 @@ def main():
     monitor, processes = Monitor(args, plant=True), Processes(args.output)
     processes.pump = lambda: rclpy.spin_once(monitor, timeout_sec=.01)
     result = dict(success=False, scenario=args.scenario, hardware_io=False,
+        arm_runtime=args.arm_runtime,
         default_environment=os.environ.get('LOCNAV_PROFILE', '0') != '1',
         profiling_enabled=os.environ.get('LOCNAV_PROFILE', '0') == '1',
         composition_enabled=not args.no_composition,

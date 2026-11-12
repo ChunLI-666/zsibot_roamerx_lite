@@ -1,0 +1,7 @@
+[ 20%] Building CXX object CMakeFiles/upstream_path_probe.dir/upstream/nav2_controller/plugins/feasible_path_handler.cpp.o
+[ 40%] Building CXX object CMakeFiles/upstream_path_probe.dir/harness/upstream_constraint_functions.cpp.o
+[ 60%] Linking CXX static library libupstream_path_probe.a
+[ 60%] Built target upstream_path_probe
+[ 80%] Building CXX object CMakeFiles/native_path_probe.dir/harness/native_path_probe.cpp.o
+[100%] Linking CXX executable native_path_probe
+[100%] Built target native_path_probe

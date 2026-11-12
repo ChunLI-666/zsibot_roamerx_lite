@@ -1,0 +1,288 @@
+{
+  "state": "OFFLINE_CLOSED_FAILURE_FACTS_ONLY",
+  "bag_sha256": "f4976b6f302af80c0bf817c819f621d4fe50fd09cf61f9f05203e05d02cce03e",
+  "sample_receipts_sha256": "291d9b62a582fc6aa50e1bc0e4f602aef52de8d5c7af4b94416d0cb9adb3ea9e",
+  "original_result_sha256": "346a1d7be2c1556f4cd1710a1e4fce66bfd9b1294d4ea34333cdcade31f135db",
+  "topics": {
+    "/front_lidar/imu": {
+      "bag_count": 1432,
+      "header_span_s": 2.861967007,
+      "header_rate_hz": 500.005764042688,
+      "bag_log_header_age_by_record_second": {
+        "0": {
+          "n": 501,
+          "median_ms": 1.031077,
+          "p99_ms": 2.005659,
+          "max_ms": 3.182859
+        },
+        "1": {
+          "n": 500,
+          "median_ms": 1.01154,
+          "p99_ms": 1.970482,
+          "max_ms": 2.5214
+        },
+        "2": {
+          "n": 431,
+          "median_ms": 1.020334,
+          "p99_ms": 2.331636,
+          "max_ms": 2.805181
+        }
+      },
+      "bag_after_first_record_second": {
+        "n": 931,
+        "median_ms": 1.014369,
+        "p99_ms": 2.283388,
+        "max_ms": 2.805181
+      },
+      "callback_count": 1282,
+      "callback_header_age_by_callback_second": {
+        "0": {
+          "n": 500,
+          "median_ms": 1.359284,
+          "p99_ms": 19.063409,
+          "max_ms": 22.137731
+        },
+        "1": {
+          "n": 491,
+          "median_ms": 4.621771,
+          "p99_ms": 21.81565,
+          "max_ms": 22.982211
+        },
+        "2": {
+          "n": 291,
+          "median_ms": 135.321969,
+          "p99_ms": 288.626887,
+          "max_ms": 296.651177
+        }
+      },
+      "callback_header_age": {
+        "n": 1282,
+        "median_ms": 3.836645,
+        "p99_ms": 270.105925,
+        "max_ms": 296.651177
+      },
+      "callback_minus_same_header_bag_log_time": {
+        "n": 1281,
+        "median_ms": 2.792249,
+        "p99_ms": 268.978426,
+        "max_ms": 295.590089
+      }
+    },
+    "/livox/imu": {
+      "bag_count": 2560,
+      "header_span_s": 5.167862771,
+      "header_rate_hz": 495.17568739636334,
+      "bag_log_header_age_by_record_second": {
+        "0": {
+          "n": 500,
+          "median_ms": 1.4031955,
+          "p99_ms": 4.140303,
+          "max_ms": 5.270687
+        },
+        "1": {
+          "n": 484,
+          "median_ms": 1.3715005,
+          "p99_ms": 3.506385,
+          "max_ms": 4.67571
+        },
+        "2": {
+          "n": 492,
+          "median_ms": 2.1014545,
+          "p99_ms": 293.553292,
+          "max_ms": 300.929605
+        },
+        "3": {
+          "n": 499,
+          "median_ms": 1.443323,
+          "p99_ms": 3.230705,
+          "max_ms": 3.859168
+        },
+        "4": {
+          "n": 501,
+          "median_ms": 1.461946,
+          "p99_ms": 3.274197,
+          "max_ms": 3.590516
+        },
+        "5": {
+          "n": 84,
+          "median_ms": 1.397969,
+          "p99_ms": 3.172968,
+          "max_ms": 3.446687
+        }
+      },
+      "bag_after_first_record_second": {
+        "n": 2060,
+        "median_ms": 1.4778215,
+        "p99_ms": 270.646224,
+        "max_ms": 300.929605
+      },
+      "callback_count": 971,
+      "callback_header_age_by_callback_second": {
+        "0": {
+          "n": 541,
+          "median_ms": 6.268331,
+          "p99_ms": 107.807219,
+          "max_ms": 110.773551
+        },
+        "1": {
+          "n": 385,
+          "median_ms": 57.876632,
+          "p99_ms": 236.807582,
+          "max_ms": 238.642989
+        },
+        "2": {
+          "n": 45,
+          "median_ms": 262.102998,
+          "p99_ms": 294.235914,
+          "max_ms": 296.175853
+        }
+      },
+      "callback_header_age": {
+        "n": 971,
+        "median_ms": 13.312901,
+        "p99_ms": 273.13407,
+        "max_ms": 296.175853
+      },
+      "callback_minus_same_header_bag_log_time": {
+        "n": 971,
+        "median_ms": 11.523945,
+        "p99_ms": 271.292994,
+        "max_ms": 293.721708
+      }
+    },
+    "/odom": {
+      "bag_count": 286,
+      "header_span_s": 2.849996941,
+      "header_rate_hz": 100.00010733344854,
+      "bag_log_header_age_by_record_second": {
+        "0": {
+          "n": 101,
+          "median_ms": 0.91432,
+          "p99_ms": 3.008505,
+          "max_ms": 3.126548
+        },
+        "1": {
+          "n": 99,
+          "median_ms": 0.96356,
+          "p99_ms": 2.530008,
+          "max_ms": 2.780179
+        },
+        "2": {
+          "n": 86,
+          "median_ms": 0.9860185,
+          "p99_ms": 2.348998,
+          "max_ms": 2.626812
+        }
+      },
+      "bag_after_first_record_second": {
+        "n": 185,
+        "median_ms": 0.973715,
+        "p99_ms": 2.530008,
+        "max_ms": 2.780179
+      },
+      "callback_count": 286,
+      "callback_header_age_by_callback_second": {
+        "0": {
+          "n": 101,
+          "median_ms": 2.161732,
+          "p99_ms": 5.836634,
+          "max_ms": 5.84027
+        },
+        "1": {
+          "n": 100,
+          "median_ms": 3.194397,
+          "p99_ms": 6.519263,
+          "max_ms": 6.606586
+        },
+        "2": {
+          "n": 85,
+          "median_ms": 4.84416,
+          "p99_ms": 11.354578,
+          "max_ms": 12.45406
+        }
+      },
+      "callback_header_age": {
+        "n": 286,
+        "median_ms": 3.2875775,
+        "p99_ms": 10.190851,
+        "max_ms": 12.45406
+      },
+      "callback_minus_same_header_bag_log_time": {
+        "n": 285,
+        "median_ms": 2.202704,
+        "p99_ms": 8.713235,
+        "max_ms": 11.37467
+      }
+    },
+    "/front_camera/image/compressed": {
+      "bag_count": 29,
+      "header_span_s": 2.8,
+      "header_rate_hz": 10.0,
+      "bag_log_header_age_by_record_second": {
+        "0": {
+          "n": 10,
+          "median_ms": 136.730781,
+          "p99_ms": 143.244309,
+          "max_ms": 147.240924
+        },
+        "1": {
+          "n": 11,
+          "median_ms": 133.097891,
+          "p99_ms": 147.205807,
+          "max_ms": 149.721762
+        },
+        "2": {
+          "n": 8,
+          "median_ms": 129.806063,
+          "p99_ms": 137.202389,
+          "max_ms": 143.142688
+        }
+      },
+      "bag_after_first_record_second": {
+        "n": 19,
+        "median_ms": 133.080449,
+        "p99_ms": 147.205807,
+        "max_ms": 149.721762
+      },
+      "callback_count": 29,
+      "callback_header_age_by_callback_second": {
+        "0": {
+          "n": 10,
+          "median_ms": 138.5917865,
+          "p99_ms": 147.847581,
+          "max_ms": 149.005341
+        },
+        "1": {
+          "n": 10,
+          "median_ms": 137.811674,
+          "p99_ms": 149.085547,
+          "max_ms": 155.261101
+        },
+        "2": {
+          "n": 9,
+          "median_ms": 138.459956,
+          "p99_ms": 146.964326,
+          "max_ms": 149.455498
+        }
+      },
+      "callback_header_age": {
+        "n": 29,
+        "median_ms": 138.459956,
+        "p99_ms": 149.455498,
+        "max_ms": 155.261101
+      },
+      "callback_minus_same_header_bag_log_time": {
+        "n": 29,
+        "median_ms": 4.603272,
+        "p99_ms": 9.088016,
+        "max_ms": 9.761937
+      }
+    }
+  },
+  "original_state": "HOLD_READINESS_FAILED",
+  "motion_authorized": false,
+  "interpretation": "Recorder observes near-source IMU times while observer IMU callbacks accumulate delay; dispatch/outer-check backlog is supported. Derived record-age startup burst is also preserved. Scheduling v3 still requires a fresh runtime capture.",
+  "time_basis": "MCAP logTime used only for recorder/header age and same-header comparison. Actual recorded callback wall receipt used for observer/header age; neither substitutes for the other.",
+  "source_or_bag_modified": false,
+  "no_ROS_context_Node_Popen_signal_UDP_remote": true
+}
