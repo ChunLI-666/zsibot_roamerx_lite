@@ -46,7 +46,7 @@ if(BUILD_TESTING)
     RFN_REENTRY_ADAPTER_LIBRARY="$<TARGET_FILE:official_lattice_rpp_adapter>")
   ament_target_dependencies(test_plugin_reentry ${dependencies} class_loader)
   add_dependencies(test_plugin_reentry official_lattice_rpp_adapter)
-  set_tests_properties(test_plugin_reentry PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
+  set_tests_properties(test_plugin_reentry PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE)
   set_tests_properties(test_command_limits test_terminal_track_drift test_rotation_constraints
     test_planner_goal_contract test_terminal_goal_binding test_initial_goal_rotation
     test_plugin_reentry PROPERTIES ENVIRONMENT

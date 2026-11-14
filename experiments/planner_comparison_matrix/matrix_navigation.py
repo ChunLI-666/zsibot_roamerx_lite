@@ -302,6 +302,95 @@ def source_snapshot(path,template,with_waypoints=False):
         if not hex_digest(digest,64) or sha(resolved)!=digest:raise ValueError('Source snapshot hash mismatch: '+name)
     return data,raw
 
+def validate_build_receipt(receipt_path,selected_install,variant,terminal_repair,snapshot,snapshot_raw):
+    """Validate the existing receipt before prepare or any actor starts."""
+    receipt_path=pathlib.Path(receipt_path).resolve();prefix=pathlib.Path(selected_install).resolve()
+    data=json.loads(receipt_path.read_bytes());commit=data.get('repository_commit','')
+    if len(commit)!=40 or any(c not in '0123456789abcdef' for c in commit):
+        raise ValueError('Build receipt requires full repository_commit SHA')
+    kind=data.get('source_identity_kind','committed')
+    if kind=='working_tree_snapshot':
+        if not terminal_repair or variant!='official' or data.get('source_files_match_commit') is not False:
+            raise ValueError('Working-tree source identity requires explicit official terminal repair')
+        if not snapshot or not snapshot_raw or data.get('source_snapshot_sha256')!=hashlib.sha256(snapshot_raw).hexdigest():
+            raise ValueError('Working-tree source snapshot is absent or differs from build receipt')
+        if snapshot['origin']['commit']!=commit or data.get('source_sha256')!=snapshot['files_sha256']:
+            raise ValueError('Working-tree source hashes or base commit differ from snapshot')
+        adapter=NAV/'src/navigation/src/official_lattice_rpp_adapter'
+        required={p.relative_to(NAV).as_posix() for p in adapter.rglob('*') if p.is_file()}
+        required.update({
+          'src/navigation/src/robot_feasible_navigation/include/robot_feasible_navigation/footprint_sweep.hpp',
+          'src/navigation/src/robot_feasible_navigation/vendor/nav2_smac_planner/LICENSE.Apache-2.0',
+          'experiments/official_path_handler_turn_validation/inputs/global_planner/diagnostic_small_radius_same_actions.json'})
+        if not required<=snapshot['files_sha256'].keys():
+            raise ValueError('Working-tree receipt lacks adapter build closure: '+repr(sorted(required-snapshot['files_sha256'].keys())))
+        patch_name=data.get('base_patch_file','');patch=pathlib.PurePosixPath(patch_name)
+        if not patch_name or patch.name!=patch_name or patch_name in ('.','..'):
+            raise ValueError('Invalid base-relative patch receipt path')
+        if sha(receipt_path.parent/patch_name)!=data.get('base_patch_sha256'):
+            raise ValueError('Base-relative patch differs from build receipt')
+        git_root=subprocess.run(['git','-C',str(NAV),'rev-parse','--show-toplevel'],text=True,capture_output=True)
+        if git_root.returncode==0 and pathlib.Path(git_root.stdout.strip()).resolve()==NAV.resolve():
+            actual_base=subprocess.check_output(['git','-C',str(NAV),'rev-parse','HEAD'],text=True).strip()
+            actual_patch=subprocess.check_output(['git','-C',str(NAV),'diff','--binary',commit,'--'])
+            if actual_base!=commit or hashlib.sha256(actual_patch).hexdigest()!=data['base_patch_sha256']:
+                raise ValueError('Canonical checkout base or patch changed')
+        inputs=data.get('build_inputs',{});underlay=inputs.get('underlay_sha256',{})
+        if (not isinstance(inputs.get('commands'),list) or not inputs['commands'] or
+            not all(isinstance(x,str) and x for x in inputs['commands']) or
+            any(not isinstance(inputs.get(k),str) or len(inputs[k])!=64 for k in ('cmake_cache_sha256','configure_log_sha256')) or
+            not isinstance(underlay,dict) or not underlay):
+            raise ValueError('Working-tree receipt lacks build input evidence')
+        required_underlay={'/opt/ros/jazzy/lib/'+name for name in (
+          'libnav2_costmap_2d_core.so','libnav2_regulated_pure_pursuit_controller.so',
+          'libcontroller_server_core.so','libpose_progress_checker.so')}
+        required_underlay.update({'/opt/ros/jazzy/include/nav2_core/controller.hpp',
+          '/opt/ros/jazzy/include/nav2_core/progress_checker.hpp'})
+        if not required_underlay<=underlay.keys():raise ValueError('Build receipt lacks required Jazzy ABI inputs')
+        for stem in ('cmake_cache','configure_log'):
+            filename=inputs.get(stem+'_file','')
+            if not filename or pathlib.PurePosixPath(filename).name!=filename or sha(receipt_path.parent/filename)!=inputs[stem+'_sha256']:
+                raise ValueError('Build input evidence differs: '+stem)
+        for name,digest in underlay.items():
+            path=pathlib.Path(name)
+            if not path.is_absolute() or not path.is_file() or sha(path)!=digest:
+                raise ValueError('Build underlay differs: '+name)
+        if data.get('install_prefix')!=str(prefix):raise ValueError('Build receipt install prefix differs')
+        required_artifacts={'lib/libofficial_lattice_rpp_adapter.so',
+          'share/official_lattice_rpp_adapter/plugins.xml',
+          'share/ament_index/resource_index/nav2_core__pluginlib__plugin/official_lattice_rpp_adapter'}
+    else:
+        if kind!='committed' or data.get('source_files_match_commit') is not True:
+            raise ValueError('Non-repair profile requires commit-bound source receipt')
+        required_artifacts={'lib/libsegment_controller_core.so','lib/libsafe_lattice_planner.so',
+          'lib/robot_feasible_navigation/segment_controller_server'} if variant=='segmented' else {'lib/libofficial_lattice_rpp_adapter.so'}
+    artifacts=data.get('artifact_sha256',{})
+    if not isinstance(artifacts,dict) or not required_artifacts<=artifacts.keys():
+        raise ValueError('Build receipt lacks selected artifacts')
+    for name,digest in artifacts.items():
+        relative=pathlib.PurePosixPath(name);item=(prefix/name).resolve()
+        if (relative.is_absolute() or '..' in relative.parts or relative.as_posix()!=name or
+            not item.is_relative_to(prefix) or not item.is_file() or sha(item)!=digest):
+            raise ValueError('Build artifact differs or escapes prefix: '+name)
+    return dict(source_identity_kind=kind,repository_commit=commit,
+      repository_commit_role='base' if kind=='working_tree_snapshot' else 'source_commit',
+      source_files_match_commit=data['source_files_match_commit'],
+      source_snapshot_sha256=data.get('source_snapshot_sha256'),base_patch_sha256=data.get('base_patch_sha256'))
+
+def validate_waypoint_source_binding(identity,snapshot,waypoint):
+    """Keep independent waypoint receipts; compare source bytes for a dirty adapter."""
+    commit=waypoint['repository_commit']
+    if identity['source_identity_kind']=='working_tree_snapshot':
+        sources=waypoint.get('source_sha256',{})
+        if not snapshot or not sources or any(snapshot['files_sha256'].get(name)!=digest for name,digest in sources.items()):
+            raise ValueError('Waypoint receipt source differs from the adapter source snapshot')
+        return dict(method='source_sha256',waypoint_repository_commit=commit,
+          adapter_base_commit=identity['repository_commit'],adapter_source_is_base_commit=False)
+    if commit!=identity['repository_commit']:raise ValueError('Waypoint and primary runtime commit differ')
+    return dict(method='repository_commit',waypoint_repository_commit=commit,
+      adapter_base_commit=identity['repository_commit'],adapter_source_is_base_commit=True)
+
+
 def native_bt_self_client_valid(proof):
     """Verify the owned native self-client and its sealed, observed topic ingress."""
     try:
@@ -410,6 +499,10 @@ def simulation_scan_latency_profile(max_age=.3):
 
 def prepare(args):
     terminal_aim=getattr(args,'terminal_rotation_aim_yaw_tolerance',0.)
+    terminal_repair=getattr(args,'terminal_settle_repair',False)
+    if terminal_repair:
+        if args.variant!='official':raise ValueError('Terminal settle repair is only for official Lattice')
+        terminal_aim=.03  # The single switch explicitly selects and records the inner aim.
     if terminal_aim not in (0.,.03) or terminal_aim>args.yaw_tolerance:
         raise ValueError('Terminal aim must be disabled or the explicit .03rad candidate within the original yaw tolerance')
     if terminal_aim and args.variant!='official':
@@ -421,6 +514,12 @@ def prepare(args):
         raise ValueError('Latest-only health TF observation requires the explicit simulation profile')
     template=pathlib.Path(args.template).absolute()
     snapshot,snapshot_raw=source_snapshot(args.source_snapshot,template,args.with_waypoints) if args.source_snapshot else (None,None)
+    selected_path=args.segmented_install if args.variant=='segmented' else args.official_install
+    if not selected_path:raise ValueError('Provide an explicit --segmented-install or --official-install for the selected variant')
+    selected_install=pathlib.Path(selected_path).resolve()
+    if terminal_repair and not args.build_receipt:raise ValueError('Terminal repair requires a build receipt and source snapshot')
+    source_identity=validate_build_receipt(args.build_receipt,selected_install,args.variant,terminal_repair,snapshot,snapshot_raw) if args.build_receipt else None
+    waypoint_source_binding=validate_waypoint_source_binding(source_identity,snapshot,waypoint_binding) if source_identity and waypoint_binding else None
     out=pathlib.Path(args.output).resolve();out.mkdir(parents=True,exist_ok=False)
     footprint=json.loads(args.footprint)
     if len(footprint)<3 or any(len(p)!=2 or any(not math.isfinite(v) for v in p) for p in footprint):raise ValueError('finite polygon required')
@@ -437,9 +536,6 @@ def prepare(args):
     d=yaml.safe_load(template.read_text());rpp=copy.deepcopy(d['controller_server']['ros__parameters']['FollowPath'].get('rpp',d['controller_server']['ros__parameters']['FollowPath']))
     rpp.pop('plugin',None)
     if args.rotate_threshold is not None:rpp['rotate_to_heading_min_angle']=args.rotate_threshold
-    selected_path=args.segmented_install if args.variant=='segmented' else args.official_install
-    if not selected_path:raise ValueError('Provide an explicit --segmented-install or --official-install for the selected variant')
-    selected_install=pathlib.Path(selected_path).resolve()
     required_plugin={'official':'official_lattice_rpp_adapter::CheckedLattice','hybrid':'official_lattice_rpp_adapter::CheckedHybrid','segmented':'robot_feasible_navigation::SafeLatticePlanner'}[args.variant]
     manifest=dict(scope='Matrix navigation experiment only; not physical robot acceptance',stage='prepared',execution_requested=args.run,variant=args.variant,
         simulation_scan_latency_profile=scan_profile,
@@ -453,7 +549,7 @@ def prepare(args):
         local_costmap=dict(rolling_window=True,width_m=6,height_m=6,resolution=.01,publish_frequency=1.),
         goal_tolerances=dict(xy=args.xy_tolerance,yaw=args.yaw_tolerance,stateful=False),goal_distance_from_start_limit_m=8.,
         command_chain=['/cmd_vel_nav','/cmd_vel','/cmd_vel_safe'],goal_client='Separate authorized agent must record UUID, original goal, result/cancel and settled errors',
-        build_receipt=str(pathlib.Path(args.build_receipt).resolve()) if args.build_receipt else None,
+        build_receipt=str(pathlib.Path(args.build_receipt).resolve()) if args.build_receipt else None,source_identity=source_identity,waypoint_source_binding=waypoint_source_binding,
         source_repository_observation=None if snapshot else dict(head=subprocess.check_output(['git','-C',str(NAV),'rev-parse','HEAD'],text=True).strip(),
           status=subprocess.check_output(['git','-C',str(NAV),'status','--short'],text=True)),
         caution='Repository observation is not a substitute for the selected artifact build receipt')
@@ -464,6 +560,10 @@ def prepare(args):
           note='Supplied canonical source observation and verified deployment bytes; no deployment Git checkout was inspected. This does not replace the selected artifact build receipt.')
     if args.build_receipt:
         receipt=pathlib.Path(args.build_receipt).resolve();shutil.copy2(receipt,out/'source_build_receipt.json');manifest['build_receipt_sha256']=sha(receipt)
+        if source_identity['source_identity_kind']=='working_tree_snapshot':
+            build_data=json.loads(receipt.read_bytes());patch_name=build_data['base_patch_file']
+            for name in (patch_name,build_data['build_inputs']['cmake_cache_file'],build_data['build_inputs']['configure_log_file']):
+                shutil.copy2(receipt.parent/name,out/name)
     manifest['lifecycle_manager_runtime']=lifecycle_artifacts(args.lifecycle_install,args.lifecycle_build_receipt)
     if manifest['lifecycle_manager_runtime']:
         shutil.copy2(args.lifecycle_build_receipt,out/'lifecycle_build_receipt.json')
@@ -517,6 +617,16 @@ def prepare(args):
             controller['FollowPath']['terminal_early_braking_min_linear_velocity']=.30
             controller['FollowPath']['rpp'].update(lookahead_dist=.75,min_lookahead_dist=.75,max_lookahead_dist=.75,use_velocity_scaled_lookahead_dist=False,rotate_to_heading_angular_vel=.3)
             controller['FollowPath']['max_command_angular_velocity']=.3
+            if terminal_repair:
+                controller['FollowPath'].update(terminal_settle_repair=True,terminal_progress_checker='Progress',
+                    terminal_settle_timeout_sec=30.,terminal_settle_max_angular_velocity=.10,
+                    terminal_settle_near_angle=.35,terminal_settle_angle_gain_per_sec=.5)
+                controller['Progress'].update(plugin='official_lattice_rpp_adapter::TerminalProgressChecker',
+                    controller_name='FollowPath')
+                manifest['terminal_settle_repair']=dict(enabled=True,aim_yaw_rad=.03,phase_timeout_sec=30.,
+                    max_corrections=2,max_angular_rad_per_sec=.10,near_angle_rad=.35,angle_gain_per_sec=.5,
+                    progress_checker='official_lattice_rpp_adapter::TerminalProgressChecker',
+                    scope='Experimental official controller only; no simulator or physical acceptance implied')
             manifest['experimental_rpp_profile']=dict(fixed_lookahead_m=.75,rotate_angular_velocity=.3,pre_sweep_angular_limit=.3)
             manifest['experimental_terminal_braking_profile']=dict(early_braking_min_measured_linear_mps=.30,
                 full_stop_linear_mps=.03,full_stop_angular_radps=.05,
@@ -538,6 +648,9 @@ def prepare(args):
                 phase='First terminal hold zero starts one fixed phase; correction and same-goal plan do not renew it. Existing progress or task deadline may end sooner.',
                 evidence='Source17 observed 1s yaw spans at10/20/30s were .003632/.000635/.000210rad; subsequent recorded motion remained. No future tail prediction.',
                 boundary='Explicit simulation candidate for current finite-window stability; original final independent acceptance and one bounded mission correction still apply.')
+            if terminal_repair:
+                manifest['terminal_yaw_stability']['phase_timeout_sec']=30.
+                manifest['terminal_yaw_stability']['phase']='Fixed 30s monotonic phase shared with the health-checked progress plugin; independent task deadline remains in force.'
             manifest['terminal_track_execution_envelope']=dict(enabled=True,pivot_displacement_limit_m=.05,baseline_original_region_preserved=True,
                 original_goal_outer_m=args.xy_tolerance+.05,original_mandatory_track_only=True,admission_scope='fresh_unstarted_goal_shortcut_after_measured_stop',initial_shortcut_max_xy_error_m=args.xy_tolerance,
                 final_goal_tolerances_unchanged=True,continuous_collision_tube_certified=False,
@@ -633,6 +746,22 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
     if os.environ.get('ROS_DOMAIN_ID')!='185':raise RuntimeError('Matrix navigation requires the isolated domain185 environment from simulation_setup')
     if not args.build_receipt:raise RuntimeError('--run requires a concrete selected-artifact --build-receipt')
     if not args.message_install:raise RuntimeError('--run requires an isolated custom-message --message-install for complete recording')
+    if (sha(args.build_receipt)!=manifest['build_receipt_sha256'] or
+        sha(out/'source_build_receipt.json')!=manifest['build_receipt_sha256']):
+        raise RuntimeError('Build receipt changed after preparation')
+    checked_snapshot,checked_raw=(None,None)
+    if args.source_snapshot:
+        checked_snapshot,checked_raw=source_snapshot(out/'deployment_source_snapshot.json',pathlib.Path(args.template).absolute(),args.with_waypoints)
+        if sha(args.source_snapshot)!=manifest['deployment_source_snapshot']['sha256'] or hashlib.sha256(checked_raw).hexdigest()!=manifest['deployment_source_snapshot']['sha256']:
+            raise RuntimeError('Source snapshot changed after preparation')
+    source_identity=validate_build_receipt(out/'source_build_receipt.json',selected_install,args.variant,
+      getattr(args,'terminal_settle_repair',False),checked_snapshot,checked_raw)
+    original_identity=validate_build_receipt(args.build_receipt,selected_install,args.variant,
+      getattr(args,'terminal_settle_repair',False),checked_snapshot,checked_raw)
+    if source_identity!=manifest['source_identity'] or original_identity!=source_identity:
+        raise RuntimeError('Build identity changed after preparation')
+    if args.with_waypoints and validate_waypoint_source_binding(source_identity,checked_snapshot,manifest['waypoint_runtime'])!=manifest['waypoint_source_binding']:
+        raise RuntimeError('Waypoint source binding changed after preparation')
     if lifecycle_artifacts(args.lifecycle_install,args.lifecycle_build_receipt)!=manifest['lifecycle_manager_runtime']:
         raise RuntimeError('Lifecycle artifacts changed after preparation')
     if args.source_snapshot:
@@ -842,9 +971,6 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
     receipt=json.loads((out/'source_build_receipt.json').read_text())
     commit=receipt.get('repository_commit','')
     if len(commit)!=40 or any(c not in '0123456789abcdef' for c in commit):raise RuntimeError('Build receipt requires full repository_commit SHA')
-    if receipt.get('source_files_match_commit') is not True:raise RuntimeError('Build receipt must prove selected source files match its commit')
-    if args.with_waypoints and manifest['waypoint_runtime']['repository_commit']!=commit:
-        raise RuntimeError('Waypoint overlay and primary runtime commit differ')
     declared=receipt.get('artifact_sha256',{})
     required=['lib/libsegment_controller_core.so','lib/libsafe_lattice_planner.so','lib/robot_feasible_navigation/segment_controller_server'] if args.variant=='segmented' else ['lib/libofficial_lattice_rpp_adapter.so']
     for rel in required:
@@ -985,6 +1111,16 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
                 return value.get('bool_value') if value.get('type')==1 else value.get('double_value')
             if parameter_value('planner_server','GridBased.terminal_goal_binding') is not True or parameter_value('controller_server','FollowPath.terminal_goal_binding') is not True:
                 raise RuntimeError('paired terminal goal-binding mode not active')
+            if getattr(args,'terminal_settle_repair',False):
+                expected={'FollowPath.terminal_settle_repair':True,'FollowPath.terminal_rotation_aim_yaw_tolerance':.03,
+                  'FollowPath.terminal_settle_timeout_sec':30.,'FollowPath.terminal_settle_max_angular_velocity':.10,
+                  'FollowPath.terminal_settle_near_angle':.35,'FollowPath.terminal_settle_angle_gain_per_sec':.5}
+                if any(parameter_value('controller_server',key)!=value for key,value in expected.items()):
+                    raise RuntimeError('terminal settle repair effective parameter mismatch')
+                for key,value in {'Progress.plugin':'official_lattice_rpp_adapter::TerminalProgressChecker',
+                                  'Progress.controller_name':'FollowPath','FollowPath.terminal_progress_checker':'Progress'}.items():
+                    if params['controller_server'].get(key,{}).get('string_value')!=value:
+                        raise RuntimeError('terminal settle repair plugin binding mismatch: '+key)
             if any(abs(parameter_value(node,key)-.01)>1e-12 for node,key in [
                 ('planner_server','GridBased.terminal_global_resolution'),('controller_server','FollowPath.terminal_global_resolution'),
                 ('global_costmap/global_costmap','resolution'),('local_costmap/local_costmap','resolution')]):
@@ -1235,6 +1371,7 @@ def main():
     p.add_argument('--xy-tolerance',type=float,default=.15);p.add_argument('--yaw-tolerance',type=float,default=.08)
     p.add_argument('--terminal-rotation-aim-yaw-tolerance',type=float,choices=[0.,.03],default=0.,
       help='Explicit official-Lattice inner-aim experiment; default disabled, does not change original acceptance or prove a stopping envelope')
+    p.add_argument('--terminal-settle-repair',action='store_true',help='Enable the paired official terminal repair, .03 aim and bounded progress plugin')
     p.add_argument('--build-receipt');p.add_argument('--message-install');p.add_argument('--preflight-timeout',type=float,default=30.);p.add_argument('--run',action='store_true')
     p.add_argument('--lifecycle-install',help='Optional isolated lifecycle executable/core pair, shared by all variants')
     p.add_argument('--lifecycle-build-receipt',help='Exact lifecycle artifact receipt; required with --lifecycle-install')

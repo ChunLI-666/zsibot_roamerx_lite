@@ -4,9 +4,11 @@
 // All use current fixture clocks; none is raw DDS replay or freshness proof.
 #include <gtest/gtest.h>
 #include <class_loader/class_loader.hpp>
+#include <pluginlib/class_loader.hpp>
 #include <nav2_core/controller.hpp>
 #include <nav2_core/controller_exceptions.hpp>
 #include <nav2_core/goal_checker.hpp>
+#include <nav2_core/progress_checker.hpp>
 #include <nav2_costmap_2d/costmap_2d_ros.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -1075,5 +1077,155 @@ TEST_F(P7InnerAimStableTerminal, RecordedOuterResidualRequiresInnerAimAndANewFul
   RecordProperty("actual_adapter_mapping",adapter);RecordProperty("actual_rpp_mapping",rpp);
   RecordProperty("registered_dds_callbacks",static_cast<int>(callbacks_));
   RecordProperty("post_zero_ready_ms",static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-zero_time).count()));
+}
+
+class P8TerminalRepair : public P7InnerAimStableTerminal {
+protected:
+  double phaseSeconds() const override {return 30.;}
+  void configureExtra() override {
+    P7InnerAimStableTerminal::configureExtra();
+    node_->declare_parameter("FollowPath.terminal_settle_repair",true);
+    node_->declare_parameter("FollowPath.terminal_progress_checker",std::string("Progress"));
+    node_->declare_parameter("Progress.plugin",std::string("official_lattice_rpp_adapter::TerminalProgressChecker"));
+    node_->declare_parameter("Progress.controller_name",std::string("FollowPath"));
+    node_->declare_parameter("progress_checker_plugins",std::vector<std::string>{"Progress"});
+    node_->declare_parameter("Progress.movement_time_allowance",.2);
+  }
+  void SetUp() override {
+    P7InnerAimStableTerminal::SetUp();
+    progress_=loader_->createInstance<nav2_core::ProgressChecker>(
+      "official_lattice_rpp_adapter::TerminalProgressChecker");
+    progress_->initialize(node_,"Progress");progress_->reset();
+  }
+  void TearDown() override {progress_.reset();P7InnerAimStableTerminal::TearDown();}
+  std::shared_ptr<nav2_core::ProgressChecker> progress_;
+  void stableOutsideCandidate(double error=.09) {
+    heading_=M_PI+error;
+    p5Run(950ms,true);
+    p5Run(160ms,true,0.,0.,false);
+    deliver(p5Message());const auto prepared=p5Tick();
+    EXPECT_DOUBLE_EQ(prepared.twist.angular.z,0.);
+    EXPECT_DOUBLE_EQ(prepared.twist.linear.x,0.);
+  }
+  geometry_msgs::msg::TwistStamped nextCorrection() {
+    p5Run(50ms,true,0.,0.,false);deliver(p5Message());return p5Tick();
+  }
+};
+TEST_F(P8TerminalRepair, SwingOutsideHoldsUntilStableThenSelectsOneCorrection) {
+  p5Run(250ms,true);stableOutsideCandidate();
+  auto correction=nextCorrection();ASSERT_LT(correction.twist.angular.z,0.);
+  EXPECT_LE(std::abs(correction.twist.angular.z),.1);
+  heading_=M_PI+.02;const auto restarted=std::chrono::steady_clock::now();
+  p5Run(950ms,true);ASSERT_TRUE(p5Run(450ms));
+  EXPECT_GE(std::chrono::steady_clock::now()-restarted,1s);
+}
+TEST_F(P8TerminalRepair, DeliveredMotionPulseRevokesPreparedCandidateBeforeNonzero) {
+  p5Run(250ms,true);stableOutsideCandidate();
+  deliver(p5Message(.1));deliver(p5Message());
+  const auto revoked=p5Tick();EXPECT_DOUBLE_EQ(revoked.twist.angular.z,0.);
+  p5Run(900ms,true); // Old certificate must not move while the new full window is incomplete.
+  p5Run(180ms,true,0.,0.,false);deliver(p5Message());
+  auto prepared=p5Tick();EXPECT_DOUBLE_EQ(prepared.twist.angular.z,0.);
+  auto resumed=nextCorrection();EXPECT_LT(resumed.twist.angular.z,0.);
+}
+TEST_F(P8TerminalRepair, RevokedReadyCandidateDoesNotCommitAcrossCallback) {
+  ASSERT_TRUE(p5Run(1400ms));ASSERT_TRUE(p5Check());
+  p1_allocation_fixture::Barrier barrier(76u*76u*sizeof(std::uint32_t));const auto input=current_pose_;
+  auto computed=std::async(std::launch::async,[&]{p1_allocation_fixture::TargetThread target;
+    return controller_->computeVelocityCommands(input,geometry_msgs::msg::Twist{},checker_.get());});
+  const bool injected=barrier.wait();
+  if(injected) {deliver(p5Message(.08));deliver(p5Message());}
+  barrier.release();geometry_msgs::msg::TwistStamped result;ASSERT_NO_THROW(result=computed.get());
+  ASSERT_TRUE(injected);ASSERT_FALSE(p1_allocation_fixture::timed_out);
+  EXPECT_DOUBLE_EQ(result.twist.angular.z,0.);EXPECT_FALSE(p5Check());
+}
+TEST_F(P8TerminalRepair, OnlyTwoActualCorrectionsArePermitted) {
+  p5Run(250ms,true);
+  for(int correction=0;correction<2;++correction) {
+    stableOutsideCandidate();auto cmd=nextCorrection();ASSERT_LT(cmd.twist.angular.z,0.);
+    heading_=M_PI+.02;p5Run(950ms,true);ASSERT_TRUE(p5Run(400ms));
+  }
+  heading_=M_PI+.09;p5Run(950ms,true);p5Run(160ms,true,0.,0.,false);deliver(p5Message());
+  EXPECT_THROW(p5Tick(),nav2_core::NoValidControl);
+}
+TEST_F(P8TerminalRepair, PositiveFinalHeadingCommandIsLimited) {
+  heading_=M_PI+.2;deliver(p5Message());const auto cmd=p5Tick();
+  EXPECT_LT(cmd.twist.angular.z,0.);EXPECT_NEAR(std::abs(cmd.twist.angular.z),.1,1e-6);
+}
+TEST_F(P8TerminalRepair, NegativeFinalHeadingCommandIsLimited) {
+  heading_=M_PI-.2;deliver(p5Message());const auto cmd=p5Tick();
+  EXPECT_GT(cmd.twist.angular.z,0.);EXPECT_NEAR(std::abs(cmd.twist.angular.z),.1,1e-6);
+}
+TEST_F(P8TerminalRepair, PositiveNearHeadingCommandSlowsProportionally) {
+  heading_=M_PI+.12;deliver(p5Message());const auto cmd=p5Tick();
+  EXPECT_LT(cmd.twist.angular.z,0.);EXPECT_NEAR(std::abs(cmd.twist.angular.z),.06,1e-6);
+}
+TEST_F(P8TerminalRepair, NegativeNearHeadingCommandSlowsProportionally) {
+  heading_=M_PI-.12;deliver(p5Message());const auto cmd=p5Tick();
+  EXPECT_GT(cmd.twist.angular.z,0.);EXPECT_NEAR(std::abs(cmd.twist.angular.z),.06,1e-6);
+}
+TEST_F(P8TerminalRepair, RealProgressPluginDelegatesAndRejectsStaleTerminalCycle) {
+  geometry_msgs::msg::PoseStamped current=pose(.02);
+  ASSERT_TRUE(progress_->check(current));std::this_thread::sleep_for(250ms);
+  EXPECT_FALSE(progress_->check(current));progress_->reset();
+  p5Run(650ms,true);EXPECT_TRUE(progress_->check(current_pose_));
+  progress_->reset();EXPECT_TRUE(progress_->check(current_pose_));
+  std::this_thread::sleep_for(320ms);EXPECT_FALSE(progress_->check(current_pose_));
+}
+TEST_F(P8TerminalRepair, RealProgressPluginFailsAtFixedThirtySecondDeadline) {
+  const auto start=std::chrono::steady_clock::now();auto next_tick=start,next_sample=start;
+  bool expired=false,replanned=false;
+  while(std::chrono::steady_clock::now()-start<32s) {
+    deliver(p5Message());const auto now=std::chrono::steady_clock::now();
+    if(now>=next_tick) {
+      if (!replanned&&now-start>=15s) {
+        controller_->setPlan(plan(.02));checker_->reset();progress_->reset();replanned=true;
+      }
+      if(!progress_->check(current_pose_)) {expired=true;break;}
+      const auto command=p5Tick();ASSERT_DOUBLE_EQ(command.twist.angular.z,0.);
+      next_tick=now+50ms;
+    }
+    next_sample+=2ms;std::this_thread::sleep_until(next_sample);
+  }
+  ASSERT_TRUE(expired);ASSERT_TRUE(replanned);EXPECT_GE(std::chrono::steady_clock::now()-start,30s);
+  RecordProperty("elapsed_ms",static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::chrono::steady_clock::now()-start).count()));
+}
+
+TEST_F(P8TerminalRepair, PluginlibDiscoversRealInstalledProgressPlugin) {
+  pluginlib::ClassLoader<nav2_core::ProgressChecker> loader("nav2_core","nav2_core::ProgressChecker");
+  auto plugin=loader.createSharedInstance("official_lattice_rpp_adapter::TerminalProgressChecker");
+  ASSERT_TRUE(plugin);plugin->initialize(node_,"Progress");
+  std::ifstream maps("/proc/self/maps");std::string line,adapter,core;
+  while(std::getline(maps,line)) {
+    if(line.find("libofficial_lattice_rpp_adapter.so")!=std::string::npos)adapter=line;
+    if(line.find("libpose_progress_checker.so")!=std::string::npos)core=line;
+  }
+  ASSERT_FALSE(adapter.empty());ASSERT_FALSE(core.empty());
+  RecordProperty("loaded_adapter",adapter);RecordProperty("loaded_pose_progress",core);
+}
+TEST_F(P8TerminalRepair, CancelImmediatelyRevokesTerminalProgress) {
+  p5Run(200ms,true);ASSERT_TRUE(progress_->check(current_pose_));controller_->cancel();
+  EXPECT_FALSE(progress_->check(current_pose_));
+}
+class P8UnfinishedPivot : public P8TerminalRepair {
+protected:
+  bool initialShortcut() const override {return false;}
+  double entryRadius() const override {return .05;}
+};
+TEST_F(P8UnfinishedPivot, RequiredNonterminalRotationCannotBeSkippedByFinalYaw) {
+  auto p=plan(.3);p.poses.insert(p.poses.end()-1,pose(0.,M_PI/2.));
+  p.poses.insert(p.poses.end()-1,pose(0.,M_PI));controller_->setPlan(p);checker_->reset();
+  const auto value=commandAt(.11,0.,M_PI-.06);EXPECT_GT(value.twist.linear.x,0.);
+}
+TEST_F(PluginReentry, ProgressPluginRejectsUnpairedLegacyController) {
+  auto plugin=loader_->createInstance<nav2_core::ProgressChecker>(
+    "official_lattice_rpp_adapter::TerminalProgressChecker");
+  EXPECT_THROW(plugin->initialize(node_,"Progress"),std::runtime_error);
+}
+TEST_F(PluginReentry, RepairControllerRejectsUnpairedProgressConfiguration) {
+  node_->declare_parameter("Unpaired.terminal_settle_repair",true);
+  auto other=loader_->createInstance<nav2_core::Controller>("official_lattice_rpp_adapter::FeasibleRPP");
+  EXPECT_THROW(other->configure(node_,"Unpaired",map_->getTfBuffer(),map_),std::runtime_error);
 }
 }  // namespace

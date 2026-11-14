@@ -132,6 +132,7 @@ void CompletionGate::invalidate() {
 void CompletionGate::clearPlan() {
   std::lock_guard<std::mutex> lock(mutex_);
   ready_=false;++epoch_;++plan_generation_;binding_.reset();
+  terminal_progress_active_=terminal_progress_failed_=false;terminal_deadline_ns_=terminal_last_source_=0;terminal_progress_reason_.clear();
 }
 std::uint64_t CompletionGate::bindPlan() {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -141,6 +142,14 @@ void CompletionGate::installBinding(std::shared_ptr<const Binding> binding) {
   std::lock_guard<std::mutex> lock(mutex_);
   need(binding&&binding->generation==plan_generation_,"Stale original-goal binding generation");
   need(!binding_,"Original-goal binding is immutable within its plan generation");
+  if (terminal_progress_active_) {
+    const auto & a=terminal_progress_goal_;const auto & b=binding->original_goal;
+    const bool same=a.header.frame_id==b.header.frame_id&&a.pose.position.x==b.pose.position.x&&
+      a.pose.position.y==b.pose.position.y&&
+      std::abs(angle(tf2::getYaw(a.pose.orientation),tf2::getYaw(b.pose.orientation)))<=1e-12;
+    if (same) {terminal_progress_plan_=binding->generation;}
+    else {terminal_progress_active_=terminal_progress_failed_=false;terminal_deadline_ns_=terminal_last_source_=0;terminal_progress_reason_.clear();}
+  }
   binding_=std::move(binding);
 }
 std::uint64_t CompletionGate::beginCycle(std::uint64_t plan) {
@@ -159,6 +168,50 @@ void CompletionGate::finishCycle(std::uint64_t epoch,bool complete,
     if (source_valid_until_ns_!=0&&
       (source_valid_from_ns_<=0||source_valid_from_ns_>=source_valid_until_ns_)) {ready_=false;}
   }
+}
+void CompletionGate::updateTerminalProgress(std::uint64_t plan,std::int64_t deadline_ns,
+  std::chrono::steady_clock::time_point valid_until,std::int64_t source_from,
+  std::int64_t source_until,std::int64_t source_now) {
+  if (deadline_ns<=0) {return;}
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto now=std::chrono::steady_clock::now();
+  const auto deadline=std::chrono::steady_clock::time_point(std::chrono::duration_cast<
+    std::chrono::steady_clock::duration>(std::chrono::nanoseconds(deadline_ns)));
+  if (!terminal_progress_active_) {
+    terminal_progress_active_=true;terminal_progress_goal_=binding_?binding_->original_goal:geometry_msgs::msg::PoseStamped{};
+    terminal_progress_plan_=plan;terminal_deadline_ns_=deadline_ns;
+  } else if (deadline_ns!=terminal_deadline_ns_||now>=terminal_health_until_||
+    source_now<terminal_last_source_) {
+    terminal_progress_failed_=true;terminal_progress_reason_="deadline_changed_stale_or_clock_rollback";
+  }
+  if (!binding_||plan!=plan_generation_||plan!=terminal_progress_plan_||now>=deadline||
+    source_from<=0||source_now<source_from||source_now>=source_until||now>=valid_until) {
+    terminal_progress_failed_=true;
+    terminal_progress_reason_=now>=deadline?"fixed_deadline":"identity_or_input_stale";
+  }
+  terminal_last_source_=source_now;terminal_source_from_=source_from;terminal_source_until_=source_until;
+  terminal_health_until_=std::min({valid_until,deadline,now+std::chrono::milliseconds(250)});
+}
+void CompletionGate::revokeTerminalProgress() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (terminal_progress_active_) {terminal_progress_failed_=true;terminal_progress_reason_="cancelled";}
+}
+CompletionGate::ProgressSnapshot CompletionGate::terminalProgress(std::int64_t source_now) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!terminal_progress_active_) {return {TerminalProgress::Ordinary,0,0,""};}
+  const auto now=std::chrono::steady_clock::now();
+  const auto deadline=std::chrono::steady_clock::time_point(std::chrono::duration_cast<
+    std::chrono::steady_clock::duration>(std::chrono::nanoseconds(terminal_deadline_ns_)));
+  if (!terminal_progress_failed_) {
+    if (!binding_||plan_generation_!=terminal_progress_plan_) {terminal_progress_reason_="identity";}
+    else if (source_now<terminal_last_source_||source_now<terminal_source_from_) {terminal_progress_reason_="source_clock_rollback";}
+    else if (now>=deadline) {terminal_progress_reason_="fixed_deadline";}
+    else if (source_now>=terminal_source_until_||now>=terminal_health_until_) {terminal_progress_reason_="stale_cycle_or_odom";}
+    if (!terminal_progress_reason_.empty()) {terminal_progress_failed_=true;}
+  }
+  terminal_last_source_=source_now;
+  return {terminal_progress_failed_?TerminalProgress::Failed:TerminalProgress::Healthy,
+    terminal_progress_plan_,terminal_deadline_ns_,terminal_progress_reason_};
 }
 bool CompletionGate::eligibleLocked() const {
   return ready_&&std::chrono::steady_clock::now()<valid_until_;

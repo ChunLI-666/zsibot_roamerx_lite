@@ -23,24 +23,27 @@ inline bool terminalMeasuredStopped(const geometry_msgs::msg::Twist & v) {
 class TerminalStopHold {
 public:
   enum class Action {Track,HoldZero,CorrectYaw,Ready,Outside};
-  void configureStability(bool enabled,std::int64_t phase_limit_ns) {
-    if (phase_limit_ns<=0||phase_limit_ns>10000000000LL) {
-      throw std::invalid_argument("terminal settling phase must be in (0,10] seconds");
+  void configureStability(bool enabled,std::int64_t phase_limit_ns,bool repair=false) {
+    if (phase_limit_ns<=0||phase_limit_ns>(repair?30000000000LL:10000000000LL)||
+      (repair&&!enabled)) {
+      throw std::invalid_argument("invalid terminal settling phase or repair profile");
     }
-    stability_=enabled;phase_limit_=phase_limit_ns;reset();
+    stability_=enabled;repair_=repair;phase_limit_=phase_limit_ns;reset();
   }
   void resetHold() {
     generation_=0;holding_=false;zero_odom_stamp_=zero_steady_=0;
     zero_selected_=false;observed_=false;resetDwell();
   }
-  void reset() {resetHold();phase_deadline_=0;has_phase_goal_=false;phase_frame_.clear();}
+  void reset() {resetHold();phase_deadline_=0;has_phase_goal_=false;phase_frame_.clear();corrections_=0;}
   void installGoal(const std::string & frame,double x,double y,double heading) {
     const bool same=has_phase_goal_&&frame==phase_frame_&&x==phase_x_&&y==phase_y_&&
       std::abs(std::atan2(std::sin(heading-phase_yaw_),std::cos(heading-phase_yaw_)))<=1e-12;
-    if (!same) {phase_deadline_=0;}
+    if (!same) {phase_deadline_=0;corrections_=0;}
     phase_frame_=frame;phase_x_=x;phase_y_=y;phase_yaw_=heading;has_phase_goal_=true;
   }
   bool stabilityEnabled() const {return stability_;}
+  unsigned correctionCount() const {return corrections_;}
+  void correctionSelected() {++corrections_;}
   std::int64_t zeroStamp() const {return zero_odom_stamp_;}
   std::int64_t zeroSteady() const {return zero_steady_;}
   std::int64_t phaseDeadline() const {return phase_deadline_;}
@@ -80,7 +83,7 @@ public:
     if (!measured_stopped||odom_stamp<=zero_odom_stamp_) {
       resetDwell();return Action::HoldZero;
     }
-    if (!in_yaw) {holding_=zero_selected_=false;resetDwell();return Action::CorrectYaw;}
+    if (!in_yaw&&!repair_) {holding_=zero_selected_=false;resetDwell();return Action::CorrectYaw;}
     // Every intervening command remains a collision-checked zero. Both real
     // elapsed time and advancing original odometry must cover the full dwell;
     // neither a queued epoch jump nor a frozen measurement can certify it.
@@ -88,15 +91,17 @@ public:
       dwelling_=true;dwell_steady_ns_=steady_ns;dwell_odom_stamp_=odom_stamp;
     }
     last_odom_stamp_=odom_stamp;
-    return steady_ns-dwell_steady_ns_>=kTerminalStopDwellNs&&
-      odom_stamp-dwell_odom_stamp_>=kTerminalStopDwellNs&&
-      (!stability_||yaw_stable)?Action::Ready:Action::HoldZero;
+    const bool stable=steady_ns-dwell_steady_ns_>=kTerminalStopDwellNs&&
+      odom_stamp-dwell_odom_stamp_>=kTerminalStopDwellNs&&(!stability_||yaw_stable);
+    if (!stable) {return Action::HoldZero;}
+    return in_yaw?Action::Ready:Action::CorrectYaw;
   }
 private:
   std::uint64_t generation_=0;
   bool holding_=false;
   std::int64_t zero_odom_stamp_=0;
-  bool stability_=false,zero_selected_=false,has_phase_goal_=false;
+  bool stability_=false,repair_=false,zero_selected_=false,has_phase_goal_=false;
+  unsigned corrections_=0;
   std::int64_t zero_steady_=0,phase_deadline_=0,phase_limit_=10000000000LL;
   std::string phase_frame_;
   double phase_x_=0.,phase_y_=0.,phase_yaw_=0.;

@@ -21,6 +21,8 @@ class P2PivotProfile(unittest.TestCase):
             '--footprint','[[-0.647,-0.530],[0.647,-0.530],[0.647,0.530],[-0.647,0.530]]',
             '--padding','.15','--variant',variant,'--output',str(out),'--official-install',str(self.install),
             '--template',str(ROOT/'matrix_profile.yaml')]+list(extra)
+        if '--terminal-settle-repair' in extra and variant=='official':
+            command+=['--build-receipt',os.environ['P8_BUILD_RECEIPT'],'--source-snapshot',os.environ['P8_SOURCE_SNAPSHOT']]
         result=subprocess.run(command,capture_output=True,text=True,timeout=20)
         (self.output/(label+'.invocation.json')).write_text(json.dumps(dict(argv=command,returncode=result.returncode,
             stdout=result.stdout,stderr=result.stderr,run_requested=False),indent=2)+'\n')
@@ -43,9 +45,24 @@ class P2PivotProfile(unittest.TestCase):
                 aim=manifest['terminal_zero_aim'];self.assertEqual(aim['enabled'],bool(value));self.assertTrue(aim['default_disabled'])
                 self.assertFalse(aim['stopping_envelope_validated']);self.assertFalse(manifest['execution_requested'])
                 self.assertTrue((out/'navigate.xml').is_file());self.assertFalse((out/'ready.json').exists())
+    def test_repair_switch_pairs_inner_aim_and_progress(self):
+        result,out=self.invoke('repair',['--terminal-settle-repair'])
+        self.assertEqual(result.returncode,0,result.stderr)
+        manifest=json.loads((out/'runtime_manifest.json').read_text())
+        params=yaml.safe_load((out/'params.yaml').read_text())['controller_server']['ros__parameters']
+        follow=params['FollowPath'];progress=params['Progress']
+        self.assertTrue(follow['terminal_settle_repair']);self.assertEqual(follow['terminal_rotation_aim_yaw_tolerance'],.03)
+        self.assertEqual(follow['terminal_settle_timeout_sec'],30.);self.assertEqual(follow['terminal_settle_max_angular_velocity'],.1)
+        self.assertEqual(follow['terminal_settle_near_angle'],.35);self.assertEqual(follow['terminal_settle_angle_gain_per_sec'],.5)
+        self.assertEqual(progress['plugin'],'official_lattice_rpp_adapter::TerminalProgressChecker')
+        self.assertEqual(progress['controller_name'],'FollowPath');self.assertEqual(follow['terminal_progress_checker'],'Progress')
+        self.assertEqual(manifest['terminal_settle_repair']['aim_yaw_rad'],.03)
+        self.assertEqual(manifest['terminal_yaw_stability']['phase_timeout_sec'],30.)
+
     def test_unsupported_aim_and_nonofficial_opt_in_are_rejected_before_preparing(self):
         for label,extra,variant in [('unsupported',['--terminal-rotation-aim-yaw-tolerance','.02'],'official'),
-                                     ('segmented',['--terminal-rotation-aim-yaw-tolerance','.03'],'segmented')]:
+                                     ('segmented',['--terminal-rotation-aim-yaw-tolerance','.03'],'segmented'),
+                                     ('repair_hybrid',['--terminal-settle-repair'],'hybrid')]:
             with self.subTest(label=label):
                 result,out=self.invoke(label,extra,variant);self.assertNotEqual(result.returncode,0)
                 self.assertFalse((out/'runtime_manifest.json').exists())
