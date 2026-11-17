@@ -250,7 +250,7 @@ def scan_observation(latest,topic,begin,end,reason):
       boundary='Call bounds only, not exact internal validation now. source_health stops at first error; later producer guards may not have been evaluated.')
 
 
-def source_snapshot(path,template,with_waypoints=False):
+def source_snapshot(path,template,with_waypoints=False,warehouse_fullmap_enabled=False):
     """Validate a deployment source manifest without inspecting a Git checkout."""
     def unique_object(pairs):
         result={}
@@ -281,6 +281,7 @@ def source_snapshot(path,template,with_waypoints=False):
     # The wrapper executes before this process; the other files are consumed here.
     required=[pathlib.Path(__file__),BASE/'recovery_navigation.py',BASE/'waypoint_runtime.py',BASE/'static_layer_snapshot.py',BASE/'recording_deadline.py',BASE/'run_matrix_navigation.sh',
       template,NAV/'src/navigation/src/robot_navigo/scripts/nav_safety_gate.py']
+    if warehouse_fullmap_enabled:required.append(BASE/'warehouse_fullmap.py')
     if with_waypoints:
         required += [NAV/name for name in waypoint_runtime.SOURCE_FILES]
         required += [BASE/'goal_pilot_source'/name for name in
@@ -513,7 +514,7 @@ def prepare(args):
     if getattr(args,'health_tf_latest_only',False) and scan_profile['operational_max_age_sec']!=.5:
         raise ValueError('Latest-only health TF observation requires the explicit simulation profile')
     template=pathlib.Path(args.template).absolute()
-    snapshot,snapshot_raw=source_snapshot(args.source_snapshot,template,args.with_waypoints) if args.source_snapshot else (None,None)
+    snapshot,snapshot_raw=source_snapshot(args.source_snapshot,template,args.with_waypoints,getattr(args,'warehouse_fullmap',False)) if args.source_snapshot else (None,None)
     selected_path=args.segmented_install if args.variant=='segmented' else args.official_install
     if not selected_path:raise ValueError('Provide an explicit --segmented-install or --official-install for the selected variant')
     selected_install=pathlib.Path(selected_path).resolve()
@@ -532,6 +533,18 @@ def prepare(args):
     map_yaml=pathlib.Path(args.map).resolve();map_data=yaml.safe_load(map_yaml.read_text())
     if abs(float(map_data['resolution'])-.01)>1e-8:raise ValueError('this comparison requires 1cm geometry map')
     map_image=(map_yaml.parent/map_data['image']).resolve()
+    fullmap=getattr(args,'warehouse_fullmap',False)
+    if fullmap:
+        import warehouse_fullmap
+        full_geometry=warehouse_fullmap.map_geometry(map_data,map_image)
+    else:full_geometry=None
+    if fullmap:
+        if map_data.get('negate',0)!=0 or map_data.get('mode','trinary')!='trinary' or float(map_data['free_thresh'])!=.25:
+            raise ValueError('Fullmap static occupancy contract mismatch')
+        full_geometry.update(image=str(map_image),image_sha256=sha(map_image),yaml_sha256=sha(map_yaml),
+                             free_thresh=float(map_data['free_thresh']),footprint=footprint,padding=args.padding)
+    if fullmap and (args.variant!='official' or not args.with_waypoints or not args.with_mission_recovery):
+        raise ValueError('Warehouse fullmap requires official persistent waypoint/recovery profile')
     template=template.resolve()
     d=yaml.safe_load(template.read_text());rpp=copy.deepcopy(d['controller_server']['ros__parameters']['FollowPath'].get('rpp',d['controller_server']['ros__parameters']['FollowPath']))
     rpp.pop('plugin',None)
@@ -545,14 +558,17 @@ def prepare(args):
         profile_template=str(template),profile_template_sha256=sha(template),footprint=footprint,padding=args.padding,
         rotate_to_heading_min_angle=rpp['rotate_to_heading_min_angle'],
         odom_topic=args.odom_topic,scan_topic=args.scan_topic,camera_topic=args.camera_topic,camera_info_topic=args.camera_info_topic,
-        global_costmap=dict(rolling_window=True,width_m=20,height_m=20,resolution=.01,publish_frequency=.5),
+        global_costmap=(dict(rolling_window=False,**full_geometry,publish_frequency=.5) if fullmap else dict(rolling_window=True,width_m=20,height_m=20,resolution=.01,publish_frequency=.5)),
         local_costmap=dict(rolling_window=True,width_m=6,height_m=6,resolution=.01,publish_frequency=1.),
-        goal_tolerances=dict(xy=args.xy_tolerance,yaw=args.yaw_tolerance,stateful=False),goal_distance_from_start_limit_m=8.,
+        goal_tolerances=dict(xy=args.xy_tolerance,yaw=args.yaw_tolerance,stateful=False),goal_distance_from_start_limit_m=None if fullmap else 8.,
         command_chain=['/cmd_vel_nav','/cmd_vel','/cmd_vel_safe'],goal_client='Separate authorized agent must record UUID, original goal, result/cancel and settled errors',
         build_receipt=str(pathlib.Path(args.build_receipt).resolve()) if args.build_receipt else None,source_identity=source_identity,waypoint_source_binding=waypoint_source_binding,
         source_repository_observation=None if snapshot else dict(head=subprocess.check_output(['git','-C',str(NAV),'rev-parse','HEAD'],text=True).strip(),
           status=subprocess.check_output(['git','-C',str(NAV),'status','--short'],text=True)),
         caution='Repository observation is not a substitute for the selected artifact build receipt')
+    if fullmap:
+        manifest['warehouse_fullmap']=full_geometry
+        manifest['initial_goal_rule']='fullmap_geometry_single_goal'
     if snapshot:
         frozen=out/'deployment_source_snapshot.json';frozen.write_bytes(snapshot_raw)
         manifest['deployment_source_snapshot']=dict(path=str(frozen),sha256=sha(frozen),origin=snapshot['origin'],
@@ -573,6 +589,8 @@ def prepare(args):
         p=d[name][name]['ros__parameters'];p.update(footprint=json.dumps(footprint),footprint_padding=args.padding,
           rolling_window=True,width=size,height=size,resolution=.01,publish_frequency=frequency,
           update_frequency=2. if name=='global_costmap' else 10.,always_send_full_costmap=True)
+        if fullmap and name=='global_costmap':
+            warehouse_fullmap.apply_global_profile(p,full_geometry)
         # Preserve the original map's unknown-space hard boundary: with only
         # inflate_unknown=false, stock inflation may replace unknown by253.
         p['inflation_layer'].update(inflate_unknown=False,inflate_around_unknown=True)
@@ -607,7 +625,7 @@ def prepare(args):
             planner.update(terminal_goal_binding=True,terminal_global_resolution=.01,cost_penalty=1.)
             entry_xy=min(.05,args.xy_tolerance)
             controller['FollowPath'].update(terminal_goal_binding=True,terminal_global_resolution=.01,
-                terminal_global_extent=20.,initial_goal_region_shortcut=True,
+                terminal_global_extent=warehouse_fullmap.terminal_extent(full_geometry) if fullmap else 20.,initial_goal_region_shortcut=True,
                 initial_goal_region_max_xy_error=args.xy_tolerance,terminal_track_xy_drift_limit=.05,
                 terminal_rotation_entry_xy_tolerance=entry_xy,terminal_original_region_pivot=True,
                 terminal_rotation_aim_yaw_tolerance=terminal_aim,
@@ -661,7 +679,7 @@ def prepare(args):
                 original_region_pivots=['fresh_unstarted_initial_opt_in','completed_stopped_small_yaw_correction'],
                 nonterminal_handler_and_RPP_tolerances_unchanged=True,
                 evidence='B33 F013 actual pivots were .12825m and .14915m from the original goal before pure rotation; new inner entry is a simulation candidate, not runtime acceptance')
-            manifest['terminal_goal_binding']=dict(enabled=True,global_resolution=.01,global_extent=20.,
+            manifest['terminal_goal_binding']=dict(enabled=True,global_resolution=.01,global_extent=warehouse_fullmap.terminal_extent(full_geometry) if fullmap else 20.,
                 semantics='Original path.back goal is retained for server acceptance; RPP executes checked prefix and ordered actual-origin terminal headings, never an artificial quantization tail.')
             manifest['experimental_planner_profile']=dict(cost_penalty=1.,max_planning_time_sec=2.,
                 filled_output_validation_unchanged=True,
@@ -1109,6 +1127,11 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
             def parameter_value(node,key):
                 value=params[node].get(key,{})
                 return value.get('bool_value') if value.get('type')==1 else value.get('double_value')
+            if manifest.get('warehouse_fullmap'):
+                if parameter_value('global_costmap/global_costmap','rolling_window') is not False:
+                    raise RuntimeError('warehouse fullmap rolling_window not false in actual parameters')
+                if abs(parameter_value('controller_server','FollowPath.terminal_global_extent')-manifest['terminal_goal_binding']['global_extent'])>1e-9:
+                    raise RuntimeError('warehouse terminal global extent actual parameter mismatch')
             if parameter_value('planner_server','GridBased.terminal_goal_binding') is not True or parameter_value('controller_server','FollowPath.terminal_goal_binding') is not True:
                 raise RuntimeError('paired terminal goal-binding mode not active')
             if getattr(args,'terminal_settle_repair',False):
@@ -1131,8 +1154,12 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
             client=node.create_client(GetCostmap,'/'+name+'/get_costmap')
             if not client.wait_for_service(timeout_sec=3.):raise RuntimeError('missing actual costmap service')
             msg=wait(client.call_async(GetCostmap.Request())).map
-            if abs(msg.metadata.resolution-.01)>1e-6 or msg.metadata.size_x!=size or msg.metadata.size_y!=size:raise RuntimeError('actual rolling geometry mismatch '+name)
-            (out/(name+'_initial.cdr')).write_bytes(serialize_message(msg));actual_maps[name]=message_to_ordereddict(msg.metadata)
+            metadata=message_to_ordereddict(msg.metadata)
+            if name=='global_costmap' and manifest.get('warehouse_fullmap'):
+                import warehouse_fullmap
+                warehouse_fullmap.validate_actual_geometry(metadata,manifest['warehouse_fullmap'])
+            elif abs(msg.metadata.resolution-.01)>1e-6 or msg.metadata.size_x!=size or msg.metadata.size_y!=size:raise RuntimeError('actual rolling geometry mismatch '+name)
+            (out/(name+'_initial.cdr')).write_bytes(serialize_message(msg));actual_maps[name]=metadata
         deadline=time.monotonic()+6.
         while time.monotonic()<deadline and any(counts.get('/'+n+'/costmap_raw',0)==0 for n in ['global_costmap','local_costmap']):pump(.1)
         if any(counts.get('/'+n+'/costmap_raw',0)==0 for n in ['global_costmap','local_costmap']):raise RuntimeError('full raw costmap publication not observed')
@@ -1204,6 +1231,8 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
           params_sha256=sha(out/'params.yaml'),build_receipt_sha256=manifest['build_receipt_sha256'],source_counts=counts,
           simulation_scan_latency_profile=manifest['simulation_scan_latency_profile'],
           action_server='/navigate_to_pose',goal_tolerances=manifest['goal_tolerances'],goal_client_authorization='Wait for root instruction; this file alone does not dispatch navigation')
+        if manifest.get('warehouse_fullmap') is not None:
+            readiness['warehouse_fullmap']=manifest['warehouse_fullmap']
         if args.with_waypoints:
             readiness.update(waypoint_action_server='/follow_waypoints',waypoint_contract=manifest['waypoint_contract'],
               waypoint_ownership=ownership,mission_deadline=dict(run_id=deadline_guard.manifest['run_id'],
@@ -1371,6 +1400,7 @@ def main():
     p.add_argument('--xy-tolerance',type=float,default=.15);p.add_argument('--yaw-tolerance',type=float,default=.08)
     p.add_argument('--terminal-rotation-aim-yaw-tolerance',type=float,choices=[0.,.03],default=0.,
       help='Explicit official-Lattice inner-aim experiment; default disabled, does not change original acceptance or prove a stopping envelope')
+    p.add_argument('--warehouse-fullmap',action='store_true',help='Simulation warehouse static global map; requires persistent official profile')
     p.add_argument('--terminal-settle-repair',action='store_true',help='Enable the paired official terminal repair, .03 aim and bounded progress plugin')
     p.add_argument('--build-receipt');p.add_argument('--message-install');p.add_argument('--preflight-timeout',type=float,default=30.);p.add_argument('--run',action='store_true')
     p.add_argument('--lifecycle-install',help='Optional isolated lifecycle executable/core pair, shared by all variants')

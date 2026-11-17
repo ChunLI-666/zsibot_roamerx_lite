@@ -29,7 +29,7 @@ from unique_identifier_msgs.msg import UUID
 
 import pilot_scan_timing as frozen
 import message_info_contract
-from waypoint_contract import (ACTION, AdvancingStop, AsyncEvidenceWriter, OrderedVisits, OwnedGoalIdentity, initial_leg_limit,
+from waypoint_contract import (ACTION, AdvancingStop, AsyncEvidenceWriter, OrderedVisits, OwnedGoalIdentity, initial_leg_limit, validate_initial_request,
                                evidence_json, finite_velocity, mission_budget, strict_stopped, validate_ownership, validate_route, waypoint_binding)
 from waypoint_contract import (ReadyReadCapture, ownership_metadata_lease_deviation, validate_settle_budget,
                                producer_scan_confirmation_failure, producer_scan_confirmation_outcome)
@@ -812,11 +812,21 @@ class WaypointPilot(frozen.Pilot):
         if not valid:return valid,issues,snapshot
         if time.monotonic()>=deadline or self.mission.store.remaining()<=0:
             return False,['post_intent_deadline'],snapshot
-        limit=initial_leg_limit(self.args.simulation_first_leg_max_distance_m,
-            self.latest_ready,self.args.simulation_scan_max_age_sec)
         pose=snapshot['last']['pose'];goal=self.route[self.mission.start_index]['pose']
-        if math.hypot(goal[0]-pose['x'],goal[1]-pose['y'])>=limit:
-            return False,['post_intent_first_leg_outside_reviewed_window'],snapshot
+        if self.latest_ready.get('warehouse_fullmap') is None:
+            limit=initial_leg_limit(self.args.simulation_first_leg_max_distance_m,
+                self.latest_ready,self.args.simulation_scan_max_age_sec)
+            if math.hypot(goal[0]-pose['x'],goal[1]-pose['y'])>=limit:
+                return False,['post_intent_first_leg_outside_reviewed_window'],snapshot
+        else:
+            if len(self.route)!=1:return False,['fullmap_requires_single_original_goal'],snapshot
+            try:
+                allowed=validate_initial_request(self.args.simulation_first_leg_max_distance_m,
+                    self.latest_ready,self.args.simulation_scan_max_age_sec,pose,self.route[self.mission.start_index:])
+            except ValueError as exc:
+                return False,['post_intent_geometry_invalid:'+str(exc)],snapshot
+            if not allowed:
+                return False,['post_intent_first_leg_outside_reviewed_window_or_static_clearance'],snapshot
         self.args.timeout=min(self.args.timeout,self.mission.store.remaining())
         self.emit('post_intent_preflight_passed',action_uuid=str(self.mission.action_uuid),
             original_deadline_steady_s=deadline,original_stable_sec=self.args.stable_preflight_seconds,
@@ -845,22 +855,40 @@ class WaypointPilot(frozen.Pilot):
         if not valid:
             return dict(classification='invalid_final_preflight_not_sent', issues=issues, snapshot=snapshot)
         start_pose = snapshot['last']['pose']
-        try:
-            first_limit = initial_leg_limit(self.args.simulation_first_leg_max_distance_m,
-                self.latest_ready, self.args.simulation_scan_max_age_sec)
-        except ValueError as exc:
-            return dict(classification='invalid_initial_request_window_goal_not_sent',reason=str(exc))
         start_index = self.mission.start_index if getattr(self, 'mission', None) is not None else 0
-        first_distance = math.hypot(self.route[start_index]['pose'][0]-start_pose['x'], self.route[start_index]['pose'][1]-start_pose['y'])
-        self.emit('first_leg_window_check', distance_m=first_distance, limit_m=first_limit,
-                  source_pose_stamp_ns=start_pose.get('stamp_ns'), final_goal_tolerances_unchanged=True)
-        if first_distance >= first_limit:
-            return dict(classification='invalid_first_leg_outside_reviewed_rolling_window_goal_not_sent')
+        if self.latest_ready.get('warehouse_fullmap') is None:
+            if len(self.route)==1:return dict(classification='invalid_single_goal_requires_fullmap_identity')
+            try:
+                first_limit = initial_leg_limit(self.args.simulation_first_leg_max_distance_m,
+                    self.latest_ready,self.args.simulation_scan_max_age_sec)
+            except ValueError as exc:
+                return dict(classification='invalid_initial_request_window_goal_not_sent',reason=str(exc))
+            first_distance = math.hypot(self.route[start_index]['pose'][0]-start_pose['x'],self.route[start_index]['pose'][1]-start_pose['y'])
+            self.emit('first_leg_window_check', distance_m=first_distance, limit_m=first_limit,
+                      source_pose_stamp_ns=start_pose.get('stamp_ns'), final_goal_tolerances_unchanged=True)
+            if first_distance >= first_limit:
+                return dict(classification='invalid_first_leg_outside_reviewed_rolling_window_goal_not_sent')
+        else:
+            if len(self.route)!=1 or getattr(self,'mission',None) is None:
+                return dict(classification='invalid_fullmap_requires_single_persistent_goal')
+            try:
+                allowed=validate_initial_request(self.args.simulation_first_leg_max_distance_m,
+                    self.latest_ready,self.args.simulation_scan_max_age_sec,start_pose,self.route[start_index:])
+            except ValueError as exc:
+                return dict(classification='invalid_initial_request_window_goal_not_sent',reason=str(exc))
+            self.emit('first_leg_window_check',distance_m=math.hypot(self.route[start_index]['pose'][0]-start_pose['x'],
+                      self.route[start_index]['pose'][1]-start_pose['y']), source_pose_stamp_ns=start_pose.get('stamp_ns'),
+                      fullmap=True,final_goal_tolerances_unchanged=True)
+            if not allowed:
+                return dict(classification='invalid_first_leg_outside_reviewed_window_goal_not_sent')
         self.storage_preflight_gap=False
         requested_uuid = self.mission.reserve() if getattr(self, 'mission', None) is not None else uuid.uuid4()
         if getattr(self,'mission',None) is not None:
             valid,issues,snapshot=self.post_intent_preflight(deadline,started)
             if not valid:return dict(classification='invalid_post_intent_preflight_not_sent',issues=issues,snapshot=snapshot)
+        fullmap_checked_pose=(dict(snapshot['last']['pose']) if self.latest_ready.get('warehouse_fullmap') is not None else None)
+        if fullmap_checked_pose is not None:
+            self.emit('fullmap_static_start_checked',x=fullmap_checked_pose['x'],y=fullmap_checked_pose['y'],margin_m=.15,source_stamp_ns=fullmap_checked_pose.get('stamp_ns'))
         request = FollowWaypoints.Goal()
         try:
             launcher_boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip()
@@ -892,6 +920,13 @@ class WaypointPilot(frozen.Pilot):
                 launcher_boot_id)
         except ValueError as exc:budget_issues.append('readiness:'+str(exc))
         valid,issues,snapshot=self.decision_ready(budget_issues,require_stopped=True)
+        if fullmap_checked_pose is not None:
+            try:
+                final_pose=snapshot['last']['pose']
+                dx=final_pose['x']-fullmap_checked_pose['x'];dy=final_pose['y']-fullmap_checked_pose['y']
+                if not math.isfinite(dx) or not math.isfinite(dy) or math.hypot(dx,dy)>.15:
+                    issues.append('fullmap_pose_changed_beyond_checked_static_margin')
+            except (KeyError,TypeError):issues.append('fullmap_final_pose_missing')
         if time.monotonic()>=deadline:issues.append('final_dispatch_preflight_deadline')
         if not valid or issues:
             return dict(classification='invalid_dispatch_decision_not_sent',issues=issues,snapshot=snapshot)
