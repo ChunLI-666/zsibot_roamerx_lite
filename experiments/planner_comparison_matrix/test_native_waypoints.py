@@ -22,7 +22,7 @@ import uuid
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE/'goal_pilot_source'))
-from waypoint_contract import (AsyncEvidenceWriter, OrderedVisits, OwnedGoalIdentity, ReadyReadCapture, WAYPOINT_PARAMETERS, initial_leg_limit,
+from waypoint_contract import (AsyncEvidenceWriter, OrderedVisits, OwnedGoalIdentity, ReadyReadCapture, WAYPOINT_PARAMETERS, initial_leg_limit, validate_initial_request,
                                simulation_scan_latency_profile, validate_simulation_scan_latency_profile, operational_scan_age_issues, strict_simulation_scan_deviations, producer_scan_signed_age_bounds, record_scan_timing_health,
                                evidence_json, exclusive_graph, finite_velocity, mission_budget, strict_stopped,
                                validate_ownership, validate_route, validate_settle_budget, validate_scan_aging_confirmation, waypoint_binding)
@@ -204,6 +204,18 @@ class OwnershipAndBudgetTests(unittest.TestCase):
 
 
 class RawPoseTests(unittest.TestCase):
+    def check_payload(self, sample):
+        node = SimpleNamespace(
+            simulation_scan_max_age_sec=.3, simulation_scan_sequence_fault=None, goal_sent_ns=None,
+            args=SimpleNamespace(execute=False, scan_aging_confirm_sec=0.),
+            input_ready=lambda **kwargs: (True, [], sample),
+            check_interruption=lambda: None, scan_timing_record_check=lambda *args: None,
+        )
+        for name in ('current_payload_issues', 'decision_ready', 'execution_ready'):
+            method, _ = load_method(name)
+            setattr(node, name, MethodType(method, node))
+        return node.execution_ready(require_stopped=False)
+
     def test_nonfinite_quaternion_cannot_hide_behind_finite_projected_yaw(self):
         callback, namespace = load_method('pose_cb')
         base = ast.parse((HERE/'goal_pilot_source/pilot_scan_timing.py').read_bytes())
@@ -225,29 +237,24 @@ class RawPoseTests(unittest.TestCase):
                                  ('pose', 'map', 12_000_000_034, 1., 2.))
                 self.assertTrue(math.isfinite(value['yaw']))
                 self.assertEqual(value['raw_pose_values_finite'], expected)
-                checked, check_namespace = load_method('execution_ready')
-                node = SimpleNamespace(simulation_scan_max_age_sec=.3, simulation_scan_sequence_fault=None,
-                    check_interruption=lambda: None,
-                    input_ready=lambda **kwargs: (True, [], dict(last=dict(pose=value,**{'/cmd_vel_safe':dict(vx=0.,vy=0.,wz=0.)}))), args=SimpleNamespace(execute=False, scan_aging_confirm_sec=0.),
-                    scan_timing_record_check=lambda *args: None)
-                valid, issues, snapshot = checked(node)
+                sample = snapshot()
+                sample['last']['pose'] = value
+                valid, issues, _ = self.check_payload(sample)
                 self.assertEqual(valid, expected)
+                self.assertEqual(issues, [] if expected else ['pose:raw_position_or_quaternion_nonfinite_or_missing'])
                 if not expected:
-                    self.assertIn('pose:raw_position_or_quaternion_nonfinite_or_missing', issues)
                     self.assertEqual(json.loads(evidence_json(value))['raw_quaternion']['w'], dict(nonfinite_float='+Infinity'))
 
     def test_moving_safe_command_has_only_finite_gate_without_stop_threshold(self):
-        checked, namespace = load_method('execution_ready')
-        for velocity, expected in [(dict(vx=.4,vy=0.,wz=.3),True),(dict(vx=math.nan,vy=0.,wz=0.),False),
-                                   (dict(vx=0.,vy=math.inf,wz=0.),False),(dict(vx=0.,vy=0.),False)]:
-            sample=snapshot()
-            sample['last']['pose']['raw_pose_values_finite']=True
-            sample['last']['/cmd_vel_safe'].update(velocity)
-            if 'wz' not in velocity:sample['last']['/cmd_vel_safe'].pop('wz')
-            node=SimpleNamespace(simulation_scan_max_age_sec=.3,simulation_scan_sequence_fault=None,
-                                 check_interruption=lambda:None,input_ready=lambda **kwargs:(True,[],sample),
-                                 args=SimpleNamespace(execute=False, scan_aging_confirm_sec=0.),scan_timing_record_check=lambda *args:None)
-            self.assertEqual(checked(node,require_stopped=False)[0],expected)
+        for velocity, expected in [(dict(vx=.4, vy=0., wz=.3), True), (dict(vx=math.nan, vy=0., wz=0.), False),
+                                   (dict(vx=0., vy=math.inf, wz=0.), False), (dict(vx=0., vy=0.), False)]:
+            with self.subTest(velocity=velocity):
+                sample = snapshot()
+                sample['last']['pose']['raw_pose_values_finite'] = True
+                sample['last']['/cmd_vel_safe'] = velocity
+                valid, issues, _ = self.check_payload(sample)
+                self.assertEqual(valid, expected)
+                self.assertEqual(issues, [] if expected else ['/cmd_vel_safe:nonfinite_or_missing_velocity'])
 
 
 class WriterAndCancellationTests(unittest.TestCase):
@@ -349,7 +356,7 @@ class ExitFlowTests(unittest.TestCase):
             main = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'main')
             cls = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'WaypointPilot')
             methods = [node for node in cls.body if isinstance(node, ast.FunctionDef) and node.name in
-                       ['run_batch', 'finalize_own_goal', 'cancel_own', 'record_stop', 'check_interruption','execution_ready','pump_runtime_inputs']]
+                       ['run_batch', 'finalize_own_goal', 'cancel_own', 'record_stop', 'check_interruption','execution_ready','current_payload_issues','pump_runtime_inputs']]
             future = SimpleNamespace(done=lambda: True,
                                      result=lambda: SimpleNamespace(return_code=0, goals_canceling=[]))
             fake_ros = SimpleNamespace(ok=lambda: True,
@@ -366,7 +373,7 @@ class ExitFlowTests(unittest.TestCase):
                 signal=SimpleNamespace(SIGINT=2, SIGTERM=15, signal=lambda number, handler: 'previous'),
                 frozen=SimpleNamespace(validate_numeric_arguments=lambda args: None,
                                        stamp_ns=lambda stamp: stamp.sec*1_000_000_000+stamp.nanosec,error=pure['error']),
-                validate_route=validate_route, validate_settle_budget=validate_settle_budget, initial_leg_limit=initial_leg_limit,
+                validate_route=validate_route, validate_settle_budget=validate_settle_budget, initial_leg_limit=initial_leg_limit, validate_initial_request=validate_initial_request,
                 validate_scan_aging_confirmation=validate_scan_aging_confirmation,
                 evidence_json=evidence_json, mission_budget=mission_budget,
                 strict_stopped=strict_stopped,finite_velocity=finite_velocity, OwnedGoalIdentity=OwnedGoalIdentity, ACTION='/follow_waypoints',
@@ -422,12 +429,14 @@ class ExitFlowTests(unittest.TestCase):
                     self.first_plans={}
                     self.feedback_overflow=0
                     self.counts={};self.runtime_last_pump=None;self.runtime_last_ready_check_ns=None
+                    self._stop_sample_previous={};self._stop_callback_resets=0
                     self.event_pub = SimpleNamespace(get_subscription_count=lambda: 1)
                     self.latest_ready = dict(mission_deadline=dict(deadline_boottime_sec=time.clock_gettime(time.CLOCK_BOOTTIME)+1000.,
                         launcher_boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip()))
                     self.latest_ready_sha = 'b'*64
                     self.native_feedback = lambda message: None
-                    for name in ['finalize_own_goal', 'cancel_own', 'record_stop', 'check_interruption','pump_runtime_inputs']:
+                    self.input_ready = lambda **unused: (True, [], snapshot())
+                    for name in ['current_payload_issues', 'finalize_own_goal', 'cancel_own', 'record_stop', 'check_interruption','pump_runtime_inputs']:
                         setattr(self, name, MethodType(namespace[name], self))
                 def emit(self, kind, **fields):
                     events.append((kind, fields))
@@ -444,6 +453,10 @@ class ExitFlowTests(unittest.TestCase):
                         try:return namespace['execution_ready'](self,**kwargs)
                         finally:self.args.execute=previous
                     return True, [], snapshot()
+                def decision_ready(self, prior_issues=(), **kwargs):
+                    _, input_issues, sample = self.input_ready()
+                    issues = list(dict.fromkeys([*prior_issues,*input_issues]))
+                    return not issues, issues, sample
                 def invalidate_artifact(self, issues):
                     self.artifact_invalid_reasons.extend(issues)
                 def observe_ordered(self,*args):
@@ -483,7 +496,8 @@ class ExitFlowTests(unittest.TestCase):
                 namespace['main']()
             result = json.loads((output/'result.json').read_text())
             self.assertEqual(events[0], ('init', dict(signal_handler_options='NO')))
-            cancel = next(index for index, event in enumerate(events) if event[0] == 'uuid_cancel_dispatch')
+            cancel = next((index for index, event in enumerate(events) if event[0] == 'uuid_cancel_dispatch'), None)
+            self.assertIsNotNone(cancel,repr((result,events)))
             stop = next(index for index, event in enumerate(events) if event[0] == 'stop_observation')
             close = next(index for index, event in enumerate(events) if event[0] == 'evidence_close')
             shutdown = next(index for index, event in enumerate(events) if event[0] == 'shutdown')
@@ -521,7 +535,7 @@ class ExitFlowTests(unittest.TestCase):
 
     def test_runtime_nonfinite_safe_command_promptly_cancels_only_own_accepted_goal(self):
         result,events=self.exercise('nonfinite_safe_runtime')
-        self.assertEqual(result['classification'],'invalid_runtime_evidence')
+        self.assertEqual(result['classification'],'invalid_runtime_evidence',repr(result))
         self.assertIn('/cmd_vel_safe:nonfinite_or_missing_velocity',result['cancel_reason'])
         self.assertEqual(result['status'],5)
 
