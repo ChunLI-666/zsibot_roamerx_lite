@@ -47,6 +47,39 @@ localhost and never launch hardware adapters. Historical bag replay cannot
 validate arrival. Closed-loop SE2 validation runs real navigation algorithms but
 does not validate actual robot dynamics, real SDK or Lightning on synthetic data.
 
+## Offline MCAP replay
+
+Build and source this package, then use the same self-contained MCAP you open in
+Foxglove. Install the optional desktop Python packages separately (for example in
+a virtual environment with access to the sourced ROS overlay).
+
+```sh
+python3 -m pip install mcap mcap-ros2-support
+ros2 run robot_debug_tools debug_replay_view viewing.mcap debug-043.html \
+  --start 282.9 --duration 1.4
+```
+
+Open the generated HTML in a browser. The input is an indexed MCAP file and
+times are relative to its first log timestamp. Expand an event to compare its
+recorded facts, original record locator and complete decoded message. At narrow
+widths the two panes stack. Use `--topic` (repeatable) or a shorter time window to
+focus on one module. The report shows when the requested record limit truncated
+the view.
+
+For an older split bag, run the command on one original MCAP split at a time.
+If the file has empty Action schemas, pass `--schemas-from action_channels_recovered.mcap`
+with the matching historical schema companion. Only definitions for missing
+schemas are read from the companion. An unresolvable record keeps its time,
+topic and CDR hash and is marked as unavailable for decoding. The tool reads
+ROS 2 CDR with `ros2msg` schemas. It never publishes, starts a ROS node, or
+rewrites a recording. Use the native Foxglove layout for 3D and normal replay.
+
+ROS header time, MCAP log/publish time, BT event time and watchdog durations
+remain independent. Action UUIDs are displayed per goal. Invalid values and
+unbound build metadata remain unknown. A ROS zero-velocity output is evidence of
+a command, with physical execution separate. A recorded observer snapshot is
+shown with the observation and publication times it contains.
+
 ## Building an immutable Git archive
 
 Normal checkouts retain the existing HEAD/dirty-source fingerprint behavior.
