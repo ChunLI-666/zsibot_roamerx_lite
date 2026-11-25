@@ -666,8 +666,8 @@ def prepare(args):
             controller['FollowPath']['terminal_stop_before_rotation']=True
             controller['FollowPath']['terminal_early_braking_min_linear_velocity']=.30
             if private_approach:
-                controller['FollowPath']['private_early_braking_radius']=.22
-                manifest['private_early_braking']=dict(radius_m=.22,minimum_measured_speed_mps=.30,
+                controller['FollowPath']['private_early_braking_radius']=.18
+                manifest['private_early_braking']=dict(radius_m=.18,minimum_measured_speed_mps=.30,
                     requires_ordered_terminal_track=True,original_goal_and_handoff_unchanged=True,
                     boundary='Warehouse private comparison; measured stopping distance remains unproven.')
             controller['FollowPath']['rpp'].update(lookahead_dist=.75,min_lookahead_dist=.75,max_lookahead_dist=.75,use_velocity_scaled_lookahead_dist=False,rotate_to_heading_angular_vel=.3)
@@ -1187,7 +1187,7 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
                     raise RuntimeError('private same-heading planner parameters mismatch')
                 if parameter_value('controller_server','FollowPath.rpp.min_approach_linear_velocity') != .40:
                     raise RuntimeError('private approach velocity floor mismatch')
-                if parameter_value('controller_server','FollowPath.private_early_braking_radius') != .22:
+                if parameter_value('controller_server','FollowPath.private_early_braking_radius') != .18:
                     raise RuntimeError('private early braking radius mismatch')
             if getattr(args,'terminal_settle_repair',False):
                 expected={'FollowPath.terminal_settle_repair':True,'FollowPath.terminal_rotation_aim_yaw_tolerance':.03,
