@@ -19,6 +19,7 @@ geometry_msgs::msg::PoseStamped pose(double x,double y,double yaw=0.) {
 }
 class SameHeading : public ::testing::Test {
  protected:
+  virtual bool useCache() const {return false;}
   static void SetUpTestSuite() {rclcpp::init(0,nullptr);}
   static void TearDownTestSuite() {rclcpp::shutdown();}
   void SetUp() override {
@@ -27,6 +28,7 @@ class SameHeading : public ::testing::Test {
     node->declare_parameter("GridBased.terminal_goal_binding",true);
     node->declare_parameter("GridBased.private_same_heading_approach",true);
     node->declare_parameter("GridBased.max_planning_time",2.);
+    node->declare_parameter("GridBased.cache_obstacle_heuristic",useCache());
     node->declare_parameter("GridBased.lookup_table_size",1.);
     node->declare_parameter("GridBased.cost_penalty",1.);
     node->declare_parameter("GridBased.max_iterations",1000000);
@@ -55,6 +57,43 @@ class SameHeading : public ::testing::Test {
   std::shared_ptr<rclcpp_lifecycle::LifecycleNode> node;std::shared_ptr<nav2_costmap_2d::Costmap2DROS> map;
   std::unique_ptr<class_loader::ClassLoader> loader;nav2_core::GlobalPlanner::Ptr planner;
 };
+class CacheSameHeading : public SameHeading {
+ protected:
+  bool useCache() const override {return true;}
+};
+TEST_F(CacheSameHeading, CurrentMapTailRejectsObstaclesAndUnknownAfterWarmup) {
+  ASSERT_TRUE(node->get_parameter("GridBased.cache_obstacle_heuristic").as_bool());
+  ASSERT_NO_THROW(makePlan());auto * grid=map->getCostmap();unsigned int x,y;
+  ASSERT_TRUE(grid->worldToMap(-.5,0.,x,y));
+  for (unsigned char cost:{254,255}) {grid->setCost(x,y,cost);EXPECT_ANY_THROW(makePlan())<<int(cost);}
+  grid->setCost(x,y,0);EXPECT_NO_THROW(makePlan());
+}
+TEST_F(CacheSameHeading, ChangedConnectionFindsCheckedAlternateAndClears) {
+  const auto start=pose(-2.3,0.);const auto goal=pose(0.,0.);
+  const auto old=planner->createPlan(start,goal,[]{return false;});ASSERT_GT(old.poses.size(),3u);
+  auto * grid=map->getCostmap();unsigned int x,y;ASSERT_TRUE(grid->worldToMap(-1.65,0.,x,y));
+  for (unsigned char obstacle:{254,255}) {
+    // A physical obstacle is surrounded by the costmap's inscribed halo.
+    for (int dy=-30;dy<=30;++dy) for (int dx=-30;dx<=30;++dx) {
+      const double radius=std::hypot(dx,dy)*grid->getResolution();
+      if (radius<=.30) grid->setCost(x+dx,y+dy,radius<=.07?obstacle:253);
+    }
+    const auto fp=map->getRobotFootprint();bool old_blocked=false;
+    for(const auto & q:old.poses) if(!robot_feasible_navigation::sweep::footprintFree(*grid,fp,q.pose.position.x,q.pose.position.y,tf2::getYaw(q.pose.orientation))) {old_blocked=true;break;}
+    ASSERT_TRUE(old_blocked);
+    const auto alternate=planner->createPlan(start,goal,[]{return false;});ASSERT_GT(alternate.poses.size(),3u);
+    for(const auto & q:alternate.poses) EXPECT_TRUE(robot_feasible_navigation::sweep::footprintFree(*grid,fp,q.pose.position.x,q.pose.position.y,tf2::getYaw(q.pose.orientation)));
+    for (int dy=-30;dy<=30;++dy) for (int dx=-30;dx<=30;++dx) grid->setCost(x+dx,y+dy,0);
+    EXPECT_NO_THROW(planner->createPlan(start,goal,[]{return false;}));
+  }
+}
+TEST_F(CacheSameHeading, GoalChangeAndExternalCancelKeepTheirNormalSemantics) {
+  ASSERT_NO_THROW(makePlan());
+  EXPECT_THROW(planner->createPlan(pose(-1.6,.02),pose(0.,0.),[]{return true;}),nav2_core::PlannerCancelled);
+  const auto moved=planner->createPlan(pose(-1.6,.02),pose(0.,.2),[]{return false;});
+  const auto b=official_lattice_rpp_adapter::goal_region::splitBinding(moved,.01,6.);
+  EXPECT_DOUBLE_EQ(b.original_goal.pose.position.y,.2);
+}
 TEST_F(SameHeading, ActualPlannerOutputRetainsOriginalGoalAndBoundStraightSuffix) {
   const auto path=makePlan();ASSERT_GT(path.poses.size(),3u);
   const auto b=official_lattice_rpp_adapter::goal_region::splitBinding(path,.01,6.);

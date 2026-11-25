@@ -654,7 +654,13 @@ def prepare(args):
             if private_approach:
                 planner.update(private_same_heading_approach=True,private_same_heading_distance=1.)
                 manifest['private_same_heading_approach']=dict(distance_m=1.,threshold=254,
-                    deadline_sec=2., original_goal_unchanged=True)
+                    native_search_budget_sec=2., original_goal_unchanged=True)
+                if fullmap and scan_profile['operational_max_age_sec']==.9:
+                    # Private Warehouse continuation reuses only the native goal
+                    # heuristic; current-grid collision and filled sweeps remain active.
+                    planner['cache_obstacle_heuristic']=True
+                    manifest['private_warehouse_goal_heuristic_cache']=dict(enabled=True,
+                        boundary='same-goal heuristic only; current map collision and full swept footprint remain mandatory')
             entry_xy=min(.05,args.xy_tolerance)
             controller['FollowPath'].update(terminal_goal_binding=True,terminal_global_resolution=.01,
                 terminal_global_extent=warehouse_fullmap.terminal_extent(full_geometry) if fullmap else 20.,initial_goal_region_shortcut=True,
@@ -1194,6 +1200,8 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
             if getattr(args,'private_same_heading_approach',False):
                 if parameter_value('planner_server','GridBased.private_same_heading_approach') is not True or parameter_value('planner_server','GridBased.private_same_heading_distance')!=1.:
                     raise RuntimeError('private same-heading planner parameters mismatch')
+                if manifest.get('private_warehouse_goal_heuristic_cache') and parameter_value('planner_server','GridBased.cache_obstacle_heuristic') is not True:
+                    raise RuntimeError('private Warehouse goal heuristic cache not active')
                 if parameter_value('controller_server','FollowPath.rpp.min_approach_linear_velocity') != .40:
                     raise RuntimeError('private approach velocity floor mismatch')
                 if parameter_value('controller_server','FollowPath.private_early_braking_radius') != .18:
