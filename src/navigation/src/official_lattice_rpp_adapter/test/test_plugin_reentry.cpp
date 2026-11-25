@@ -1141,6 +1141,52 @@ protected:
     p5Run(50ms,true,0.,0.,false);deliver(p5Message());return p5Tick();
   }
 };
+
+class PrivateStraightHold : public P8TerminalRepair {
+protected:
+  bool initialShortcut() const override {return false;}
+  double entryRadius() const override {return .05;}
+  void configureExtra() override {
+    P8TerminalRepair::configureExtra();
+    node_->declare_parameter("FollowPath.private_early_braking_radius",.18);
+    node_->declare_parameter("FollowPath.private_straight_hold",true);
+  }
+  void startOrderedTrack() {
+    controller_->setPlan(plan(.3));checker_->reset();
+    const auto before=command(.12);
+    ASSERT_GT(before.twist.linear.x,0.);
+  }
+};
+TEST_F(PrivateStraightHold, BothOuterResidualSignsObtainNewStableCertificate) {
+  for (double error:{-.04,.04}) {
+    SCOPED_TRACE(error);startOrderedTrack();heading_=M_PI+error;
+    p5Run(950ms,true);ASSERT_TRUE(p5Run(450ms));
+    EXPECT_TRUE(p5Check());
+  }
+}
+TEST_F(PrivateStraightHold, ActualPriorTerminalRotationRetainsInnerAim) {
+  startOrderedTrack();heading_=M_PI+.09;deliver(p5Message());
+  const auto first=p5Tick();ASSERT_LT(first.twist.angular.z,0.);
+  heading_=M_PI+.04;deliver(p5Message());
+  const auto second=p5Tick();EXPECT_LT(second.twist.angular.z,0.);EXPECT_FALSE(p5Check());
+}
+TEST_F(PrivateStraightHold, SameGoalReplanDoesNotEraseActualTerminalRotation) {
+  startOrderedTrack();heading_=M_PI+.09;deliver(p5Message());
+  ASSERT_LT(p5Tick().twist.angular.z,0.);
+  startOrderedTrack();heading_=M_PI+.04;deliver(p5Message());
+  EXPECT_LT(p5Tick().twist.angular.z,0.);EXPECT_FALSE(p5Check());
+}
+TEST_F(PrivateStraightHold, MandatoryEndpointRotationCannotUseOuterEntry) {
+  auto p=plan(.3);p.poses.insert(p.poses.end()-1,pose(0.,M_PI+.06));
+  p.poses.insert(p.poses.end()-1,pose(0.,M_PI));
+  controller_->setPlan(p);checker_->reset();ASSERT_GT(command(.12).twist.linear.x,0.);
+  heading_=M_PI+.04;deliver(p5Message());
+  const auto cmd=p5Tick();EXPECT_NE(cmd.twist.angular.z,0.);EXPECT_FALSE(p5Check());
+}
+TEST_F(PrivateStraightHold, OutsideOriginalYawDoesNotEnterHold) {
+  startOrderedTrack();heading_=M_PI+.081;deliver(p5Message());
+  const auto cmd=p5Tick();EXPECT_LT(cmd.twist.angular.z,0.);EXPECT_FALSE(p5Check());
+}
 TEST_F(P8TerminalRepair, SwingOutsideHoldsUntilStableThenSelectsOneCorrection) {
   p5Run(250ms,true);stableOutsideCandidate();
   auto correction=nextCorrection();ASSERT_LT(correction.twist.angular.z,0.);

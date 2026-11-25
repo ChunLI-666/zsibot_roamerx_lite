@@ -345,6 +345,9 @@ public:
       private_early_braking_radius_<=.30&&
       (private_early_braking_radius_==0.||(terminal_binding_&&terminal_stop_before_rotation_)),
       "invalid private early braking radius or terminal binding");
+    private_straight_hold_=parameter(node,name+".private_straight_hold",false);
+    require(!private_straight_hold_||(terminal_settle_repair_&&private_early_braking_radius_>0.),
+      "private straight hold requires the stopped Warehouse repair profile");
     terminal_entry_xy_=parameter(node,name+".terminal_rotation_entry_xy_tolerance",0.);
     require(std::isfinite(terminal_entry_xy_)&&terminal_entry_xy_>=0.&&terminal_entry_xy_<=.25,
       "invalid terminal rotation entry XY tolerance");
@@ -388,16 +391,21 @@ public:
     terminal_stop_.reset();clearYawCertificate();
     initial_original_region_pivot_=aim_reverse_replan_pending_=false;
     terminal_reentry_permission_.reset();terminal_correction_permission_.reset();
-    terminal_braking_=terminal_rotation_started_=false;
+    terminal_braking_=terminal_rotation_started_=terminal_ever_rotated_=false;
     rpp_.cleanup();handler_.reset();segment_pub_.reset();guard_.reset();odom_sub_.reset();completion_.reset();}
   void activate() override {rpp_.activate();segment_pub_->on_activate();}
   void deactivate() override {completion_->clearPlan();terminal_stop_.reset();terminal_drift_.invalidate();terminal_drift_active_=false;
     clearYawCertificate();
     initial_original_region_pivot_=aim_reverse_replan_pending_=false;
     terminal_reentry_permission_.reset();terminal_correction_permission_.reset();
-    terminal_braking_=terminal_rotation_started_=false;
+    terminal_braking_=terminal_rotation_started_=terminal_ever_rotated_=false;
     terminal_correction_active_=false;rpp_.deactivate();segment_pub_->on_deactivate();}
   void setPlan(const nav_msgs::msg::Path & path) override {
+    const bool same_goal=binding_&&!path.poses.empty()&&path.header.frame_id==path_frame_&&
+      finite(path.poses.back().pose)&&
+      std::hypot(path.poses.back().pose.position.x-binding_->original_goal.pose.position.x,
+        path.poses.back().pose.position.y-binding_->original_goal.pose.position.y)<1e-9&&
+      std::abs(angle(yaw(path.poses.back().pose),yaw(binding_->original_goal.pose)))<1e-9;
     std::optional<OdomSample> aim_replan_stop;
     if (aim_reverse_replan_pending_) {
       aim_replan_stop=measuredOdometry();
@@ -418,8 +426,10 @@ public:
       completion_->invalidate();return;
     }
     const auto plan_generation=completion_->bindPlan();has_plan_=false;
+    if (!same_goal) {terminal_ever_rotated_=false;}
     terminal_braking_=terminal_rotation_started_=false;
     terminal_armed_=terminal_cancelled_=terminal_drift_active_=false;binding_.reset();
+    private_ordered_handoff_=false;
     terminal_stop_.resetHold();clearYawCertificate();terminal_correction_active_=false;terminal_correction_headings_.reset({});
     initial_goal_rotation_pending_=initial_goal_region_shortcut_;
     initial_original_region_pivot_=false;
@@ -485,14 +495,14 @@ public:
     clearYawCertificate();
     initial_original_region_pivot_=aim_reverse_replan_pending_=false;
     terminal_reentry_permission_.reset();terminal_correction_permission_.reset();
-    terminal_braking_=terminal_rotation_started_=false;
+    terminal_braking_=terminal_rotation_started_=terminal_ever_rotated_=false;
     terminal_armed_=false;terminal_drift_active_=false;initial_goal_rotation_pending_=false;terminal_stop_.reset();
     terminal_correction_active_=false;terminal_correction_headings_.reset({});}
   bool cancel() override {completion_->invalidate();completion_->revokeTerminalProgress();terminal_drift_.invalidate();terminal_cancelled_=true;terminal_drift_active_=false;initial_goal_rotation_pending_=false;
     clearYawCertificate();
     initial_original_region_pivot_=aim_reverse_replan_pending_=false;
     terminal_reentry_permission_.reset();terminal_correction_permission_.reset();
-    terminal_braking_=terminal_rotation_started_=false;
+    terminal_braking_=terminal_rotation_started_=terminal_ever_rotated_=false;
     terminal_stop_.reset();terminal_correction_active_=false;terminal_correction_headings_.reset({});return rpp_.cancel();}
   void setSpeedLimit(const double & limit,const bool & percentage) override {rpp_.setSpeedLimit(limit,percentage);}
   geometry_msgs::msg::TwistStamped computeVelocityCommands(const geometry_msgs::msg::PoseStamped & pose,
@@ -810,6 +820,7 @@ public:
           terminal_entry_xy_>0.?entry_xy-binding_->error:tolerance.position.x)) {
         if (terminal_stop_before_rotation_&&!measured_stopped) {return begin_braking(pose);}
         terminal_drift_active_=false;
+        private_ordered_handoff_=true;
         terminal_armed_=true;terminal_headings_.reset(binding_->terminal_headings);
       }
     }
@@ -873,6 +884,31 @@ public:
       const bool stop_in_original=std::hypot(stop_path.pose.position.x-binding_->original_goal.pose.position.x,
         stop_path.pose.position.y-binding_->original_goal.pose.position.y)<=tolerance.position.x;
       const bool in_original_yaw=std::abs(goal_remaining)<=yaw_tolerance;
+      // This exception is only for an actually consumed same-heading TRACK.
+      // Cursor completion alone cannot prove that the prescribed endpoint did
+      // not contain a real rotation which happened to fit the goal tolerance.
+      bool straight_terminal=private_straight_hold_&&private_ordered_handoff_&&
+        handler_->finalPrefixActive()&&binding_->suffix_begin<binding_->rotation_begin&&
+        mandatory_complete&&!initial_original_region_pivot_&&!terminal_rotation_started_&&!terminal_ever_rotated_&&
+        !terminal_correction_active_&&!terminal_correction_permission_&&
+        !terminal_drift_.reentryRequired()&&terminal_stop_.correctionCount()==0;
+      const double goal_yaw=yaw(binding_->original_goal.pose);
+      if (straight_terminal) {
+        for (const auto heading:binding_->terminal_headings) {
+          if (std::abs(angle(heading,goal_yaw))>1e-5) {straight_terminal=false;break;}
+        }
+        const auto & first=binding_->executable.poses[binding_->rotation_begin].pose;
+        straight_terminal=straight_terminal&&std::abs(angle(yaw(first),goal_yaw))<=1e-5;
+      }
+      const double centered_distance=std::hypot(stop_path.pose.position.x-binding_->original_goal.pose.position.x,
+        stop_path.pose.position.y-binding_->original_goal.pose.position.y);
+      bool current_stopped=false;
+      if (straight_terminal&&centered_distance<=entry_xy&&in_original_yaw&&measured_stopped) {
+        std::lock_guard<std::mutex> odom_lock(odom_mutex_);
+        current_stopped=currentStoppedSampleLocked(measured_sample);
+      }
+      const bool straight_entry=straight_terminal&&centered_distance<=entry_xy&&
+        in_original_yaw&&current_stopped;
       const bool was_holding=terminal_stop_.holding();
       const bool yaw_stable=yaw_stability_.qualifies(measured_sample.yaw_proof,
         terminal_stop_.zeroStamp(),terminal_stop_.zeroSteady());
@@ -883,7 +919,8 @@ public:
         terminal_stop_.observe(binding_->generation,mandatory_complete,stop_in_original,
         in_original_yaw,measured_stopped,measured_odom_stamp,
         std::chrono::duration_cast<std::chrono::nanoseconds>(
-          std::chrono::steady_clock::now().time_since_epoch()).count(),std::abs(goal_remaining)<=aim_yaw,yaw_stable);
+          std::chrono::steady_clock::now().time_since_epoch()).count(),
+          std::abs(goal_remaining)<=aim_yaw||straight_entry,yaw_stable);
       if (action==goal_region::TerminalStopHold::Action::Outside) {
         throw nav2_core::NoValidControl("Actual body left original goal region during terminal stop");
       }
@@ -913,6 +950,15 @@ public:
       if (action!=goal_region::TerminalStopHold::Action::Track) {
         nav_msgs::msg::Path held;held.header=stop_body.header;held.poses={stop_body,stop_body};segment_pub_->publish(held);
         auto zero=zero_at(stop_body,action==goal_region::TerminalStopHold::Action::Ready);
+        if (straight_entry&&!was_holding&&terminal_stop_.holding()) {
+          if (auto node=node_.lock()) {
+            const auto state=handler_->diagnosticState();
+            RCLCPP_INFO(node->get_logger(),"private_straight_hold_entry_v1 generation=%llu prefix=%zu suffix=%zu rotation=%zu body_stamp_ns=%lld odom_stamp_ns=%lld xy=%.9f yaw_error=%.9f",
+              static_cast<unsigned long long>(binding_->generation),state.prefix_offset,binding_->suffix_begin,
+              binding_->rotation_begin,static_cast<long long>(rclcpp::Time(stop_body.header.stamp).nanoseconds()),
+              static_cast<long long>(measured_odom_stamp),centered_distance,goal_remaining);
+          }
+        }
         if (terminal_settle_repair_&&action==goal_region::TerminalStopHold::Action::CorrectYaw) {
           std::lock_guard<std::mutex> odom_lock(odom_mutex_);
           checkSettlingDeadlineLocked();const auto proof=yaw_stability_.measure();
@@ -1121,7 +1167,7 @@ public:
           if (terminal_settle_repair_&&terminal_correction_permission_) {
             terminal_stop_.correctionSelected();terminal_correction_permission_.reset();
           }
-          if (checked_terminal_entry) {terminal_rotation_started_=true;}
+          if (checked_terminal_entry) {terminal_rotation_started_=true;terminal_ever_rotated_=true;}
           terminal_stop_.nonzeroSelected();yaw_stability_.clearCertificate();
           completion_->finishCycle(generation,false,entry_sample.valid_until,
             entry_sample.source_valid_until_ns,entry_sample.source_valid_from_ns);
@@ -1163,6 +1209,7 @@ private:
   bool terminal_stop_before_rotation_=false;
   double terminal_early_braking_min_linear_velocity_=goal_region::kTerminalTransStoppedVelocity;
   double private_early_braking_radius_=0.;
+  bool private_straight_hold_=false,private_ordered_handoff_=false,terminal_ever_rotated_=false;
   bool terminal_braking_=false,terminal_rotation_started_=false;
   double terminal_resolution_=0.01,terminal_extent_=20.;
   std::shared_ptr<const goal_region::Binding> binding_;
