@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Experimental compatibility boundary: all public plugin interfaces are installed Jazzy interfaces.
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <mutex>
@@ -348,6 +349,13 @@ public:
     private_straight_hold_=parameter(node,name+".private_straight_hold",false);
     require(!private_straight_hold_||(terminal_settle_repair_&&private_early_braking_radius_>0.),
       "private straight hold requires the stopped Warehouse repair profile");
+    private_straight_max_angular_=parameter(node,name+".private_straight_max_angular_velocity",0.);
+    private_straight_lookahead_=parameter(node,name+".rpp.lookahead_dist",.6);
+    require(std::isfinite(private_straight_max_angular_)&&private_straight_max_angular_>=0.&&
+      private_straight_max_angular_<=.3&&std::isfinite(private_straight_lookahead_)&&
+      private_straight_lookahead_>0.&&
+      (private_straight_max_angular_==0.||private_straight_hold_),
+      "invalid private straight angular limit or profile");
     terminal_entry_xy_=parameter(node,name+".terminal_rotation_entry_xy_tolerance",0.);
     require(std::isfinite(terminal_entry_xy_)&&terminal_entry_xy_>=0.&&terminal_entry_xy_<=.25,
       "invalid terminal rotation entry XY tolerance");
@@ -1028,11 +1036,61 @@ public:
     require(std::isfinite(v.linear.x)&&std::isfinite(v.angular.z)&&v.linear.x>=0.&&
       v.linear.y==0.&&v.linear.z==0.&&v.angular.x==0.&&v.angular.y==0.,"invalid command");
     require(!terminal_armed_||v.linear.x==0.,"terminal goal-region command must be pure rotation");
+    auto command_pose=pose;
+    if (private_straight_max_angular_>0.&&binding_) {
+      if (auto node=node_.lock()) {
+        const auto state=handler_->diagnosticState();
+        RCLCPP_INFO_THROTTLE(node->get_logger(),*node->get_clock(),1000,
+          "private_straight_candidate_v1 armed=%d final=%d track=%d prefix=%zu suffix=%zu rotation=%zu vx=%.9f w=%.9f",
+          terminal_armed_,state.final_prefix,handler_->terminalTrackActive(binding_->suffix_begin,binding_->rotation_begin),
+          state.prefix_offset,binding_->suffix_begin,binding_->rotation_begin,v.linear.x,v.angular.z);
+      }
+    }
+    if (private_straight_max_angular_>0.&&!terminal_armed_&&binding_&&v.linear.x>0.&&
+      !terminal_rotation_started_&&handler_->terminalTrackActive(binding_->suffix_begin,binding_->rotation_begin)) {
+      // The original final TRACK is straight at the bound goal heading. Do not
+      // alter a required co-located terminal turn or any upstream checkpoint.
+      const double goal_heading=yaw(binding_->original_goal.pose);
+      bool straight=binding_->suffix_begin<binding_->rotation_begin;
+      for (const auto heading:binding_->terminal_headings) {
+        if (std::abs(angle(heading,goal_heading))>1e-5) {straight=false;break;}
+      }
+      if (straight) {
+        const auto actual=latestBodyPose();geometry_msgs::msg::PoseStamped actual_path;
+        if (!nav2_util::transformPoseInTargetFrame(actual,actual_path,*tf_,path_frame_,map_->getTransformTolerance())) {
+          throw nav2_core::ControllerTFError("Unable to transform private straight TRACK origin");
+        }
+        require(finite(actual_path.pose),"nonfinite private straight TRACK origin");
+        const double dx=binding_->original_goal.pose.position.x-actual_path.pose.position.x;
+        const double dy=binding_->original_goal.pose.position.y-actual_path.pose.position.y;
+        const double distance=std::hypot(dx,dy);
+        const double lateral=-std::sin(goal_heading)*dx+std::cos(goal_heading)*dy;
+        if (distance<=private_straight_lookahead_&&std::abs(lateral)<=entry_xy-binding_->error) {
+          const auto latest=measuredOdometry();const double actual_w=latest.message.twist.twist.angular.z;
+          const double low=std::max(-command_yaw_limit_,actual_w-terminal_accel_step_);
+          const double high=std::min(command_yaw_limit_,actual_w+terminal_accel_step_);
+          if (low>high) {throw nav2_core::NoValidControl("Private straight angular acceleration conflicts with global limit");}
+          const double raw=cmd.twist.angular.z;
+          cmd.twist.angular.z=std::clamp(std::clamp(raw,-private_straight_max_angular_,
+            private_straight_max_angular_),low,high);
+          if (raw*cmd.twist.angular.z<0.||std::abs(cmd.twist.angular.z)>std::abs(raw)+1e-12) {
+            return begin_braking(actual);
+          }
+          command_pose=actual;cmd.header=actual.header;
+          if (auto node=node_.lock()) {
+            RCLCPP_INFO_THROTTLE(node->get_logger(),*node->get_clock(),250,
+              "private_straight_angular_v1 body_stamp_ns=%lld odom_stamp_ns=%lld distance=%.9f lateral=%.9f raw_w=%.9f bounded_w=%.9f measured_w=%.9f step=%.9f",
+              static_cast<long long>(rclcpp::Time(actual.header.stamp).nanoseconds()),
+              static_cast<long long>(rclcpp::Time(latest.message.header.stamp).nanoseconds()),
+              distance,lateral,raw,cmd.twist.angular.z,actual_w,terminal_accel_step_);
+          }
+        }
+      }
+    }
     double target_delta=0.;bool goal_heading_rotation=false;
     const bool rotating_command=rpp_.rotationTarget(pose,velocity,target_delta,&goal_heading_rotation);
     bool checked_terminal_entry=false;
     std::optional<OdomSample> terminal_entry_observation;
-    auto command_pose=pose;
     if ((terminal_original_region_pivot_||terminal_rotation_aim_yaw_>0.)&&terminal_complete_for_aim) {
       command_pose=latestBodyPose();geometry_msgs::msg::PoseStamped actual_path;
       if (!nav2_util::transformPoseInTargetFrame(command_pose,actual_path,*tf_,path_frame_,map_->getTransformTolerance())) {
@@ -1210,6 +1268,7 @@ private:
   double terminal_early_braking_min_linear_velocity_=goal_region::kTerminalTransStoppedVelocity;
   double private_early_braking_radius_=0.;
   bool private_straight_hold_=false,private_ordered_handoff_=false,terminal_ever_rotated_=false;
+  double private_straight_max_angular_=0.,private_straight_lookahead_=0.;
   bool terminal_braking_=false,terminal_rotation_started_=false;
   double terminal_resolution_=0.01,terminal_extent_=20.;
   std::shared_ptr<const goal_region::Binding> binding_;

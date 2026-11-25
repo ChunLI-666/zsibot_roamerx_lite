@@ -675,7 +675,10 @@ def prepare(args):
             if terminal_repair:
                 if private_approach:
                     controller['FollowPath']['private_straight_hold']=True
+                    controller['FollowPath']['private_straight_max_angular_velocity']=.10
                     manifest['private_straight_hold']=dict(enabled=True, original_goal_and_certificate_unchanged=True)
+                    manifest['private_straight_angular_limit']=dict(max_rad_s=.10,
+                        remaining_distance='existing RPP lookahead', measured_accel_limit=True)
                 controller['FollowPath'].update(terminal_settle_repair=True,terminal_progress_checker='Progress',
                     terminal_settle_timeout_sec=30.,terminal_settle_max_angular_velocity=.10,
                     terminal_settle_near_angle=.35,terminal_settle_angle_gain_per_sec=.5)
@@ -1195,6 +1198,8 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
             if getattr(args,'terminal_settle_repair',False):
                 if getattr(args,'private_same_heading_approach',False) and parameter_value('controller_server','FollowPath.private_straight_hold') is not True:
                     raise RuntimeError('private straight hold effective parameter mismatch')
+                if getattr(args,'private_same_heading_approach',False) and parameter_value('controller_server','FollowPath.private_straight_max_angular_velocity') != .10:
+                    raise RuntimeError('private straight angular limit effective parameter mismatch')
                 expected={'FollowPath.terminal_settle_repair':True,'FollowPath.terminal_rotation_aim_yaw_tolerance':.03,
                   'FollowPath.terminal_settle_timeout_sec':30.,'FollowPath.terminal_settle_max_angular_velocity':.10,
                   'FollowPath.terminal_settle_near_angle':.35,'FollowPath.terminal_settle_angle_gain_per_sec':.5}

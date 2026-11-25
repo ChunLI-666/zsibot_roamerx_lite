@@ -1187,6 +1187,48 @@ TEST_F(PrivateStraightHold, OutsideOriginalYawDoesNotEnterHold) {
   startOrderedTrack();heading_=M_PI+.081;deliver(p5Message());
   const auto cmd=p5Tick();EXPECT_LT(cmd.twist.angular.z,0.);EXPECT_FALSE(p5Check());
 }
+
+class PrivateStraightAngular : public PrivateStraightHold {
+protected:
+  void configureExtra() override {
+    PrivateStraightHold::configureExtra();
+    node_->declare_parameter("FollowPath.private_straight_max_angular_velocity",.10);
+    node_->set_parameter(rclcpp::Parameter("FollowPath.rpp.desired_linear_vel",.4));
+    node_->set_parameter(rclcpp::Parameter("FollowPath.rpp.max_angular_accel",3.2));
+    node_->declare_parameter("FollowPath.rpp.min_approach_linear_velocity",.4);
+    node_->declare_parameter("FollowPath.rpp.approach_velocity_scaling_dist",.3);
+    node_->declare_parameter("FollowPath.rpp.regulated_linear_scaling_min_speed",.4);
+  }
+};
+TEST_F(PrivateStraightAngular, SameHeadingFinalTrackCapsBothSignsWithoutReducingForward) {
+  for (double offset:{-.06,.06}) {
+    SCOPED_TRACE(offset);controller_->setPlan(plan(1.5));checker_->reset();
+    auto cmd=commandAt(.45,0.,M_PI+offset,.4,0.,0.);
+    EXPECT_NEAR(cmd.twist.linear.x,.4,1e-9);
+    EXPECT_GT(std::abs(cmd.twist.angular.z),.01);
+    EXPECT_LE(std::abs(cmd.twist.angular.z),.1000001);
+    EXPECT_LT(offset*cmd.twist.angular.z,0.);
+  }
+}
+TEST_F(PrivateStraightAngular, LimitUsesMeasuredAngularAccelerationBeforeCommandSweep) {
+  controller_->setPlan(plan(1.5));checker_->reset();
+  const auto cmd=commandAt(.45,0.,M_PI-.06,.4,0.,.25);
+  EXPECT_NEAR(cmd.twist.linear.x,.4,1e-9);
+  EXPECT_LE(std::abs(cmd.twist.angular.z-.25),.1600001);
+  EXPECT_LE(std::abs(cmd.twist.angular.z),.1000001);
+}
+TEST_F(PrivateStraightAngular, ObstacleStillRejectsTheLimitedMotion) {
+  controller_->setPlan(plan(1.5));checker_->reset();
+  unsigned int mx,my;ASSERT_TRUE(map_->getCostmap()->worldToMap(-.65,0.,mx,my));
+  map_->getCostmap()->setCost(mx,my,nav2_costmap_2d::LETHAL_OBSTACLE);
+  EXPECT_THROW(commandAt(.45,0.,M_PI-.06,.4,0.,0.),nav2_core::NoValidControl);
+}
+TEST_F(PrivateStraightAngular, OppositeMeasuredTurnDoesNotInventTheWrongSignCommand) {
+  controller_->setPlan(plan(1.5));checker_->reset();
+  const auto cmd=commandAt(.45,0.,M_PI+.06,.4,0.,.25);
+  EXPECT_DOUBLE_EQ(cmd.twist.linear.x,0.);EXPECT_DOUBLE_EQ(cmd.twist.angular.z,0.);
+  EXPECT_THROW(commandAt(.45,0.,M_PI+.06),nav2_core::NoValidControl);
+}
 TEST_F(P8TerminalRepair, SwingOutsideHoldsUntilStableThenSelectsOneCorrection) {
   p5Run(250ms,true);stableOutsideCandidate();
   auto correction=nextCorrection();ASSERT_LT(correction.twist.angular.z,0.);
