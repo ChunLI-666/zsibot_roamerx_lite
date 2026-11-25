@@ -5,6 +5,7 @@
 #include <mutex>
 #include <optional>
 #include <chrono>
+#include <thread>
 #include <iomanip>
 #include <sstream>
 #include <unordered_map>
@@ -29,6 +30,7 @@
 #include "official_lattice_rpp_adapter/command_limits.hpp"
 #include "official_lattice_rpp_adapter/planner_failure_snapshot.hpp"
 #include "robot_feasible_navigation/footprint_sweep.hpp"
+#include "official_lattice_rpp_adapter/private_footprint_sweep.hpp"
 
 namespace official_lattice_rpp_adapter {
 namespace sweep = robot_feasible_navigation::sweep;
@@ -1407,6 +1409,14 @@ public:
     }
     require(parameter(node,name+".tolerance",0.)==0.,"exact goal search required");
     terminal_binding_=parameter(node,name+".terminal_goal_binding",false);
+    straight_approach_=parameter(node,name+".private_same_heading_approach",false);
+    straight_approach_distance_=parameter(node,name+".private_same_heading_distance",1.0);
+    if (straight_approach_) {
+      require(stop_turn_&&terminal_binding_,"same-heading approach requires bound stop-turn Lattice");
+      require(std::isfinite(straight_approach_distance_)&&straight_approach_distance_>=.5&&
+        straight_approach_distance_<=2.,"invalid private approach distance");
+      require(parameter(node,name+".max_planning_time",2.)==2.,"private approach requires a 2s search budget");
+    }
     const double terminal_resolution=parameter(node,name+".terminal_global_resolution",0.01);
     if (terminal_binding_) {
       require(stop_turn_,"goal-cell binding is only verified for stop-turn Lattice");
@@ -1437,12 +1447,20 @@ public:
   void deactivate() override {planner_->deactivate();}
   nav_msgs::msg::Path createPlan(const geometry_msgs::msg::PoseStamped & start,
     const geometry_msgs::msg::PoseStamped & goal,std::function<bool()> cancel) override {
-    std::unique_lock<std::mutex> request_lock(mutex_);
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(2);
+    const auto stop=[&] {return (cancel&&cancel()) ||
+      (straight_approach_&&std::chrono::steady_clock::now()>=deadline);};
+    const auto check=[&] {if (stop()) {throw nav2_core::PlannerCancelled("Private approach canceled or deadline exceeded");}};
+    std::unique_lock<std::mutex> request_lock(mutex_,std::defer_lock);
+    if (straight_approach_) {while (!request_lock.try_lock()) {check();std::this_thread::yield();}check();}
+    else {request_lock.lock();}
     require(finite(start.pose)&&finite(goal.pose),"invalid planar planner request");
     require(start.header.frame_id==map_->getGlobalFrameID()&&goal.header.frame_id==start.header.frame_id,
       "planner frame mismatch");
     auto * map=map_->getCostmap();
-    std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> lock(*map->getMutex());
+    std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> lock(*map->getMutex(),std::defer_lock);
+    if (straight_approach_) {while (!lock.try_lock()) {check();std::this_thread::yield();}check();}
+    else {lock.lock();}
     std::optional<diagnostics::FailureSnapshot> snapshot;
     const auto snapshot_sequence=++snapshot_sequence_;
     std::exception_ptr snapshot_capture_error;
@@ -1470,21 +1488,54 @@ public:
       } catch (...) {snapshot_capture_error=std::current_exception();snapshot.reset();}
     }
     try {
-    const auto fp=map_->getRobotFootprint();sweep::ScopedObstacleIndex index(*map);
+    const auto fp=map_->getRobotFootprint();
+    const unsigned char threshold=straight_approach_?nav2_costmap_2d::INSCRIBED_INFLATED_OBSTACLE:
+      nav2_costmap_2d::LETHAL_OBSTACLE;
+    std::unique_ptr<sweep::ScopedObstacleIndex> standard_index;
+    std::unique_ptr<private_sweep::ScopedObstacleIndex> strict_index;
+    if (straight_approach_) {strict_index=std::make_unique<private_sweep::ScopedObstacleIndex>(*map,threshold);}
+    else {standard_index=std::make_unique<sweep::ScopedObstacleIndex>(*map);}
+    if (straight_approach_) {check();}
+    const auto checkedEdge=[&](const geometry_msgs::msg::Pose & a,const geometry_msgs::msg::Pose & b) {
+      if (!straight_approach_) {return edgeFree(*map,fp,a,b);}
+      check();private_sweep::BlockingCell failure;
+      const bool ok=private_sweep::sweepFree(*map,fp,a.position.x,a.position.y,yaw(a),
+        b.position.x,b.position.y,yaw(b),.02,threshold,&failure,stop);
+      check();
+      if (!ok&&failure.present) {
+        if (auto node=node_.lock()) {
+          RCLCPP_ERROR(node->get_logger(),"private_approach_block frame=%s resolution=%.9f cell=%u,%u cost=%u center=%.9f,%.9f pose=%.9f,%.9f,%.9f steady_ns=%lld snapshot=%llu",
+            start.header.frame_id.c_str(),map->getResolution(),failure.column,failure.row,
+            static_cast<unsigned>(failure.cost),failure.center_x,failure.center_y,failure.pose_x,
+            failure.pose_y,failure.pose_yaw,static_cast<long long>(diagnostics::steadyNs()),
+            static_cast<unsigned long long>(snapshot_sequence));
+        }
+      }
+      return ok;
+    };
     if (!sweep::footprintFree(*map,fp,start.pose.position.x,start.pose.position.y,yaw(start.pose))) {
       throw nav2_core::StartOccupied("Filled start footprint occupied");
     }
     if (!sweep::footprintFree(*map,fp,goal.pose.position.x,goal.pose.position.y,yaw(goal.pose))) {
       throw nav2_core::GoalOccupied("Filled goal footprint occupied");
     }
-    auto observed_cancel=cancel;
+    auto observed_cancel=straight_approach_?std::function<bool()>(stop):cancel;
     if (snapshot&&cancel) {
-      observed_cancel=[&] {++snapshot->base_cancel_checks;const bool requested=cancel();
+      observed_cancel=[&] {++snapshot->base_cancel_checks;const bool requested=stop();
         if (requested) {++snapshot->base_cancel_true;}return requested;};
+    }
+    auto plan_goal=goal;
+    if (straight_approach_) {
+      const double h=yaw(goal.pose);
+      plan_goal.pose.position.x-=straight_approach_distance_*std::cos(h);
+      plan_goal.pose.position.y-=straight_approach_distance_*std::sin(h);
+      if (!checkedEdge(plan_goal.pose,goal.pose)) {
+        throw nav2_core::NoValidPathCouldBeFound("Private approach or final straight sweep blocked");
+      }
     }
     if (snapshot) {snapshot->beginBase();}
     nav_msgs::msg::Path raw;
-    try {raw=planner_->createPlan(start,goal,observed_cancel);}
+    try {raw=planner_->createPlan(start,plan_goal,observed_cancel);if (straight_approach_) {check();}}
     catch (...) {if (snapshot) {snapshot->endBase(false);}throw;}
     if (snapshot) {snapshot->endBase(true);snapshot->raw_pose_count=raw.poses.size();
       snapshot->phase="filled_output_validation";}
@@ -1493,12 +1544,12 @@ public:
     // float-converted goal XY. Accept only its exact documented singleton and
     // the existing in-place path equivalence; larger subcell moves still fail.
     const bool native_same_cell=stop_turn_ &&
-      nativeLatticeSameCellSingleton(raw,start,goal,*map);
+      nativeLatticeSameCellSingleton(raw,start,plan_goal,*map);
     if (terminal_binding_) {
-      require(goal_region::proveGoalCell(raw,start,goal,*map).valid,
+      require(goal_region::proveGoalCell(raw,start,plan_goal,*map).valid,
         "official raw endpoint has no bounded goal-cell proof");
     } else if (native_same_cell) {
-      require(withinPathRotationXYEquivalence(start.pose,goal.pose),
+      require(withinPathRotationXYEquivalence(start.pose,plan_goal.pose),
         "official same-cell path exceeds rotation XY equivalence");
     }
     // Restore only the documented FLOAT cell/origin round trip, including sameXY rotation samples.
@@ -1510,7 +1561,7 @@ public:
     };
     if (!native_same_cell) {
       for (auto & p:raw.poses) {
-        for (const auto * exact:{&start,&goal}) {
+        for (const auto * exact:{&start,static_cast<const geometry_msgs::msg::PoseStamped *>(&plan_goal)}) {
           const auto [x,y]=rounded(exact->pose);
           const double bound=64.*std::numeric_limits<double>::epsilon()*std::max({1.,std::abs(x),std::abs(y)});
           if (std::abs(p.pose.position.x-x)<=bound) {p.pose.position.x=exact->pose.position.x;}
@@ -1522,7 +1573,7 @@ public:
     const auto sameXY=[](const auto & a,const auto & b) {
       return std::hypot(a.position.x-b.position.x,a.position.y-b.position.y)<1e-9;
     };
-    require(terminal_binding_ || native_same_cell || sameXY(raw.poses.back().pose,goal.pose),
+    require(terminal_binding_ || native_same_cell || sameXY(raw.poses.back().pose,plan_goal.pose),
       "official path did not preserve exact goal XY");
     // Installed official search emits its first primitive sample, not always the
     // exact start node (observed first sample is 1mm). Preserve the actual start
@@ -1549,15 +1600,15 @@ public:
     nav_msgs::msg::Path output;output.header=raw.header;
     auto first=start;first.header=output.header;output.poses.push_back(first);
     if (terminal_binding_) {
-      auto attitude=raw.poses.back();attitude.pose.orientation=goal.pose.orientation;
+      auto attitude=raw.poses.back();attitude.pose.orientation=plan_goal.pose.orientation;
       raw.poses.push_back(attitude); // Checked rotation at the actual executable endpoint.
     } else {
-      raw.poses.push_back(goal); // Historical numerical co-location mode.
+      raw.poses.push_back(plan_goal); // Historical numerical co-location mode.
     }
     for (const auto & p:raw.poses) {
       if (cancel&&cancel()) {throw nav2_core::PlannerCancelled("Filled sweep canceled");}
       const auto a=output.poses.back().pose;
-      if (!edgeFree(*map,fp,a,p.pose)) {throw nav2_core::NoValidPathCouldBeFound("Filled official path sweep blocked");}
+      if (!checkedEdge(a,p.pose)) {throw nav2_core::NoValidPathCouldBeFound("Filled official path sweep blocked");}
       // Densify rotations so constraint detection retains the complete rotation and its signed direction.
       const double dyaw=angle(yaw(a),yaw(p.pose));
       const int count=std::max(1,static_cast<int>(std::ceil(std::abs(dyaw)/0.02)));
@@ -1573,9 +1624,25 @@ public:
     }
     if (terminal_binding_) {
       output.poses.back().pose.orientation=goal.pose.orientation;
-      require(edgeFree(*map,fp,output.poses.back().pose,goal.pose),"filled terminal goal-region certificate blocked");
+      if (straight_approach_) {
+        auto endpoint=output.poses.back();const double h=yaw(goal.pose);
+        const double dx=goal.pose.position.x-endpoint.pose.position.x;
+        const double dy=goal.pose.position.y-endpoint.pose.position.y;
+        const double along=dx*std::cos(h)+dy*std::sin(h);
+        require(along>0.,"private straight endpoint is not ahead");
+        endpoint.pose.position.x+=along*std::cos(h);endpoint.pose.position.y+=along*std::sin(h);
+        require(std::hypot(endpoint.pose.position.x-goal.pose.position.x,endpoint.pose.position.y-goal.pose.position.y)<=
+          goal_region::consumerBudget(map->getResolution(),std::max(map->getSizeInMetersX(),map->getSizeInMetersY()),goal.pose),
+          "lattice endpoint cannot join goal heading within original binding budget");
+        if (!checkedEdge(output.poses.back().pose,endpoint.pose)) {
+          throw nav2_core::NoValidPathCouldBeFound("Filled private straight sweep blocked");
+        }
+        output.poses.push_back(endpoint);
+      }
+      require(checkedEdge(output.poses.back().pose,goal.pose),"filled terminal goal-region certificate blocked");
       auto original=goal;original.header=output.header;output.poses.push_back(original);
     } else {output.poses.back().pose=goal.pose;}
+    if (straight_approach_) {check();}
     return output;
     } catch (...) {
       const auto original_error=std::current_exception();
@@ -1608,6 +1675,8 @@ private:
   std::string planner_type_;
   bool stop_turn_;
   bool terminal_binding_=false;
+  bool straight_approach_=false;
+  double straight_approach_distance_=1.;
   nav2_core::GlobalPlanner::Ptr planner_;
   std::shared_ptr<nav2_costmap_2d::Costmap2DROS> map_;
   std::mutex mutex_;

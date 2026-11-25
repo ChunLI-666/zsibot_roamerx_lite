@@ -535,6 +535,9 @@ def prepare(args):
             getattr(args,'warehouse_fullmap',False) and args.with_waypoints and args.with_mission_recovery
             and args.variant=='official' and args.scan_topic=='/laser_scan_leveled_nav_floor_v1'):
         raise ValueError('900ms scan age requires the official Warehouse fullmap mission and floor scan topic')
+    private_approach=getattr(args,'private_same_heading_approach',False)
+    if private_approach and not (scan_profile['operational_max_age_sec']==.9 and terminal_repair):
+        raise ValueError('Same-heading approach requires the isolated Warehouse 900ms terminal profile')
     if getattr(args,'health_tf_latest_only',False) and scan_profile['operational_max_age_sec']!=.5:
         raise ValueError('Latest-only health TF observation requires the explicit simulation profile')
     template=pathlib.Path(args.template).absolute()
@@ -648,6 +651,10 @@ def prepare(args):
         else:
             planner['lattice_filepath']=str(selected_install/'share/official_lattice_rpp_adapter/params/stop_turn_1cm_h16_small_radius.json')
             planner.update(terminal_goal_binding=True,terminal_global_resolution=.01,cost_penalty=1.)
+            if private_approach:
+                planner.update(private_same_heading_approach=True,private_same_heading_distance=1.)
+                manifest['private_same_heading_approach']=dict(distance_m=1.,threshold=253,
+                    deadline_sec=2., original_goal_unchanged=True)
             entry_xy=min(.05,args.xy_tolerance)
             controller['FollowPath'].update(terminal_goal_binding=True,terminal_global_resolution=.01,
                 terminal_global_extent=warehouse_fullmap.terminal_extent(full_geometry) if fullmap else 20.,initial_goal_region_shortcut=True,
@@ -1170,6 +1177,9 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
                     raise RuntimeError('warehouse terminal global extent actual parameter mismatch')
             if parameter_value('planner_server','GridBased.terminal_goal_binding') is not True or parameter_value('controller_server','FollowPath.terminal_goal_binding') is not True:
                 raise RuntimeError('paired terminal goal-binding mode not active')
+            if getattr(args,'private_same_heading_approach',False):
+                if parameter_value('planner_server','GridBased.private_same_heading_approach') is not True or parameter_value('planner_server','GridBased.private_same_heading_distance')!=1.:
+                    raise RuntimeError('private same-heading planner parameters mismatch')
             if getattr(args,'terminal_settle_repair',False):
                 expected={'FollowPath.terminal_settle_repair':True,'FollowPath.terminal_rotation_aim_yaw_tolerance':.03,
                   'FollowPath.terminal_settle_timeout_sec':30.,'FollowPath.terminal_settle_max_angular_velocity':.10,
@@ -1456,6 +1466,7 @@ def main():
     p.add_argument('--xy-tolerance',type=float,default=.15);p.add_argument('--yaw-tolerance',type=float,default=.08)
     p.add_argument('--terminal-rotation-aim-yaw-tolerance',type=float,choices=[0.,.03],default=0.,
       help='Explicit official-Lattice inner-aim experiment; default disabled, does not change original acceptance or prove a stopping envelope')
+    p.add_argument('--private-same-heading-approach',action='store_true',help='Private Warehouse same-heading planner experiment')
     p.add_argument('--warehouse-fullmap',action='store_true',help='Simulation warehouse static global map; requires persistent official profile')
     p.add_argument('--terminal-settle-repair',action='store_true',help='Enable the paired official terminal repair, .03 aim and bounded progress plugin')
     p.add_argument('--build-receipt');p.add_argument('--message-install');p.add_argument('--preflight-timeout',type=float,default=30.);p.add_argument('--run',action='store_true')

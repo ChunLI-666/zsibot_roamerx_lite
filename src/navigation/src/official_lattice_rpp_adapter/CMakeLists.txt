@@ -46,6 +46,15 @@ if(BUILD_TESTING)
     RFN_REENTRY_ADAPTER_LIBRARY="$<TARGET_FILE:official_lattice_rpp_adapter>")
   ament_target_dependencies(test_plugin_reentry ${dependencies} class_loader)
   add_dependencies(test_plugin_reentry official_lattice_rpp_adapter)
+  ament_add_gtest(test_same_heading_planner test/test_same_heading_planner.cpp src/terminal_goal_binding.cpp)
+  target_include_directories(test_same_heading_planner PRIVATE include ${CMAKE_CURRENT_SOURCE_DIR}/../robot_feasible_navigation/include)
+  target_compile_definitions(test_same_heading_planner PRIVATE
+    TEST_ADAPTER_LIBRARY="$<TARGET_FILE:official_lattice_rpp_adapter>"
+    TEST_LATTICE_FILE="${CMAKE_CURRENT_SOURCE_DIR}/../../../../experiments/official_path_handler_turn_validation/inputs/global_planner/diagnostic_small_radius_same_actions.json")
+  ament_target_dependencies(test_same_heading_planner ${dependencies} class_loader)
+  add_dependencies(test_same_heading_planner official_lattice_rpp_adapter)
+  set_tests_properties(test_same_heading_planner PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE ENVIRONMENT
+    "ROS_DOMAIN_ID=190;ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST;ROS_LOG_DIR=${CMAKE_CURRENT_BINARY_DIR}/ros_logs;LD_LIBRARY_PATH=/opt/ros/jazzy/lib:/opt/ros/jazzy/lib/${CMAKE_LIBRARY_ARCHITECTURE}")
   set_tests_properties(test_plugin_reentry PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE)
   set_tests_properties(test_command_limits test_terminal_track_drift test_rotation_constraints
     test_planner_goal_contract test_terminal_goal_binding test_initial_goal_rotation
