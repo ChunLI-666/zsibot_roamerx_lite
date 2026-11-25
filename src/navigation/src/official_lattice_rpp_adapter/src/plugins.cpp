@@ -340,6 +340,11 @@ public:
     require(std::isfinite(terminal_early_braking_min_linear_velocity_)&&
       terminal_early_braking_min_linear_velocity_>=goal_region::kTerminalTransStoppedVelocity,
       "terminal early-braking speed must be finite and at least the measured stop threshold");
+    private_early_braking_radius_=parameter(node,name+".private_early_braking_radius",0.);
+    require(std::isfinite(private_early_braking_radius_)&&private_early_braking_radius_>=0.&&
+      private_early_braking_radius_<=.30&&
+      (private_early_braking_radius_==0.||(terminal_binding_&&terminal_stop_before_rotation_)),
+      "invalid private early braking radius or terminal binding");
     terminal_entry_xy_=parameter(node,name+".terminal_rotation_entry_xy_tolerance",0.);
     require(std::isfinite(terminal_entry_xy_)&&terminal_entry_xy_>=0.&&terminal_entry_xy_<=.25,
       "invalid terminal rotation entry XY tolerance");
@@ -707,6 +712,83 @@ public:
     if (!terminal_armed_) {
       auto [begin,end]=handler_->findPlanSegment(pose);
       segment=handler_->transformLocalPlan(begin,end);
+      if (private_early_braking_radius_>0.&&!terminal_rotation_started_&&binding_) {
+        const auto & target=binding_->original_goal.pose;
+        const double old_distance=std::hypot(path_pose.pose.position.x-target.position.x,
+          path_pose.pose.position.y-target.position.y);
+        if (old_distance<=private_early_braking_radius_+.15) {
+          auto node=node_.lock();
+          if (node) {
+            const auto state=handler_->diagnosticState();
+            RCLCPP_INFO_THROTTLE(node->get_logger(),*node->get_clock(),1000,
+              "private_early_brake_observation_v1 body_stamp_ns=%lld odom_stamp_ns=%lld old_xy_distance=%.9f measured_vx=%.9f measured_vy=%.9f measured_wz=%.9f prefix=%zu suffix=%zu rotation=%zu final_prefix=%d terminal_track=%d",
+              static_cast<long long>(rclcpp::Time(path_pose.header.stamp).nanoseconds()),
+              static_cast<long long>(measured_odom_stamp),old_distance,measured.twist.twist.linear.x,
+              measured.twist.twist.linear.y,measured.twist.twist.angular.z,state.prefix_offset,
+              binding_->suffix_begin,binding_->rotation_begin,state.final_prefix,
+              handler_->terminalTrackActive(binding_->suffix_begin,binding_->rotation_begin));
+          }
+        }
+        if (early_braking_speed&&handler_->terminalTrackActive(binding_->suffix_begin,binding_->rotation_begin)) {
+          // Source TF may advance while the ordered handler and costmap are
+          // processed. Keep the checked original binding and sample the real
+          // current body again before choosing a checked zero.
+          const auto fresh=latestBodyPose();geometry_msgs::msg::PoseStamped fresh_path;
+          if (!nav2_util::transformPoseInTargetFrame(fresh,fresh_path,*tf_,path_frame_,map_->getTransformTolerance())) {
+            throw nav2_core::ControllerTFError("Unable to transform private early braking origin");
+          }
+          require(finite(fresh_path.pose),"nonfinite private early braking origin");
+          const double dx=target.position.x-fresh_path.pose.position.x;
+          const double dy=target.position.y-fresh_path.pose.position.y;
+          const double distance=std::hypot(dx,dy);
+          if (distance<=private_early_braking_radius_) {
+            // Sweep the measured body-frame planar velocity, including lateral
+            // motion and measured yaw rate, on the same locked live costmap.
+            // This is an extra guard; it does not assert a stopping model.
+            const auto & twist=measured.twist.twist;
+            const double vx=twist.linear.x,vy=twist.linear.y,w=twist.angular.z;
+            require(std::isfinite(vx)&&std::isfinite(vy)&&std::isfinite(w),"nonfinite early braking twist");
+            double x=fresh.pose.position.x,y=fresh.pose.position.y,heading=yaw(fresh.pose);
+            const int steps=std::max(1,static_cast<int>(std::ceil(horizon_/.02)));
+            const double dt=horizon_/steps;
+            for (int i=0;i<steps;++i) {
+              const double turn=w*dt;
+              const double bx=std::abs(w)>1e-9?(vx*std::sin(turn)+vy*(std::cos(turn)-1.))/w:vx*dt;
+              const double by=std::abs(w)>1e-9?(vx*(1.-std::cos(turn))+vy*std::sin(turn))/w:vy*dt;
+              const double nx=x+std::cos(heading)*bx-std::sin(heading)*by;
+              const double ny=y+std::sin(heading)*bx+std::cos(heading)*by;
+              if (!sweep::sweepFree(*map,fp,x,y,heading,nx,ny,heading+turn)) {
+                throw nav2_core::NoValidControl("Private measured-motion braking sweep blocked");
+              }
+              x=nx;y=ny;heading+=turn;
+            }
+            const auto selected_body=latestBodyPose();
+            if (std::hypot(selected_body.pose.position.x-fresh.pose.position.x,
+              selected_body.pose.position.y-fresh.pose.position.y)>.04||
+              std::abs(angle(yaw(fresh.pose),yaw(selected_body.pose)))>.04)
+            {
+              throw nav2_core::NoValidControl("Body moved beyond private braking sweep start tolerance");
+            }
+            if (!sweep::footprintFree(*map,fp,selected_body.pose.position.x,
+              selected_body.pose.position.y,yaw(selected_body.pose))) {
+              throw nav2_core::NoValidControl("Filled private braking selection footprint occupied");
+            }
+            const double goal_yaw=yaw(target),along=std::cos(goal_yaw)*dx+std::sin(goal_yaw)*dy;
+            const double lateral=-std::sin(goal_yaw)*dx+std::cos(goal_yaw)*dy;
+            if (auto node=node_.lock()) {
+              const auto state=handler_->diagnosticState();
+              RCLCPP_INFO(node->get_logger(),
+                "private_early_brake_selected_v1 body_stamp_ns=%lld selected_body_stamp_ns=%lld odom_stamp_ns=%lld selected_ros_ns=%lld goal_distance=%.9f along=%.9f lateral=%.9f heading_error=%.9f vx=%.9f vy=%.9f wz=%.9f radius=%.9f prefix=%zu suffix=%zu rotation=%zu measured_motion_sweep_horizon=%.9f",
+                static_cast<long long>(rclcpp::Time(fresh.header.stamp).nanoseconds()),
+                static_cast<long long>(rclcpp::Time(selected_body.header.stamp).nanoseconds()),
+                static_cast<long long>(measured_odom_stamp),static_cast<long long>(node->now().nanoseconds()),
+                distance,along,lateral,angle(yaw(fresh_path.pose),goal_yaw),vx,vy,w,
+                private_early_braking_radius_,state.prefix_offset,binding_->suffix_begin,binding_->rotation_begin,horizon_);
+            }
+            return begin_braking(selected_body);
+          }
+        }
+      }
       if (terminal_stop_before_rotation_&&!terminal_rotation_started_&&in_original_region&&early_braking_speed&&
         handler_->terminalTrackActive(binding_->suffix_begin,binding_->rotation_begin))
       {
@@ -1080,6 +1162,7 @@ private:
   double terminal_entry_xy_=0.; // Zero retains the existing goal-radius behavior.
   bool terminal_stop_before_rotation_=false;
   double terminal_early_braking_min_linear_velocity_=goal_region::kTerminalTransStoppedVelocity;
+  double private_early_braking_radius_=0.;
   bool terminal_braking_=false,terminal_rotation_started_=false;
   double terminal_resolution_=0.01,terminal_extent_=20.;
   std::shared_ptr<const goal_region::Binding> binding_;

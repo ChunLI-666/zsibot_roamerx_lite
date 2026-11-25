@@ -791,6 +791,36 @@ class FastOnlyB34Geometry : public FastOnlyBraking {
 protected:
   double mapOrigin() const override {return 1.;}
 };
+class PrivateEarlyBraking : public FastOnlyBraking {
+protected:
+  void configureExtra() override {
+    FastOnlyBraking::configureExtra();
+    node_->declare_parameter("FollowPath.private_early_braking_radius",.22);
+  }
+};
+
+TEST_F(PrivateEarlyBraking, FreshOrderedTrackTriggersCheckedZeroWithoutChangingEntry) {
+  publisher_->on_activate();controller_->setPlan(turnPlan(.4));checker_->reset();
+  auto outside=command(.24,.4);EXPECT_GT(outside.twist.linear.x,0.);
+  // The controller pose is older than the current TF, as on a live busy
+  // executor. The current actual origin lies inside the explicit window.
+  auto old=input(.24,.4);input(.20,.4);geometry_msgs::msg::Twist v;v.linear.x=.4;
+  auto brake=controller_->computeVelocityCommands(old,v,checker_.get());
+  EXPECT_DOUBLE_EQ(brake.twist.linear.x,0.);EXPECT_DOUBLE_EQ(brake.twist.angular.z,0.);
+  EXPECT_THROW(command(.10),nav2_core::NoValidControl); // Original .05 center obligation.
+}
+
+TEST_F(PrivateEarlyBraking, LowSpeedAndOutsideWindowKeepOriginalForwardCommand) {
+  publisher_->on_activate();controller_->setPlan(turnPlan(.4));checker_->reset();
+  auto low=command(.21,.20);EXPECT_DOUBLE_EQ(low.twist.linear.x,.4);
+}
+
+TEST_F(PrivateEarlyBraking, MeasuredMotionSweepRejectsObstacleBeyondCurrentFootprint) {
+  publisher_->on_activate();controller_->setPlan(turnPlan(.4));checker_->reset();
+  unsigned int mx,my;ASSERT_TRUE(map_->getCostmap()->worldToMap(-.90,0.,mx,my));
+  map_->getCostmap()->setCost(mx,my,nav2_costmap_2d::LETHAL_OBSTACLE);
+  EXPECT_THROW(command(.21,.4),nav2_core::NoValidControl);
+}
 
 TEST_F(FastOnlyBraking, OuterWindowLowMeasuredSpeedRetainsOriginalForwardFloor) {
   publisher_->on_activate();
