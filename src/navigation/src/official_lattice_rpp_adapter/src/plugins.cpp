@@ -315,6 +315,7 @@ public:
     terminal_angle_gain_=parameter(node,name+".terminal_settle_angle_gain_per_sec",.5);
     const auto max_accel=parameter(node,name+".rpp.max_angular_accel",3.2);
     const auto frequency=parameter(node,"controller_frequency",20.);
+    terminal_control_period_=1./frequency;
     require(std::isfinite(terminal_max_angular_)&&terminal_max_angular_>0.&&terminal_max_angular_<=.3&&
       std::isfinite(terminal_near_angle_)&&terminal_near_angle_>0.&&terminal_near_angle_<=M_PI&&
       std::isfinite(terminal_angle_gain_)&&terminal_angle_gain_>0.&&
@@ -350,12 +351,15 @@ public:
     require(!private_straight_hold_||(terminal_settle_repair_&&private_early_braking_radius_>0.),
       "private straight hold requires the stopped Warehouse repair profile");
     private_straight_max_angular_=parameter(node,name+".private_straight_max_angular_velocity",0.);
+    private_adaptive_braking_=parameter(node,name+".private_adaptive_braking",false);
     private_straight_lookahead_=parameter(node,name+".rpp.lookahead_dist",.6);
     require(std::isfinite(private_straight_max_angular_)&&private_straight_max_angular_>=0.&&
       private_straight_max_angular_<=.3&&std::isfinite(private_straight_lookahead_)&&
       private_straight_lookahead_>0.&&
       (private_straight_max_angular_==0.||private_straight_hold_),
       "invalid private straight angular limit or profile");
+    require(!private_adaptive_braking_||(private_straight_hold_&&private_straight_max_angular_>0.&&
+      private_early_braking_radius_>0.),"private adaptive braking requires the same-heading experimental profile");
     terminal_entry_xy_=parameter(node,name+".terminal_rotation_entry_xy_tolerance",0.);
     require(std::isfinite(terminal_entry_xy_)&&terminal_entry_xy_>=0.&&terminal_entry_xy_<=.25,
       "invalid terminal rotation entry XY tolerance");
@@ -730,6 +734,7 @@ public:
     if (!terminal_armed_) {
       auto [begin,end]=handler_->findPlanSegment(pose);
       segment=handler_->transformLocalPlan(begin,end);
+      bool adaptive_applied=false;
       if (private_early_braking_radius_>0.&&!terminal_rotation_started_&&binding_) {
         const auto & target=binding_->original_goal.pose;
         const double old_distance=std::hypot(path_pose.pose.position.x-target.position.x,
@@ -759,11 +764,71 @@ public:
           const double dx=target.position.x-fresh_path.pose.position.x;
           const double dy=target.position.y-fresh_path.pose.position.y;
           const double distance=std::hypot(dx,dy);
-          if (distance<=private_early_braking_radius_) {
+          const double goal_yaw=yaw(target),along=std::cos(goal_yaw)*dx+std::sin(goal_yaw)*dy;
+          const double lateral=-std::sin(goal_yaw)*dx+std::cos(goal_yaw)*dy;
+          const auto latest=measuredOdometry();
+          const auto & actual_twist=latest.message.twist.twist;
+          const double relative_yaw=angle(goal_yaw,yaw(fresh_path.pose));
+          const double projected=std::cos(relative_yaw)*actual_twist.linear.x-
+            std::sin(relative_yaw)*actual_twist.linear.y;
+          const auto body_stamp=rclcpp::Time(fresh.header.stamp).nanoseconds();
+          const auto latest_stamp=rclcpp::Time(latest.message.header.stamp).nanoseconds();
+          bool straight=binding_->suffix_begin<binding_->rotation_begin;
+          for (const auto heading:binding_->terminal_headings) {
+            if (std::abs(angle(heading,goal_yaw))>1e-5) {straight=false;break;}
+          }
+          const double w=actual_twist.angular.z,dt=terminal_control_period_,vx=actual_twist.linear.x,vy=actual_twist.linear.y;
+          const double turn=w*dt;
+          const double bx=std::abs(w)>1e-9?(vx*std::sin(turn)+vy*(std::cos(turn)-1.))/w:vx*dt;
+          const double by=std::abs(w)>1e-9?(vx*(1.-std::cos(turn))+vy*std::sin(turn))/w:vy*dt;
+          const double cycle_along=std::cos(relative_yaw)*bx-std::sin(relative_yaw)*by;
+          const double cycle_lateral=std::sin(relative_yaw)*bx+std::cos(relative_yaw)*by;
+          const double next_lateral=lateral-cycle_lateral;
+          const double center=entry_xy-binding_->error;
+          adaptive_applied=private_adaptive_braking_&&straight&&along>0.&&
+            std::abs(relative_yaw)<=yaw_tolerance&&std::abs(w)<=command_yaw_limit_&&
+            projected>=.38325&&projected<=.70929&&cycle_along>=0.&&
+            std::abs(body_stamp-latest_stamp)<=50000000LL&&center>0.&&
+            std::abs(lateral)<center&&std::abs(next_lateral)<center;
+          double model_low=0.,model_high=0.,trigger_along=0.;
+          if (adaptive_applied) {
+            const double t=(projected-.38325)/(.70929-.38325);
+            // Observations, not a physical stopping bound: low anchor is the
+            // measured map-axis stop, high anchor spans the two measured .71 trials.
+            model_low=.05851+t*(.14605-.05851);
+            model_high=.07104+t*(.17052-.07104);
+            const double chord=std::min(std::sqrt(center*center-lateral*lateral),
+              std::sqrt(center*center-next_lateral*next_lateral));
+            trigger_along=std::clamp(model_low+cycle_along-.25*chord,0.,private_early_braking_radius_);
+            if (auto node=node_.lock()) {
+              const auto state=handler_->diagnosticState();
+              RCLCPP_INFO_THROTTLE(node->get_logger(),*node->get_clock(),200,
+                "private_adaptive_brake_v1 body_stamp_ns=%lld odom_stamp_ns=%lld along=%.9f lateral=%.9f projected=%.9f measured_w=%.9f model_low=%.9f model_high=%.9f cycle_along=%.9f next_lateral=%.9f trigger=%.9f prefix=%zu suffix=%zu rotation=%zu",
+                static_cast<long long>(body_stamp),static_cast<long long>(latest_stamp),along,lateral,projected,w,
+                model_low,model_high,cycle_along,next_lateral,trigger_along,state.prefix_offset,binding_->suffix_begin,binding_->rotation_begin);
+            }
+          } else if (private_adaptive_braking_&&distance<=private_early_braking_radius_) {
+            if (auto node=node_.lock()) {
+              RCLCPP_INFO_THROTTLE(node->get_logger(),*node->get_clock(),200,
+                "private_adaptive_fallback_v1 body_stamp_ns=%lld odom_stamp_ns=%lld straight=%d along=%.9f lateral=%.9f next_lateral=%.9f projected=%.9f relative_yaw=%.9f measured_w=%.9f cycle_along=%.9f",
+                static_cast<long long>(body_stamp),static_cast<long long>(latest_stamp),straight,along,lateral,
+                next_lateral,projected,relative_yaw,w,cycle_along);
+            }
+          }
+          if ((adaptive_applied&&along<=trigger_along&&distance<=private_early_braking_radius_)||
+            (!adaptive_applied&&distance<=private_early_braking_radius_)) {
+            if (adaptive_applied) {
+              if (auto node=node_.lock()) {
+                RCLCPP_INFO(node->get_logger(),
+                  "private_adaptive_trigger_v1 body_stamp_ns=%lld odom_stamp_ns=%lld along=%.9f lateral=%.9f projected=%.9f measured_w=%.9f model_low=%.9f model_high=%.9f cycle_along=%.9f next_lateral=%.9f trigger=%.9f",
+                  static_cast<long long>(body_stamp),static_cast<long long>(latest_stamp),along,lateral,projected,w,
+                  model_low,model_high,cycle_along,next_lateral,trigger_along);
+              }
+            }
             // Sweep the measured body-frame planar velocity, including lateral
             // motion and measured yaw rate, on the same locked live costmap.
             // This is an extra guard; it does not assert a stopping model.
-            const auto & twist=measured.twist.twist;
+            const auto & twist=adaptive_applied?latest.message.twist.twist:measured.twist.twist;
             const double vx=twist.linear.x,vy=twist.linear.y,w=twist.angular.z;
             require(std::isfinite(vx)&&std::isfinite(vy)&&std::isfinite(w),"nonfinite early braking twist");
             double x=fresh.pose.position.x,y=fresh.pose.position.y,heading=yaw(fresh.pose);
@@ -791,8 +856,6 @@ public:
               selected_body.pose.position.y,yaw(selected_body.pose))) {
               throw nav2_core::NoValidControl("Filled private braking selection footprint occupied");
             }
-            const double goal_yaw=yaw(target),along=std::cos(goal_yaw)*dx+std::sin(goal_yaw)*dy;
-            const double lateral=-std::sin(goal_yaw)*dx+std::cos(goal_yaw)*dy;
             if (auto node=node_.lock()) {
               const auto state=handler_->diagnosticState();
               RCLCPP_INFO(node->get_logger(),
@@ -807,7 +870,7 @@ public:
           }
         }
       }
-      if (terminal_stop_before_rotation_&&!terminal_rotation_started_&&in_original_region&&early_braking_speed&&
+      if (terminal_stop_before_rotation_&&!terminal_rotation_started_&&in_original_region&&early_braking_speed&&!adaptive_applied&&
         handler_->terminalTrackActive(binding_->suffix_begin,binding_->rotation_begin))
       {
         return begin_braking(pose); // Original .15 braking window, before .05 turn admission.
@@ -1269,6 +1332,8 @@ private:
   double private_early_braking_radius_=0.;
   bool private_straight_hold_=false,private_ordered_handoff_=false,terminal_ever_rotated_=false;
   double private_straight_max_angular_=0.,private_straight_lookahead_=0.;
+  bool private_adaptive_braking_=false;
+  double terminal_control_period_=0.;
   bool terminal_braking_=false,terminal_rotation_started_=false;
   double terminal_resolution_=0.01,terminal_extent_=20.;
   std::shared_ptr<const goal_region::Binding> binding_;

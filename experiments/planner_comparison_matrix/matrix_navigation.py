@@ -676,7 +676,10 @@ def prepare(args):
                 if private_approach:
                     controller['FollowPath']['private_straight_hold']=True
                     controller['FollowPath']['private_straight_max_angular_velocity']=.10
+                    controller['FollowPath']['private_adaptive_braking']=True
                     manifest['private_straight_hold']=dict(enabled=True, original_goal_and_certificate_unchanged=True)
+                    manifest['private_adaptive_braking']=dict(enabled=True, measured_projected_speed_range_mps=[.38325,.70929],
+                        braking_radius_upper_bound_m=.18, fallback='original fixed safety gates')
                     manifest['private_straight_angular_limit']=dict(max_rad_s=.10,
                         remaining_distance='existing RPP lookahead', measured_accel_limit=True)
                 controller['FollowPath'].update(terminal_settle_repair=True,terminal_progress_checker='Progress',
@@ -1200,6 +1203,8 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
                     raise RuntimeError('private straight hold effective parameter mismatch')
                 if getattr(args,'private_same_heading_approach',False) and parameter_value('controller_server','FollowPath.private_straight_max_angular_velocity') != .10:
                     raise RuntimeError('private straight angular limit effective parameter mismatch')
+                if getattr(args,'private_same_heading_approach',False) and parameter_value('controller_server','FollowPath.private_adaptive_braking') is not True:
+                    raise RuntimeError('private adaptive braking effective parameter mismatch')
                 expected={'FollowPath.terminal_settle_repair':True,'FollowPath.terminal_rotation_aim_yaw_tolerance':.03,
                   'FollowPath.terminal_settle_timeout_sec':30.,'FollowPath.terminal_settle_max_angular_velocity':.10,
                   'FollowPath.terminal_settle_near_angle':.35,'FollowPath.terminal_settle_angle_gain_per_sec':.5}

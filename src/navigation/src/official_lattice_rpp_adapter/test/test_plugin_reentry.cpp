@@ -1247,6 +1247,70 @@ TEST_F(PrivateStraightAngular, SameGoalReplanAndCancelKeepTheirNormalSemantics) 
   EXPECT_DOUBLE_EQ(zero.twist.linear.x,0.);EXPECT_DOUBLE_EQ(zero.twist.angular.z,0.);
   EXPECT_FALSE(p5Check());
 }
+class PrivateAdaptiveBraking : public PrivateStraightAngular {
+protected:
+  void configureExtra() override {
+    PrivateStraightAngular::configureExtra();
+    node_->declare_parameter("FollowPath.private_adaptive_braking",true);
+    node_->declare_parameter("FollowPath.terminal_early_braking_min_linear_velocity",.30);
+  }
+};
+TEST_F(PrivateAdaptiveBraking, MeasuredLowSpeedPassesBothFixedWindowsThenBrakes) {
+  controller_->setPlan(plan(1.5));checker_->reset();
+  EXPECT_NEAR(command(.14,.4).twist.linear.x,.4,1e-9);
+  EXPECT_NEAR(command(.09,.4).twist.linear.x,.4,1e-9);
+  const auto stop=command(.065,.4);EXPECT_DOUBLE_EQ(stop.twist.linear.x,0.);
+  EXPECT_DOUBLE_EQ(stop.twist.angular.z,0.);
+  EXPECT_THROW(command(.10),nav2_core::NoValidControl);
+}
+TEST_F(PrivateAdaptiveBraking, MeasuredHighSpeedTriggersBeforeItsExpectedStoppingDistance) {
+  controller_->setPlan(plan(1.5));checker_->reset();
+  EXPECT_NEAR(command(.20,.70).twist.linear.x,.4,1e-9);
+  const auto stop=command(.16,.70);EXPECT_DOUBLE_EQ(stop.twist.linear.x,0.);
+  EXPECT_DOUBLE_EQ(stop.twist.angular.z,0.);
+}
+TEST_F(PrivateAdaptiveBraking, UnmeasuredSpeedBandRetainsOriginalFixedBrake) {
+  controller_->setPlan(plan(1.5));checker_->reset();
+  const auto stop=command(.14,.35);EXPECT_DOUBLE_EQ(stop.twist.linear.x,0.);
+  EXPECT_DOUBLE_EQ(stop.twist.angular.z,0.);
+}
+TEST_F(PrivateAdaptiveBraking, RequiredEndpointTurnRetainsOriginalFixedBrake) {
+  controller_->setPlan(turnPlan(1.5));checker_->reset();
+  const auto stop=command(.14,.4);EXPECT_DOUBLE_EQ(stop.twist.linear.x,0.);
+  EXPECT_DOUBLE_EQ(stop.twist.angular.z,0.);
+}
+TEST_F(PrivateAdaptiveBraking, CollisionStopsForwardCommandBeforeAdaptiveThreshold) {
+  controller_->setPlan(plan(1.5));checker_->reset();
+  unsigned int mx,my;ASSERT_TRUE(map_->getCostmap()->worldToMap(-.75,0.,mx,my));
+  map_->getCostmap()->setCost(mx,my,nav2_costmap_2d::LETHAL_OBSTACLE);
+  EXPECT_THROW(command(.14,.4),nav2_core::NoValidControl);
+}
+TEST_F(PrivateAdaptiveBraking, ReverseAndExcessAngularRateRetainOriginalBrake) {
+  for (const auto & sample:std::vector<std::pair<double,double>>{{-.4,0.},{.4,.31}}) {
+    controller_->setPlan(plan(1.5));checker_->reset();
+    const auto stop=commandAt(.14,0.,M_PI,sample.first,0.,sample.second);
+    EXPECT_DOUBLE_EQ(stop.twist.linear.x,0.);EXPECT_DOUBLE_EQ(stop.twist.angular.z,0.);
+  }
+}
+TEST_F(PrivateAdaptiveBraking, ExcessLateralErrorRetainsOriginalBrake) {
+  controller_->setPlan(plan(1.5));checker_->reset();
+  const auto stop=commandAt(.14,.06,M_PI,.4,0.,0.);
+  EXPECT_DOUBLE_EQ(stop.twist.linear.x,0.);EXPECT_DOUBLE_EQ(stop.twist.angular.z,0.);
+}
+TEST_F(PrivateAdaptiveBraking, StaleAndNonfiniteMeasuredInputCannotReleaseBrake) {
+  controller_->setPlan(plan(1.5));checker_->reset();
+  const auto p=input(.14,.4);std::this_thread::sleep_for(350ms);
+  geometry_msgs::msg::Twist v;v.linear.x=.4;
+  EXPECT_ANY_THROW(controller_->computeVelocityCommands(p,v,checker_.get()));
+  EXPECT_ANY_THROW(commandAt(.14,0.,M_PI,.4,0.,std::numeric_limits<double>::quiet_NaN()));
+}
+TEST_F(PrivateAdaptiveBraking, CancellationAfterEligibleTrackStillProducesZero) {
+  controller_->setPlan(plan(1.5));checker_->reset();
+  ASSERT_NEAR(command(.14,.4).twist.linear.x,.4,1e-9);
+  controller_->cancel();const auto stop=command(.12,.4);
+  EXPECT_DOUBLE_EQ(stop.twist.linear.x,0.);EXPECT_DOUBLE_EQ(stop.twist.angular.z,0.);
+  EXPECT_FALSE(reached(.12));
+}
 TEST_F(P8TerminalRepair, SwingOutsideHoldsUntilStableThenSelectsOneCorrection) {
   p5Run(250ms,true);stableOutsideCandidate();
   auto correction=nextCorrection();ASSERT_LT(correction.twist.angular.z,0.);
