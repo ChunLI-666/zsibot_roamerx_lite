@@ -1229,6 +1229,24 @@ TEST_F(PrivateStraightAngular, OppositeMeasuredTurnDoesNotInventTheWrongSignComm
   EXPECT_DOUBLE_EQ(cmd.twist.linear.x,0.);EXPECT_DOUBLE_EQ(cmd.twist.angular.z,0.);
   EXPECT_THROW(commandAt(.45,0.,M_PI+.06),nav2_core::NoValidControl);
 }
+TEST_F(PrivateStraightAngular, RequiredEndpointTurnDoesNotUseStraightLimit) {
+  controller_->setPlan(turnPlan(1.5));checker_->reset();
+  const auto cmd=commandAt(.45,0.,M_PI+.20,.4,0.,0.);
+  EXPECT_NEAR(cmd.twist.linear.x,.4,1e-9);
+  EXPECT_GT(std::abs(cmd.twist.angular.z),.10);
+  EXPECT_FALSE(p5Check());
+}
+TEST_F(PrivateStraightAngular, SameGoalReplanAndCancelKeepTheirNormalSemantics) {
+  controller_->setPlan(plan(1.5));checker_->reset();
+  auto first=commandAt(.45,0.,M_PI+.06,.4,0.,0.);
+  ASSERT_NEAR(first.twist.linear.x,.4,1e-9);ASSERT_LE(std::abs(first.twist.angular.z),.1000001);
+  controller_->setPlan(plan(1.5));checker_->reset();
+  auto next=commandAt(.45,0.,M_PI+.06,.4,0.,0.);
+  EXPECT_NEAR(next.twist.linear.x,.4,1e-9);EXPECT_LE(std::abs(next.twist.angular.z),.1000001);
+  controller_->cancel();auto zero=commandAt(.45,0.,M_PI+.06,.4,0.,0.);
+  EXPECT_DOUBLE_EQ(zero.twist.linear.x,0.);EXPECT_DOUBLE_EQ(zero.twist.angular.z,0.);
+  EXPECT_FALSE(p5Check());
+}
 TEST_F(P8TerminalRepair, SwingOutsideHoldsUntilStableThenSelectsOneCorrection) {
   p5Run(250ms,true);stableOutsideCandidate();
   auto correction=nextCorrection();ASSERT_LT(correction.twist.angular.z,0.);
