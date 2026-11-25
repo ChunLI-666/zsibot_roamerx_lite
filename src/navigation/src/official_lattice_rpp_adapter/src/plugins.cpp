@@ -1935,7 +1935,7 @@ public:
       auto original=goal;original.header=output.header;output.poses.push_back(original);
     } else {output.poses.back().pose=goal.pose;}
     if (straight_approach_) {check();}
-    log_timing("success");
+    log_timing("path_validated");
     if (straight_approach_&&snapshot) {
       snapshot->phase="successful_private_approach";
       strict_index.reset();standard_index.reset();lock.unlock();request_lock.unlock();
