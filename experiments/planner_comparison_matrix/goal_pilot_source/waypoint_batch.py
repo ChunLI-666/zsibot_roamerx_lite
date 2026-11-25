@@ -832,8 +832,25 @@ class WaypointPilot(frozen.Pilot):
         """One executor; callback state stays on the main thread during fsync."""
         if not rclpy.ok():
             raise RuntimeError('ROS context stopped while durable checkpoint is pending')
-        rclpy.spin_once(self,timeout_sec=.002)
         active=self.goal_sent_ns is not None
+        terminal=getattr(self,'storage_terminal',None)
+        if active and terminal is not None and getattr(self,'simulation_scan_max_age_sec',.3)==.9:
+            if self.args.stop_signals:
+                self.cancel_own('pilot_interrupted')
+                return
+            # The accepted UUID is already in flight; consume queued original
+            # callbacks before checking their age while durable ACK is pending.
+            try:
+                pumped=self.pump_runtime_inputs(terminal)
+                if getattr(self,'storage_ack_pending',False):
+                    self.emit('storage_ack_input_pump',**pumped,
+                        original_header_ns={key:self.last.get(key,{}).get('stamp_ns')
+                            for key in ('pose','odom','scan')})
+            except BaseException:
+                self.cancel_own('pilot_interrupted' if self.args.stop_signals else 'storage_wait_observation_failed')
+                raise
+        else:
+            rclpy.spin_once(self,timeout_sec=.002)
         if self.args.stop_signals:
             if active:self.cancel_own('pilot_interrupted')
             return
@@ -977,12 +994,29 @@ class WaypointPilot(frozen.Pilot):
                   preregistered_budget=budget,
                   pose_header_stamps_ns=[frozen.stamp_ns(pose.header.stamp) for pose in request.poses])
         self.check_interruption()
+        dispatch_timing=None
+        if getattr(self,'simulation_scan_max_age_sec',.3)==.9:
+            # This is the existing bounded single-executor pump, not a time
+            # refresh: the original message stamps and final guards remain.
+            prepare_started=time.monotonic_ns();prepare_cpu=time.thread_time_ns()
+            before=dict(self.counts)
+            presend_pump=self.pump_stop_inputs(int(deadline*1e9))
+            self.check_interruption()
+            dispatch_timing=dict(presend_pump=presend_pump,counts_before=before,
+                counts_after=dict(self.counts),prepare_started_steady_ns=prepare_started,
+                prepare_wall_ns=time.monotonic_ns()-prepare_started,
+                prepare_thread_cpu_ns=time.thread_time_ns()-prepare_cpu)
         budget_issues=[]
         try:
             mission_budget(self.latest_ready,self.args.timeout,time.clock_gettime(time.CLOCK_BOOTTIME),
                 launcher_boot_id)
         except ValueError as exc:budget_issues.append('readiness:'+str(exc))
+        decision_started=time.monotonic_ns();decision_cpu=time.thread_time_ns()
         valid,issues,snapshot=self.decision_ready(budget_issues,require_stopped=True)
+        if dispatch_timing is not None:
+            dispatch_timing.update(decision_started_steady_ns=decision_started,
+                decision_wall_ns=time.monotonic_ns()-decision_started,
+                decision_thread_cpu_ns=time.thread_time_ns()-decision_cpu)
         if fullmap_checked_pose is not None:
             try:
                 final_pose=snapshot['last']['pose']
@@ -996,9 +1030,20 @@ class WaypointPilot(frozen.Pilot):
         self.owned_identity,self.goal_uuid=owned_identity,goal_uuid
         self.goal_sent_steady,self.goal_sent_ns=time.monotonic(),time.time_ns()
         if getattr(self,'mission',None) is not None:self.mission.send_invoked=True
+        send_started=time.monotonic_ns();send_cpu=time.thread_time_ns()
         sent = client.send_goal_async(request, goal_uuid=self.goal_uuid, feedback_callback=self.native_feedback)
+        if dispatch_timing is not None:
+            dispatch_timing.update(send_started_steady_ns=send_started,
+                send_wall_ns=time.monotonic_ns()-send_started,
+                send_thread_cpu_ns=time.thread_time_ns()-send_cpu,counts_after_send=dict(self.counts))
         send_event['start_snapshot']=snapshot
+        emit_started=time.monotonic_ns();emit_cpu=time.thread_time_ns()
         self.emit('goal_send',**send_event)
+        if dispatch_timing is not None:
+            dispatch_timing.update(emit_started_steady_ns=emit_started,
+                emit_wall_ns=time.monotonic_ns()-emit_started,
+                emit_thread_cpu_ns=time.thread_time_ns()-emit_cpu)
+            self.emit('dispatch_callback_timing',**dispatch_timing)
         if not self.spin_until(sent.done, 10.):
             return dict(classification='goal_response_timeout_acceptance_unknown')
         self.action_goal_handle = sent.result()
@@ -1007,7 +1052,16 @@ class WaypointPilot(frozen.Pilot):
         terminal=self.action_goal_handle.get_result_async() if self.action_goal_handle.accepted else None
         self.storage_terminal=terminal
         if getattr(self, 'mission', None) is not None:
-            self.mission.acknowledge(bool(self.action_goal_handle.accepted))
+            if dispatch_timing is not None:
+                ack_started=time.monotonic_ns();ack_cpu=time.thread_time_ns();ack_before=dict(self.counts)
+                self.storage_ack_pending=True
+                try:self.mission.acknowledge(bool(self.action_goal_handle.accepted))
+                finally:self.storage_ack_pending=False
+                self.emit('durable_ack_callback_timing',started_steady_ns=ack_started,
+                    wall_ns=time.monotonic_ns()-ack_started,thread_cpu_ns=time.thread_time_ns()-ack_cpu,
+                    counts_before=ack_before,counts_after=dict(self.counts),
+                    last_runtime_pump=getattr(self,'runtime_last_pump',None))
+            else:self.mission.acknowledge(bool(self.action_goal_handle.accepted))
         if not self.action_goal_handle.accepted:
             return dict(classification='goal_rejected')
         cancel_logged = False
