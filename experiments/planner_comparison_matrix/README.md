@@ -530,3 +530,26 @@ included in launcher required sources, capability SHA and CLI source copies.
 
 These are software contracts for isolated experiments. They do not migrate old
 A16/B38 live databases or establish route, simulator or physical acceptance.
+# Warehouse scan loss recovery
+
+On the loopback-only Matrix Warehouse full-map runtime, opt in with
+`--simulation-scan-max-age-sec 0.9` on both `run_matrix_navigation.sh` and
+`goal_pilot_source/mission_resume.py`. Keep `--warehouse-fullmap`,
+`--with-waypoints`, and `--with-mission-recovery` on the navigation launcher.
+Configure the existing `livox_scan_projector_nav_floor_v1` process on this
+private runtime with `-p max_sensor_age_sec:=0.9`. Its output topic is
+`/laser_scan_leveled_nav_floor_v1`. READY verifies the actual projector
+parameter, both costmap scan update intervals, and the generated recovery BT
+scan input. The original 300 ms remains the default and a separate timing
+verdict. Use the original ROS clock and sample timestamps.
+
+To allow one mission-level retry with the existing single native BT retry,
+allocate two parent dispatches and four child attempts per index in the
+persistent mission policy. An excessive scan age cancels only the current
+parent UUID. The same invocation can dispatch a new UUID from the remaining
+waypoint index after terminal parent and child proof, measured stop, a newer
+original scan on both readers, and the normal stable preflight. The native
+recovery BT verifies the stopped start and live costmap before replanning.
+Cancel signals, ownership/identity loss and unproven stops do not authorize
+automatic dispatch. The original route, mission deadline and dispatch budget
+continue to apply.

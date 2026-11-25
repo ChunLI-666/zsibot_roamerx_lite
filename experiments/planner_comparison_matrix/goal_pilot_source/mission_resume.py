@@ -13,7 +13,8 @@ import uuid
 
 from mission_state import (MissionStore, Hold, atomic_json, digest, validate_identity,
                            check_identity_state, remaining_state)
-from waypoint_contract import OrderedVisits, evidence_json, validate_route
+from waypoint_contract import (OrderedVisits, evidence_json, validate_route,
+                               validate_ownership, validate_simulation_scan_latency_profile)
 from mission_continuation import CLIENT_SOURCES
 
 HERE = Path(__file__).resolve().parent
@@ -70,6 +71,8 @@ class Session:
         state = store.state()
         self.start_index = state['progress']['next_index']
         self.identity_epoch_id = state['identity_epoch_id']
+        self.prior_scan_pause=(state.get('attempt') or {}).get('warehouse_scan_pause')
+        self.warehouse_launcher_deadline=None
         self.action_uuid = None
         self.send_invoked=False
         self.pending_visits=deque();self.last_visit_key=None;self.storage_failure=None
@@ -93,8 +96,25 @@ class Session:
         check_identity_state(state,actual)
         if ready.get('variant') != state['variant']:
             raise Hold('Runtime variant differs from mission')
+        if ready.get('simulation_scan_latency_profile',{}).get('mode')=='warehouse_simulation_900ms':
+            deadline=ready.get('mission_deadline')
+            if not isinstance(deadline,dict) or not deadline.get('run_id') or not deadline.get('manifest_sha256'):
+                raise Hold('Warehouse launcher identity is missing')
+            expected=(self.prior_scan_pause or {}).get('launcher_deadline',self.warehouse_launcher_deadline)
+            if expected is not None and expected!=deadline:
+                raise Hold('Warehouse launcher identity changed')
+            self.warehouse_launcher_deadline=copy.deepcopy(deadline)
         if require_budget and remaining_state(state) < 1:
             raise Hold('FAILED_BUDGET: mission deadline expired')
+
+    def validate_recovered_scan(self,ready,snapshot):
+        if self.prior_scan_pause is None:
+            return
+        last=self.prior_scan_pause['last_original_scan_ns']
+        headers=(ready.get('producer_scan_observation',{}).get('header_ns'),
+                 snapshot.get('last',{}).get('scan',{}).get('stamp_ns'))
+        if not all(type(stamp) is int and stamp>last for stamp in headers):
+            raise Hold('Waiting for a newer original scan after Warehouse scan pause')
 
     def reserve(self):
         try:
@@ -158,6 +178,8 @@ def run_attempt(args, store, output, reconcile=False):
 
     if os.environ.get('ROS_DOMAIN_ID') != '185':
         raise Hold('Only isolated Matrix domain185 is supported')
+    if args.simulation_scan_max_age_sec==.9 and {p.name for p in Path('/sys/class/net').iterdir()}!={'lo'}:
+        raise Hold('900ms Warehouse scan profile requires a loopback-only private network')
     output.mkdir(parents=True,exist_ok=False)
     state=store.state(); options=runtime_args(args,output,state)
     # An exhausted motion budget must never disable exact-UUID cancellation.
@@ -200,8 +222,12 @@ def run_attempt(args, store, output, reconcile=False):
         while time.monotonic()<until:
             rclpy.spin_once(node,timeout_sec=.02)
             try:
-                node.execution_ready(phase='settle')
-                ownership=node.latest_ready.get('waypoint_ownership',{})
+                checked=node.execution_ready(phase='settle')
+                current=None
+                if options.simulation_scan_max_age_sec==.9:
+                    _,issues,snapshot=checked
+                    if issues:current=node.warehouse_pause_stop_ready(issues,snapshot)
+                ownership=(current or node.latest_ready).get('waypoint_ownership',{})
                 children=(not ownership.get('navigate_to_pose_active') and not ownership.get('follow_waypoints_active')
                     and not ownership.get('follow_path_active') and ownership.get('follow_path_status_publishers_match') is True
                     and ownership.get('exclusive_nav_client') is True
@@ -231,6 +257,8 @@ def run_attempt(args, store, output, reconcile=False):
                 result['evidence_writer']=node.finish_evidence()
                 result['camera_recording_quality']=result['evidence_writer'].get('camera_recording_quality')
                 result['strict_scan_timing_status']='FAIL' if (node.strict_scan_latency_first_fault or node.scan_aging_episodes) else 'NO_STRICT_SCAN_FAULT_RECORDED'
+                if args.simulation_scan_max_age_sec==.9:
+                    result['simulation_scan_latency_profile']=node.scan_latency_profile
                 result['children_quiescent']=children
                 result['goals_sent']=int(session.send_invoked and not reconcile)
                 result['send_goal_async_invoked']=bool(session.send_invoked)
@@ -258,11 +286,76 @@ def run_attempt(args, store, output, reconcile=False):
                         store.finish_attempt(result,children,result_path=output/'native_result.json')
         finally:
             try:
-                if node is not None:node.destroy_node()
+                if node is not None:
+                    client=getattr(node,'warehouse_action_client',None)
+                    try:
+                        if client is not None:client.destroy()
+                    finally:
+                        node.destroy_node()
             finally:
                 if rclpy.ok():rclpy.shutdown()
                 for n,handler in old.items():signal.signal(n,handler)
     return result
+
+
+def wait_for_warehouse_pilot_exit(args, store, result, output):
+    """Wait for both ROS graph views to retire the previous action client."""
+    import rclpy
+    from rclpy.signals import SignalHandlerOptions
+
+    session=Session(store,args.request_id,output)
+    ended_ns=result['finished_ns']
+    until=time.monotonic()+min(8.,max(0.,store.remaining()))
+    retired_since=None
+    readback={}
+    signals=[]
+    handlers={n:signal.signal(n,lambda n,f:signals.append(n)) for n in (signal.SIGINT,signal.SIGTERM)}
+    node=None
+    try:
+        rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
+        node=rclpy.create_node('matrix_mission_pilot_retirement',enable_rosout=False,
+                               start_parameter_services=False)
+        while not signals and rclpy.ok() and time.monotonic()<until:
+            rclpy.spin_once(node,timeout_sec=.02)
+            try:
+                ready=json.loads(args.ready.read_bytes())
+                now=time.time_ns()
+                if not 0<ready['valid_until_ns']-now<=550_000_000:
+                    raise ValueError('Launcher lease expired')
+                validate_simulation_scan_latency_profile(ready,.9)
+                session.validate_ready(ready)
+                ownership=ready['waypoint_ownership']
+                validate_ownership(ownership,now)
+                if not ownership.get('follow_path_status_publishers_match') or ownership.get('follow_path_active'):
+                    raise ValueError('FollowPath ownership or terminal state unverified')
+                if ownership['checked_unix_ns']<=ended_ns:
+                    raise ValueError('Waiting for a post-close ownership audit')
+                local_graph=set(node.get_node_names_and_namespaces())
+                launch_graph={(entry['name'],entry['namespace']) for entry in ownership['actual_service_client_graph']}
+                if ('matrix_independent_goal_pilot','/') in local_graph|launch_graph:
+                    raise ValueError('Prior pilot is still visible')
+                if not {('waypoint_follower','/'),('bt_navigator','/')}<=local_graph:
+                    raise ValueError('Observer discovery incomplete')
+                checked=time.monotonic()
+                retired_since=retired_since or checked
+                readback=dict(pid=os.getpid(),checked_unix_ns=now,ownership_checked_unix_ns=ownership['checked_unix_ns'],
+                              launcher_deadline=ready['mission_deadline'],old_parent_uuid=result['action_uuid'],
+                              stable_absence_sec=checked-retired_since)
+                if checked-retired_since>=.3:break
+            except (OSError,KeyError,TypeError,ValueError,Hold) as error:
+                retired_since=None
+                readback={'reason':str(error)}
+        else:
+            if signals:
+                store.request_cancel(args.request_id,'operator signal during paused mission')
+            atomic_json(output/'pilot_retirement.json',dict(retired=False,signals=signals,**readback))
+            return False
+        atomic_json(output/'pilot_retirement.json',dict(retired=True,**readback))
+        return True
+    finally:
+        if node is not None:node.destroy_node()
+        if rclpy.ok():rclpy.shutdown()
+        for n,handler in handlers.items():signal.signal(n,handler)
 
 
 def parser():
@@ -277,7 +370,7 @@ def parser():
     p.add_argument('--resource-lock',type=Path,default=Path('/tmp/matrix-domain185-mission.lock'))
     p.add_argument('--reason',help='Explicit reviewed retry reason; never supplied by automatic recovery')
     p.add_argument('--odom-topic',default='/odom/current_pose');p.add_argument('--scan-topic',default='/laser_scan')
-    p.add_argument('--simulation-scan-max-age-sec',type=float,choices=[.3,.5],default=.3)
+    p.add_argument('--simulation-scan-max-age-sec',type=float,choices=[.3,.5,.9],default=.3)
     p.add_argument('--simulation-first-leg-max-distance-m',type=float,choices=[8.,8.5],default=8.)
     p.add_argument('--camera-topic',default='/camera/front/image/compressed');p.add_argument('--camera-info-topic',default='/camera/front/camera_info')
     return p
@@ -381,12 +474,17 @@ def main(argv=None):
                     if s['lifecycle']=='NEEDS_TASK_DECISION':outcome='NEEDS_TASK_DECISION';code=14;break
                     if s['lifecycle']=='CANCELED':outcome='CANCELED';code=11;break
                     if s['lifecycle']=='HOLD':break
+                    if args.simulation_scan_max_age_sec==.9 and s['lifecycle']!='PAUSED_INPUT_HEALTH':break
                     if result.get('cancel_reason') in ('scheduled_cancel','pilot_interrupted') or result.get('stop_signals'):
                         outcome='CANCELED';code=11;break
                     a=s.get('attempt') or {}
                     if not (a.get('terminal_confirmed') and a.get('children_quiescent') and a.get('stopped')):break
                     # The next attempt's full stable preflight is the bounded health wait.
                     if result.get('goals_sent')==0 or not a.get('parent_action_uuid'):break
+                    if args.simulation_scan_max_age_sec==.9 and not wait_for_warehouse_pilot_exit(
+                            args,store,result,args.output):
+                        if store.state()['lifecycle']=='CANCELED':outcome='CANCELED';code=11
+                        break
         state=store.export(args.output)
         response=dict(schema='matrix.mission.operation.v1',operation=args.operation,request_id=args.request_id,
             workflow_run_id=args.workflow_run_id,operation_outcome=outcome,exit_code=code,

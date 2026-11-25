@@ -252,8 +252,9 @@ def validate_route(document):
     if isinstance(budget, bool) or not isinstance(budget, (int, float)) or not math.isfinite(budget) or not 0 < budget <= 3300.:
         raise ValueError('Executable route requires a preregistered mission_budget_sec in (0,3300]')
     entries = document.get('waypoints')
-    if not isinstance(entries, list) or not 2 <= len(entries) <= 256:
-        raise ValueError('Route requires 2..256 ordered waypoints')
+    single_fullmap = document.get('scenario_profile') == 'warehouse_fullmap'
+    if not isinstance(entries, list) or (single_fullmap and len(entries) != 1) or (not single_fullmap and not 2 <= len(entries) <= 256):
+        raise ValueError('Route requires 2..256 waypoints, or one explicit warehouse_fullmap goal')
     identifiers = set()
     result = []
     for index, entry in enumerate(entries):
@@ -298,6 +299,64 @@ def initial_leg_limit(requested, ready, simulation_scan_age):
     return requested
 
 
+def validate_initial_request(requested, ready, simulation_scan_age, start, route):
+    """Keep the rolling limit, or check the bound full map for one persistent goal.
+
+    The static square encloses every orientation of the padded footprint; the
+    existing native planner and live safety/obstacle checks remain authoritative.
+    """
+    profile = ready.get('warehouse_fullmap')
+    goal = route[0]['pose'] if route else None
+    if profile is None:
+        limit = initial_leg_limit(requested, ready, simulation_scan_age)
+        return math.hypot(goal[0]-start['x'], goal[1]-start['y']) < limit
+    if (len(route) != 1 or simulation_scan_age not in (.3,.9) or not ready.get('mission_identity', {}).get('verified')
+            or len(ready['mission_identity'].get('effective_config_sha256', '')) != 64):
+        raise ValueError('Fullmap requires one persistent goal and strict bound mission identity')
+    validate_simulation_scan_latency_profile(ready,simulation_scan_age)
+    from PIL import Image
+    m = ready.get('actual_costmaps', {}).get('global_costmap', {})
+    o = m.get('origin', {}); pos = o.get('position', {}); rot = o.get('orientation', {})
+    try:
+        numbers = [profile['resolution'], profile['origin_x'], profile['origin_y'], pos['x'], pos['y'],
+                   rot['z'], rot['w'], m['resolution']]
+        if (any(not math.isfinite(float(x)) for x in numbers)
+                or type(profile['size_x']) is not int or type(profile['size_y']) is not int
+                or m['size_x'] != profile['size_x'] or m['size_y'] != profile['size_y']
+                or abs(m['resolution']-profile['resolution']) > 1e-7
+                or abs(pos['x']-profile['origin_x']) > 1e-5 or abs(pos['y']-profile['origin_y']) > 1e-5
+                or abs(rot['z']) > 1e-7 or abs(rot['w']-1.) > 1e-7):
+            raise ValueError('Fullmap geometry mismatch')
+        image_path = Path(profile['image'])
+        with image_path.open('rb') as f:
+            if hashlib.file_digest(f, 'sha256').hexdigest() != profile['image_sha256']:
+                raise ValueError('Fullmap image hash mismatch')
+        footprint = profile['footprint']; padding = float(profile['padding'])
+        if len(footprint) < 3 or padding < 0 or not math.isfinite(padding):
+            raise ValueError('Fullmap footprint invalid')
+        # Nav2 padFootprint adds sign0(component)*padding to each coordinate.
+        radius = max(math.hypot(abs(float(p[0])) + (padding if float(p[0]) else 0.),
+                                abs(float(p[1])) + (padding if float(p[1]) else 0.)) for p in footprint)
+        radius += .15  # extra margin for the final checked start displacement
+        if not math.isfinite(radius) or profile['free_thresh'] != .25:
+            raise ValueError('Fullmap occupancy contract invalid')
+        with Image.open(image_path) as image:
+            if image.size != (profile['size_x'], profile['size_y']) or image.mode != 'L':
+                raise ValueError('Fullmap image geometry invalid')
+            for x,y in ((start['x'],start['y']),(goal[0],goal[1])):
+                if not math.isfinite(x) or not math.isfinite(y):
+                    raise ValueError('Nonfinite start/goal')
+                res=profile['resolution']; ox=profile['origin_x']; oy=profile['origin_y']; h=profile['size_y']
+                left=math.floor((x-radius-ox)/res); right=math.ceil((x+radius-ox)/res)
+                top=math.floor(h-(y+radius-oy)/res); bottom=math.ceil(h-(y-radius-oy)/res)
+                if left<0 or top<0 or right>profile['size_x'] or bottom>h or left>=right or top>=bottom:
+                    return False
+                if image.crop((left,top,right,bottom)).getextrema()[0] <= 191:
+                    return False
+        return True
+    except (KeyError, TypeError, IndexError, OSError, OverflowError) as exc:
+        raise ValueError('Fullmap evidence missing or invalid') from exc
+
 def waypoint_binding(ready, previous=None):
     """Augment the unchanged single-goal lease checks with native-batch identity."""
     contract = ready.get('waypoint_contract', {})
@@ -306,6 +365,10 @@ def waypoint_binding(ready, previous=None):
     if contract.get('number_of_loops') != 0 or contract.get('goal_index') != 0:
         raise ValueError('Batch must start at index 0 and run once without retry')
     binding = {key: ready.get(key) for key in ['waypoint_action_server', 'waypoint_contract', 'mission_deadline']}
+    if ready.get('warehouse_fullmap') is not None:
+        binding['warehouse_fullmap'] = ready['warehouse_fullmap']
+        binding['actual_global_costmap'] = ready.get('actual_costmaps', {}).get('global_costmap')
+        binding['effective_config_sha256'] = ready.get('mission_identity', {}).get('effective_config_sha256')
     deadline = ready.get('mission_deadline', {})
     if not all(key in deadline for key in ['run_id', 'manifest_sha256', 'launcher_boot_id', 'deadline_boottime_sec']):
         raise ValueError('Missing fixed launcher deadline identity')
@@ -652,10 +715,11 @@ class OrderedVisits:
 
 # Explicit simulation-only scan age profile. No sensor/clock/metadata rewriting.
 def simulation_scan_latency_profile(max_age_sec=.3):
-    if type(max_age_sec) not in (int,float) or max_age_sec not in (.3,.5):
-        raise ValueError('simulation scan max age must be .3 or .5')
+    modes={.3:'strict_300ms',.5:'simulation_500ms',.9:'warehouse_simulation_900ms'}
+    if type(max_age_sec) not in (int,float) or max_age_sec not in modes:
+        raise ValueError('simulation scan max age must be .3, .5 or .9')
     return dict(schema='matrix.simulation_scan_latency.v1',
-        mode='strict_300ms' if max_age_sec==.3 else 'simulation_500ms',
+        mode=modes[max_age_sec],
         operational_max_age_sec=max_age_sec,strict_max_age_sec=.3,future_tolerance_sec=.05,
         original_header_and_receive_timestamps=True,applies_only_to='scan_header_and_receive_age')
 
@@ -667,6 +731,8 @@ def validate_simulation_scan_latency_profile(ready,max_age_sec=.3):
     if actual is None and max_age_sec==.3:return expected
     if actual!=expected or actual.get('original_header_and_receive_timestamps') is not True:
         raise ValueError('simulation_scan_latency_profile_mismatch')
+    if max_age_sec==.9 and not ready.get('warehouse_fullmap'):
+        raise ValueError('900ms scan profile requires Warehouse fullmap')
     return expected
 
 
@@ -703,6 +769,34 @@ def producer_scan_signed_age_bounds(ready, *, clock_ns=None, steady_ns=None):
         receive_age_bounds_s=[sb/1e9-received,se/1e9-received],original_observation=obs)
 
 
+def recoverable_warehouse_scan_pause(issues, snapshot, ready, scan_topic, clock_ns, steady_ns):
+    """Classify age-only failures from original samples. Everything else holds."""
+    allowed={
+        'scan:missing_or_stale_receive','scan:invalid_header_age',
+        'scan:simulation_operational_age_or_payload_invalid','scan:producer_strict_300ms_age_exceeded',
+        'readiness:scan:producer_observation_outside_simulation_bound',
+        'readiness:launcher_not_ready:Stale receive '+scan_topic,
+        'readiness:launcher_not_ready:Stale/future stamp '+scan_topic,
+    }
+    if not issues or not set(issues)<=allowed:
+        return None
+    scan=snapshot.get('last',{}).get('scan',{})
+    stamp=scan.get('stamp_ns')
+    header,receive=scan.get('header_age_s'),scan.get('receive_age_s')
+    if (scan.get('confirmation_payload_valid') is not True or type(stamp) is not int or stamp<=0
+            or type(header) not in (int,float) or type(receive) not in (int,float)
+            or not math.isfinite(header) or not math.isfinite(receive) or header<-.05 or receive<0):
+        return None
+    bounds=producer_scan_signed_age_bounds(ready,clock_ns=clock_ns,steady_ns=steady_ns)
+    producer_header=bounds['header_age_bounds_s'][0];producer_receive=bounds['receive_age_bounds_s'][0]
+    if producer_header<-.05 or producer_receive<0 or max(header,receive,producer_header,producer_receive)<=.9:
+        return None
+    return dict(schema='matrix.mission.warehouse_scan_pause.v1',
+        last_original_scan_ns=max(stamp,bounds['original_observation']['header_ns']),
+        launcher_deadline=ready['mission_deadline'],issues=list(issues),
+        consumer_scan_age_sec=[header,receive],producer_scan_age_sec=[producer_header,producer_receive])
+
+
 def strict_simulation_scan_deviations(snapshot,ready,*,producer_bounds=None):
     deviations=[];scan=snapshot.get('last',{}).get('scan',{})
     own={k:scan.get(k) for k in ['stamp_ns','receive_age_s','header_age_s','received_unix_ns','received_steady']}
@@ -737,7 +831,8 @@ def record_scan_timing_health(pilot, require_stopped, issues, snapshot, entered_
                 producer_evidence_context=producer_evidence_context,
                 failed_READY_raw_sha256=None if getattr(pilot,'current_ready_read_failure',None) is None else pilot.current_ready_read_failure['metadata']['sha256'],
                 latest_validated_READY_sha256=getattr(pilot,'latest_ready_sha',None),strict_timing_status='FAIL')
-        pilot.invalidate_artifact(['scan:strict_300ms_latency_violation'])
+        if pilot.simulation_scan_max_age_sec!=.9:
+            pilot.invalidate_artifact(['scan:strict_300ms_latency_violation'])
         for deviation in deviations:
             stamp=(deviation.get('original_scan',{}).get('stamp_ns') if deviation['source']=='consumer_original_scan'
                 else deviation['original_observation'].get('header_ns'))

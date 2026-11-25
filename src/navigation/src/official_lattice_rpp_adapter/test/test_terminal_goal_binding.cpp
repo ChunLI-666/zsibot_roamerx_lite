@@ -295,3 +295,14 @@ TEST(P5StopHold, CorrectionReanchorsCurrentHoldWithoutRenewingSameGoalPhase) {
   EXPECT_FALSE(h.phaseExpired(3999999999LL));EXPECT_TRUE(h.phaseExpired(4000000000LL));
   h.installGoal("map",1.,0.,0.);EXPECT_EQ(h.phaseDeadline(),0);
 }
+
+TEST(CompletionGate, TerminalProgressRejectsSourceClockRollback) {
+  goal_region::CompletionGate gate;const auto binding=bound(gate);
+  const auto now=std::chrono::steady_clock::now();
+  const auto deadline=std::chrono::duration_cast<std::chrono::nanoseconds>((now+std::chrono::seconds(2)).time_since_epoch()).count();
+  gate.updateTerminalProgress(binding->generation,deadline,now+std::chrono::seconds(1),900000000,1300000000,1000000000);
+  EXPECT_EQ(gate.terminalProgress(1100000000).state,goal_region::CompletionGate::TerminalProgress::Healthy);
+  const auto result=gate.terminalProgress(1050000000);
+  EXPECT_EQ(result.state,goal_region::CompletionGate::TerminalProgress::Failed);
+  EXPECT_EQ(result.reason,"source_clock_rollback");
+}

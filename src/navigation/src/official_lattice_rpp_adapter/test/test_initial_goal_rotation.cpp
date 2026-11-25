@@ -213,3 +213,21 @@ TEST(TerminalStopHold, MeasuredStopUsesFinitePlanarNormAndExistingContractLimits
   v.angular.z=.0500001;EXPECT_FALSE(goal_region::terminalMeasuredStopped(v));
   v.angular.z=std::numeric_limits<double>::quiet_NaN();EXPECT_FALSE(goal_region::terminalMeasuredStopped(v));
 }
+
+TEST(TerminalSettleRepair, OutsideYawWaitsForBothCompleteWindows) {
+  Hold hold;hold.configureStability(true,30000000000LL,true);hold.installGoal("map",0.,0.,0.);
+  EXPECT_EQ(sample(hold,0),Action::HoldZero);hold.selectedZero(1000000000,2000000000);
+  for(int ms=50;ms<=1000;ms+=50) {
+    const auto result=hold.observe(1,true,true,false,true,1000000000+ms*1000000LL,
+      2000000000+ms*1000000LL,true,false);
+    EXPECT_EQ(result,Action::HoldZero);
+  }
+  EXPECT_EQ(hold.observe(1,true,true,false,true,2050000000,3050000000,true,true),Action::CorrectYaw);
+  EXPECT_TRUE(hold.holding());const auto deadline=hold.phaseDeadline();
+  hold.correctionSelected();hold.nonzeroSelected();hold.installGoal("map",0.,0.,0.);
+  EXPECT_EQ(hold.phaseDeadline(),deadline);EXPECT_EQ(hold.correctionCount(),1u);
+  EXPECT_EQ(sample(hold,1100),Action::HoldZero);hold.selectedZero(2100000000,3100000000);
+  EXPECT_EQ(hold.phaseDeadline(),deadline);
+  EXPECT_EQ(hold.observe(1,true,true,true,true,2150000000,3150000000,true,false),Action::HoldZero);
+  hold.installGoal("map",1.,0.,0.);EXPECT_EQ(hold.phaseDeadline(),0);EXPECT_EQ(hold.correctionCount(),0u);
+}

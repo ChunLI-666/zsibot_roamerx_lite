@@ -8,6 +8,7 @@ from test_mission_state import fixture
 from mission_state import MissionStore,Hold,atomic_json
 from mission_storage import StorageWorker
 from mission_resume import Session
+from waypoint_contract import validate_initial_request
 
 HERE=Path(__file__).resolve().parent;SOURCE=HERE/'goal_pilot_source'
 def method(name,ns):
@@ -34,7 +35,7 @@ def signal_before_send_batch(node,options,route,trace):
     ns=dict(time=time,math=math,uuid=uuid,Path=Path,ACTION='/follow_waypoints',ActionClient=Client,
         FollowWaypoints=SimpleNamespace(Goal=lambda:SimpleNamespace(poses=[])),PoseStamped=Pose,
         UUID=lambda **kwargs:SimpleNamespace(**kwargs),OwnedGoalIdentity=OwnedGoalIdentity,
-        initial_leg_limit=lambda *a:8.,mission_budget=lambda *a:{},frozen=SimpleNamespace(stamp_ns=lambda x:x))
+        initial_leg_limit=lambda *a:8.,validate_initial_request=validate_initial_request,mission_budget=lambda *a:{},frozen=SimpleNamespace(stamp_ns=lambda x:x))
     node.args=options;node.route=route;node.finalizing=False;node.goal_sent_ns=None;node.latest_ready_sha='fixture'
     node.event_pub=SimpleNamespace(get_subscription_count=lambda:1)
     node.get_clock=lambda:SimpleNamespace(now=lambda:SimpleNamespace(to_msg=time.time_ns))
@@ -364,7 +365,7 @@ class PumpTests(unittest.TestCase):
         self.assertTrue(node.storage_preflight_gap);self.assertFalse(cancels)
     def test_post_intent_uses_original_stable_window_and_fresh_snapshot_same_uuid(self):
         clock=SimpleNamespace(monotonic=lambda:10.);calls=[];snapshot={'last':{'pose':{'x':0.,'y':0.}}}
-        ns=dict(time=clock,math=math,initial_leg_limit=lambda *args:8.)
+        ns=dict(time=clock,math=math,initial_leg_limit=lambda *args:8.,validate_initial_request=validate_initial_request)
         run=method('post_intent_preflight',ns)
         ident=uuid.uuid4();node=SimpleNamespace(mission=SimpleNamespace(action_uuid=ident,start_index=0,store=SimpleNamespace(remaining=lambda:25.)),
             args=SimpleNamespace(timeout=100.,stable_preflight_seconds=10.,simulation_first_leg_max_distance_m=8.,simulation_scan_max_age_sec=.3),
@@ -398,7 +399,7 @@ class DispatchTests(unittest.TestCase):
                 ns=dict(time=time,math=math,uuid=uuid,Path=Path,ACTION='/follow_waypoints',ActionClient=Client,
                     FollowWaypoints=SimpleNamespace(Goal=lambda:SimpleNamespace(poses=[])),PoseStamped=Pose,
                     UUID=lambda **kwargs:SimpleNamespace(**kwargs),OwnedGoalIdentity=OwnedGoalIdentity,
-                    initial_leg_limit=lambda *a:8.,mission_budget=lambda *a:{},frozen=SimpleNamespace(stamp_ns=lambda x:x))
+                    initial_leg_limit=lambda *a:8.,validate_initial_request=validate_initial_request,mission_budget=lambda *a:{},frozen=SimpleNamespace(stamp_ns=lambda x:x))
                 node=SimpleNamespace(mission=session,route=worker.state()['route'],latest_ready={},latest_ready_sha='x',goal_sent_ns=None,
                     storage_preflight_gap=True,check_interruption=lambda:None,
                     args=SimpleNamespace(preflight_seconds=40.,stable_preflight_seconds=10.,timeout=100.,simulation_first_leg_max_distance_m=8.,simulation_scan_max_age_sec=.3),

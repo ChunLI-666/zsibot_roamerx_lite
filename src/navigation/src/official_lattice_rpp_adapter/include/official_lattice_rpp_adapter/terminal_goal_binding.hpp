@@ -55,6 +55,13 @@ public:
   void finishCycle(std::uint64_t epoch,bool complete,
     std::chrono::steady_clock::time_point valid_until=std::chrono::steady_clock::time_point::max(),
     std::int64_t source_valid_until_ns=0,std::int64_t source_valid_from_ns=0);
+  enum class TerminalProgress {Ordinary, Healthy, Failed};
+  void updateTerminalProgress(std::uint64_t plan,std::int64_t deadline_ns,
+    std::chrono::steady_clock::time_point valid_until,std::int64_t source_from,
+    std::int64_t source_until,std::int64_t source_now);
+  struct ProgressSnapshot {TerminalProgress state;std::uint64_t plan;std::int64_t deadline_ns;std::string reason;};
+  ProgressSnapshot terminalProgress(std::int64_t source_now);
+  void revokeTerminalProgress();
   Snapshot snapshot();
   // The provider only reads the source clock; it runs under the gate lock.
   bool stillEligible(const Snapshot & token,std::function<std::int64_t()> source_clock={});
@@ -68,6 +75,12 @@ private:
   std::int64_t source_valid_until_ns_=0;
   std::int64_t source_valid_from_ns_=0;
   std::shared_ptr<const Binding> binding_;
+  bool terminal_progress_active_=false,terminal_progress_failed_=false;
+  std::uint64_t terminal_progress_plan_=0;
+  std::int64_t terminal_deadline_ns_=0,terminal_source_from_=0,terminal_source_until_=0,terminal_last_source_=0;
+  std::chrono::steady_clock::time_point terminal_health_until_;
+  geometry_msgs::msg::PoseStamped terminal_progress_goal_;
+  std::string terminal_progress_reason_;
 };
 
 class HeadingCursor {

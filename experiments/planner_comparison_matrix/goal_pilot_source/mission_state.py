@@ -164,6 +164,16 @@ def failure_decision(result, terminal, quiescent, stopped, *, operator_cancel=Fa
     # generalize error 0 or an unknown RELEASE into a safe automatic replan.
     if 60003 in codes:return 'HOLD','RECOVERY_OWNERSHIP_RECONCILIATION_REQUIRED'
     if 60004 in codes:return 'NEEDS_TASK_DECISION','INVALID_RECOVERY_PLAN_CONTRACT'
+    if result.get('simulation_scan_latency_profile',{}).get('mode')=='warehouse_simulation_900ms':
+        pause=result.get('warehouse_scan_pause') or {}
+        stamp=pause.get('last_original_scan_ns')
+        if (result.get('status') in (5,6) and reason.startswith('input_became_invalid:')
+                and pause.get('schema')=='matrix.mission.warehouse_scan_pause.v1'
+                and type(stamp) is int and stamp>0 and pause.get('launcher_deadline')
+                and reason.removeprefix('input_became_invalid:').split(',')==pause.get('issues')):
+            return 'PAUSED_INPUT_HEALTH','FRESH_STABLE_HEALTH_REQUIRED'
+        if reason.startswith('input_became_invalid:') or codes & {102,202,60002}:
+            return 'HOLD','WAREHOUSE_INPUT_FAULT_NOT_SAFE_TO_RESUME'
     if reason.startswith('input_became_invalid:') or codes & {102,202,60002}:
         return 'PAUSED_INPUT_HEALTH','FRESH_STABLE_HEALTH_REQUIRED'
     if codes & {203,204,208}:
@@ -741,6 +751,8 @@ class MissionStore:
             else:
                 s['lifecycle'],s['hold_reason']=failure_decision(cause,a['terminal_confirmed'],a['children_quiescent'],a['stopped'],
                     operator_cancel=bool(a.get('operator_cancel_evidence')))
+                if s['lifecycle']=='PAUSED_INPUT_HEALTH' and cause.get('warehouse_scan_pause'):
+                    a['warehouse_scan_pause']=copy.deepcopy(cause['warehouse_scan_pause'])
                 correction=s.get('final_goal_correction')
                 if a.get('final_goal_correction_for'):
                     if all(a.get(k) for k in ('terminal_confirmed','children_quiescent','stopped')) and s['lifecycle'] not in ('CANCELED','HOLD'):

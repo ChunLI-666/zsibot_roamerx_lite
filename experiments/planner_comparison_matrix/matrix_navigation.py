@@ -250,7 +250,7 @@ def scan_observation(latest,topic,begin,end,reason):
       boundary='Call bounds only, not exact internal validation now. source_health stops at first error; later producer guards may not have been evaluated.')
 
 
-def source_snapshot(path,template,with_waypoints=False):
+def source_snapshot(path,template,with_waypoints=False,warehouse_fullmap_enabled=False):
     """Validate a deployment source manifest without inspecting a Git checkout."""
     def unique_object(pairs):
         result={}
@@ -281,6 +281,7 @@ def source_snapshot(path,template,with_waypoints=False):
     # The wrapper executes before this process; the other files are consumed here.
     required=[pathlib.Path(__file__),BASE/'recovery_navigation.py',BASE/'waypoint_runtime.py',BASE/'static_layer_snapshot.py',BASE/'recording_deadline.py',BASE/'run_matrix_navigation.sh',
       template,NAV/'src/navigation/src/robot_navigo/scripts/nav_safety_gate.py']
+    if warehouse_fullmap_enabled:required.append(BASE/'warehouse_fullmap.py')
     if with_waypoints:
         required += [NAV/name for name in waypoint_runtime.SOURCE_FILES]
         required += [BASE/'goal_pilot_source'/name for name in
@@ -301,6 +302,95 @@ def source_snapshot(path,template,with_waypoints=False):
             raise ValueError('Source snapshot file escapes deployment NAV or is not a file: '+name)
         if not hex_digest(digest,64) or sha(resolved)!=digest:raise ValueError('Source snapshot hash mismatch: '+name)
     return data,raw
+
+def validate_build_receipt(receipt_path,selected_install,variant,terminal_repair,snapshot,snapshot_raw):
+    """Validate the existing receipt before prepare or any actor starts."""
+    receipt_path=pathlib.Path(receipt_path).resolve();prefix=pathlib.Path(selected_install).resolve()
+    data=json.loads(receipt_path.read_bytes());commit=data.get('repository_commit','')
+    if len(commit)!=40 or any(c not in '0123456789abcdef' for c in commit):
+        raise ValueError('Build receipt requires full repository_commit SHA')
+    kind=data.get('source_identity_kind','committed')
+    if kind=='working_tree_snapshot':
+        if not terminal_repair or variant!='official' or data.get('source_files_match_commit') is not False:
+            raise ValueError('Working-tree source identity requires explicit official terminal repair')
+        if not snapshot or not snapshot_raw or data.get('source_snapshot_sha256')!=hashlib.sha256(snapshot_raw).hexdigest():
+            raise ValueError('Working-tree source snapshot is absent or differs from build receipt')
+        if snapshot['origin']['commit']!=commit or data.get('source_sha256')!=snapshot['files_sha256']:
+            raise ValueError('Working-tree source hashes or base commit differ from snapshot')
+        adapter=NAV/'src/navigation/src/official_lattice_rpp_adapter'
+        required={p.relative_to(NAV).as_posix() for p in adapter.rglob('*') if p.is_file()}
+        required.update({
+          'src/navigation/src/robot_feasible_navigation/include/robot_feasible_navigation/footprint_sweep.hpp',
+          'src/navigation/src/robot_feasible_navigation/vendor/nav2_smac_planner/LICENSE.Apache-2.0',
+          'experiments/official_path_handler_turn_validation/inputs/global_planner/diagnostic_small_radius_same_actions.json'})
+        if not required<=snapshot['files_sha256'].keys():
+            raise ValueError('Working-tree receipt lacks adapter build closure: '+repr(sorted(required-snapshot['files_sha256'].keys())))
+        patch_name=data.get('base_patch_file','');patch=pathlib.PurePosixPath(patch_name)
+        if not patch_name or patch.name!=patch_name or patch_name in ('.','..'):
+            raise ValueError('Invalid base-relative patch receipt path')
+        if sha(receipt_path.parent/patch_name)!=data.get('base_patch_sha256'):
+            raise ValueError('Base-relative patch differs from build receipt')
+        git_root=subprocess.run(['git','-C',str(NAV),'rev-parse','--show-toplevel'],text=True,capture_output=True)
+        if git_root.returncode==0 and pathlib.Path(git_root.stdout.strip()).resolve()==NAV.resolve():
+            actual_base=subprocess.check_output(['git','-C',str(NAV),'rev-parse','HEAD'],text=True).strip()
+            actual_patch=subprocess.check_output(['git','-C',str(NAV),'diff','--binary',commit,'--'])
+            if actual_base!=commit or hashlib.sha256(actual_patch).hexdigest()!=data['base_patch_sha256']:
+                raise ValueError('Canonical checkout base or patch changed')
+        inputs=data.get('build_inputs',{});underlay=inputs.get('underlay_sha256',{})
+        if (not isinstance(inputs.get('commands'),list) or not inputs['commands'] or
+            not all(isinstance(x,str) and x for x in inputs['commands']) or
+            any(not isinstance(inputs.get(k),str) or len(inputs[k])!=64 for k in ('cmake_cache_sha256','configure_log_sha256')) or
+            not isinstance(underlay,dict) or not underlay):
+            raise ValueError('Working-tree receipt lacks build input evidence')
+        required_underlay={'/opt/ros/jazzy/lib/'+name for name in (
+          'libnav2_costmap_2d_core.so','libnav2_regulated_pure_pursuit_controller.so',
+          'libcontroller_server_core.so','libpose_progress_checker.so')}
+        required_underlay.update({'/opt/ros/jazzy/include/nav2_core/controller.hpp',
+          '/opt/ros/jazzy/include/nav2_core/progress_checker.hpp'})
+        if not required_underlay<=underlay.keys():raise ValueError('Build receipt lacks required Jazzy ABI inputs')
+        for stem in ('cmake_cache','configure_log'):
+            filename=inputs.get(stem+'_file','')
+            if not filename or pathlib.PurePosixPath(filename).name!=filename or sha(receipt_path.parent/filename)!=inputs[stem+'_sha256']:
+                raise ValueError('Build input evidence differs: '+stem)
+        for name,digest in underlay.items():
+            path=pathlib.Path(name)
+            if not path.is_absolute() or not path.is_file() or sha(path)!=digest:
+                raise ValueError('Build underlay differs: '+name)
+        if data.get('install_prefix')!=str(prefix):raise ValueError('Build receipt install prefix differs')
+        required_artifacts={'lib/libofficial_lattice_rpp_adapter.so',
+          'share/official_lattice_rpp_adapter/plugins.xml',
+          'share/ament_index/resource_index/nav2_core__pluginlib__plugin/official_lattice_rpp_adapter'}
+    else:
+        if kind!='committed' or data.get('source_files_match_commit') is not True:
+            raise ValueError('Non-repair profile requires commit-bound source receipt')
+        required_artifacts={'lib/libsegment_controller_core.so','lib/libsafe_lattice_planner.so',
+          'lib/robot_feasible_navigation/segment_controller_server'} if variant=='segmented' else {'lib/libofficial_lattice_rpp_adapter.so'}
+    artifacts=data.get('artifact_sha256',{})
+    if not isinstance(artifacts,dict) or not required_artifacts<=artifacts.keys():
+        raise ValueError('Build receipt lacks selected artifacts')
+    for name,digest in artifacts.items():
+        relative=pathlib.PurePosixPath(name);item=(prefix/name).resolve()
+        if (relative.is_absolute() or '..' in relative.parts or relative.as_posix()!=name or
+            not item.is_relative_to(prefix) or not item.is_file() or sha(item)!=digest):
+            raise ValueError('Build artifact differs or escapes prefix: '+name)
+    return dict(source_identity_kind=kind,repository_commit=commit,
+      repository_commit_role='base' if kind=='working_tree_snapshot' else 'source_commit',
+      source_files_match_commit=data['source_files_match_commit'],
+      source_snapshot_sha256=data.get('source_snapshot_sha256'),base_patch_sha256=data.get('base_patch_sha256'))
+
+def validate_waypoint_source_binding(identity,snapshot,waypoint):
+    """Keep independent waypoint receipts; compare source bytes for a dirty adapter."""
+    commit=waypoint['repository_commit']
+    if identity['source_identity_kind']=='working_tree_snapshot':
+        sources=waypoint.get('source_sha256',{})
+        if not snapshot or not sources or any(snapshot['files_sha256'].get(name)!=digest for name,digest in sources.items()):
+            raise ValueError('Waypoint receipt source differs from the adapter source snapshot')
+        return dict(method='source_sha256',waypoint_repository_commit=commit,
+          adapter_base_commit=identity['repository_commit'],adapter_source_is_base_commit=False)
+    if commit!=identity['repository_commit']:raise ValueError('Waypoint and primary runtime commit differ')
+    return dict(method='repository_commit',waypoint_repository_commit=commit,
+      adapter_base_commit=identity['repository_commit'],adapter_source_is_base_commit=True)
+
 
 def native_bt_self_client_valid(proof):
     """Verify the owned native self-client and its sealed, observed topic ingress."""
@@ -401,15 +491,39 @@ def navigation_tree(variant,recovery=None):
     return '<root BTCPP_format="4" main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree"><Sequence><ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/><FollowPath path="{path}" controller_id="FollowPath" goal_checker_id="Checker" progress_checker_id="Progress"/></Sequence></BehaviorTree></root>\n'
 
 def simulation_scan_latency_profile(max_age=.3):
-    if max_age not in (.3,.5):raise ValueError('Matrix scan operational age must be .3 or .5 seconds')
+    modes={.3:'strict_300ms',.5:'simulation_500ms',.9:'warehouse_simulation_900ms'}
+    if max_age not in modes:raise ValueError('Matrix scan operational age must be .3, .5 or .9 seconds')
     return dict(schema='matrix.simulation_scan_latency.v1',
-      mode='strict_300ms' if max_age==.3 else 'simulation_500ms',
+      mode=modes[max_age],
       operational_max_age_sec=max_age,strict_max_age_sec=.3,future_tolerance_sec=.05,
       original_header_and_receive_timestamps=True,applies_only_to='scan_header_and_receive_age')
+
+def verify_warehouse_scan_consumers(parameters,recovery,projector):
+    expected={
+        projector:{
+            'max_sensor_age_sec':(3,'double_value',.9),
+            'use_sim_time':(1,'bool_value',False),
+            'imu_max_stamp_delta_sec':(3,'double_value',.03),
+            'laserscan_output_topic':(4,'string_value','/laser_scan_leveled_nav_floor_v1'),
+        },
+        **{f'{name}/{name}':{'obstacle_layer.scan.expected_update_rate':(3,'double_value',.9)}
+           for name in ('local_costmap','global_costmap')},
+    }
+    for role, fields in expected.items():
+        for key,(kind,field,value) in fields.items():
+            actual=parameters[role].get(key,{})
+            if actual.get('type')!=kind or actual.get(field)!=value:
+                raise RuntimeError(f'Warehouse scan consumer parameter mismatch: {role}.{key}')
+    if recovery['scan_max_age']!=.9:
+        raise RuntimeError('Warehouse recovery BT scan age mismatch')
 
 
 def prepare(args):
     terminal_aim=getattr(args,'terminal_rotation_aim_yaw_tolerance',0.)
+    terminal_repair=getattr(args,'terminal_settle_repair',False)
+    if terminal_repair:
+        if args.variant!='official':raise ValueError('Terminal settle repair is only for official Lattice')
+        terminal_aim=.03  # The single switch explicitly selects and records the inner aim.
     if terminal_aim not in (0.,.03) or terminal_aim>args.yaw_tolerance:
         raise ValueError('Terminal aim must be disabled or the explicit .03rad candidate within the original yaw tolerance')
     if terminal_aim and args.variant!='official':
@@ -417,10 +531,23 @@ def prepare(args):
     waypoint_binding=waypoint_runtime.artifacts(getattr(args,'waypoint_install',None),
       getattr(args,'waypoint_build_receipt',None),NAV) if args.with_waypoints else None
     scan_profile=simulation_scan_latency_profile(getattr(args,'simulation_scan_max_age_sec',.3))
+    if scan_profile['operational_max_age_sec']==.9 and not (
+            getattr(args,'warehouse_fullmap',False) and args.with_waypoints and args.with_mission_recovery
+            and args.variant=='official' and args.scan_topic=='/laser_scan_leveled_nav_floor_v1'):
+        raise ValueError('900ms scan age requires the official Warehouse fullmap mission and floor scan topic')
+    private_approach=getattr(args,'private_same_heading_approach',False)
+    if private_approach and not (scan_profile['operational_max_age_sec']==.9 and terminal_repair):
+        raise ValueError('Same-heading approach requires the isolated Warehouse 900ms terminal profile')
     if getattr(args,'health_tf_latest_only',False) and scan_profile['operational_max_age_sec']!=.5:
         raise ValueError('Latest-only health TF observation requires the explicit simulation profile')
     template=pathlib.Path(args.template).absolute()
-    snapshot,snapshot_raw=source_snapshot(args.source_snapshot,template,args.with_waypoints) if args.source_snapshot else (None,None)
+    snapshot,snapshot_raw=source_snapshot(args.source_snapshot,template,args.with_waypoints,getattr(args,'warehouse_fullmap',False)) if args.source_snapshot else (None,None)
+    selected_path=args.segmented_install if args.variant=='segmented' else args.official_install
+    if not selected_path:raise ValueError('Provide an explicit --segmented-install or --official-install for the selected variant')
+    selected_install=pathlib.Path(selected_path).resolve()
+    if terminal_repair and not args.build_receipt:raise ValueError('Terminal repair requires a build receipt and source snapshot')
+    source_identity=validate_build_receipt(args.build_receipt,selected_install,args.variant,terminal_repair,snapshot,snapshot_raw) if args.build_receipt else None
+    waypoint_source_binding=validate_waypoint_source_binding(source_identity,snapshot,waypoint_binding) if source_identity and waypoint_binding else None
     out=pathlib.Path(args.output).resolve();out.mkdir(parents=True,exist_ok=False)
     footprint=json.loads(args.footprint)
     if len(footprint)<3 or any(len(p)!=2 or any(not math.isfinite(v) for v in p) for p in footprint):raise ValueError('finite polygon required')
@@ -433,13 +560,22 @@ def prepare(args):
     map_yaml=pathlib.Path(args.map).resolve();map_data=yaml.safe_load(map_yaml.read_text())
     if abs(float(map_data['resolution'])-.01)>1e-8:raise ValueError('this comparison requires 1cm geometry map')
     map_image=(map_yaml.parent/map_data['image']).resolve()
+    fullmap=getattr(args,'warehouse_fullmap',False)
+    if fullmap:
+        import warehouse_fullmap
+        full_geometry=warehouse_fullmap.map_geometry(map_data,map_image)
+    else:full_geometry=None
+    if fullmap:
+        if map_data.get('negate',0)!=0 or map_data.get('mode','trinary')!='trinary' or float(map_data['free_thresh'])!=.25:
+            raise ValueError('Fullmap static occupancy contract mismatch')
+        full_geometry.update(image=str(map_image),image_sha256=sha(map_image),yaml_sha256=sha(map_yaml),
+                             free_thresh=float(map_data['free_thresh']),footprint=footprint,padding=args.padding)
+    if fullmap and (args.variant!='official' or not args.with_waypoints or not args.with_mission_recovery):
+        raise ValueError('Warehouse fullmap requires official persistent waypoint/recovery profile')
     template=template.resolve()
     d=yaml.safe_load(template.read_text());rpp=copy.deepcopy(d['controller_server']['ros__parameters']['FollowPath'].get('rpp',d['controller_server']['ros__parameters']['FollowPath']))
     rpp.pop('plugin',None)
     if args.rotate_threshold is not None:rpp['rotate_to_heading_min_angle']=args.rotate_threshold
-    selected_path=args.segmented_install if args.variant=='segmented' else args.official_install
-    if not selected_path:raise ValueError('Provide an explicit --segmented-install or --official-install for the selected variant')
-    selected_install=pathlib.Path(selected_path).resolve()
     required_plugin={'official':'official_lattice_rpp_adapter::CheckedLattice','hybrid':'official_lattice_rpp_adapter::CheckedHybrid','segmented':'robot_feasible_navigation::SafeLatticePlanner'}[args.variant]
     manifest=dict(scope='Matrix navigation experiment only; not physical robot acceptance',stage='prepared',execution_requested=args.run,variant=args.variant,
         simulation_scan_latency_profile=scan_profile,
@@ -449,14 +585,17 @@ def prepare(args):
         profile_template=str(template),profile_template_sha256=sha(template),footprint=footprint,padding=args.padding,
         rotate_to_heading_min_angle=rpp['rotate_to_heading_min_angle'],
         odom_topic=args.odom_topic,scan_topic=args.scan_topic,camera_topic=args.camera_topic,camera_info_topic=args.camera_info_topic,
-        global_costmap=dict(rolling_window=True,width_m=20,height_m=20,resolution=.01,publish_frequency=.5),
+        global_costmap=(dict(rolling_window=False,**full_geometry,publish_frequency=.5) if fullmap else dict(rolling_window=True,width_m=20,height_m=20,resolution=.01,publish_frequency=.5)),
         local_costmap=dict(rolling_window=True,width_m=6,height_m=6,resolution=.01,publish_frequency=1.),
-        goal_tolerances=dict(xy=args.xy_tolerance,yaw=args.yaw_tolerance,stateful=False),goal_distance_from_start_limit_m=8.,
+        goal_tolerances=dict(xy=args.xy_tolerance,yaw=args.yaw_tolerance,stateful=False),goal_distance_from_start_limit_m=None if fullmap else 8.,
         command_chain=['/cmd_vel_nav','/cmd_vel','/cmd_vel_safe'],goal_client='Separate authorized agent must record UUID, original goal, result/cancel and settled errors',
-        build_receipt=str(pathlib.Path(args.build_receipt).resolve()) if args.build_receipt else None,
+        build_receipt=str(pathlib.Path(args.build_receipt).resolve()) if args.build_receipt else None,source_identity=source_identity,waypoint_source_binding=waypoint_source_binding,
         source_repository_observation=None if snapshot else dict(head=subprocess.check_output(['git','-C',str(NAV),'rev-parse','HEAD'],text=True).strip(),
           status=subprocess.check_output(['git','-C',str(NAV),'status','--short'],text=True)),
         caution='Repository observation is not a substitute for the selected artifact build receipt')
+    if fullmap:
+        manifest['warehouse_fullmap']=full_geometry
+        manifest['initial_goal_rule']='fullmap_geometry_single_goal'
     if snapshot:
         frozen=out/'deployment_source_snapshot.json';frozen.write_bytes(snapshot_raw)
         manifest['deployment_source_snapshot']=dict(path=str(frozen),sha256=sha(frozen),origin=snapshot['origin'],
@@ -464,6 +603,10 @@ def prepare(args):
           note='Supplied canonical source observation and verified deployment bytes; no deployment Git checkout was inspected. This does not replace the selected artifact build receipt.')
     if args.build_receipt:
         receipt=pathlib.Path(args.build_receipt).resolve();shutil.copy2(receipt,out/'source_build_receipt.json');manifest['build_receipt_sha256']=sha(receipt)
+        if source_identity['source_identity_kind']=='working_tree_snapshot':
+            build_data=json.loads(receipt.read_bytes());patch_name=build_data['base_patch_file']
+            for name in (patch_name,build_data['build_inputs']['cmake_cache_file'],build_data['build_inputs']['configure_log_file']):
+                shutil.copy2(receipt.parent/name,out/name)
     manifest['lifecycle_manager_runtime']=lifecycle_artifacts(args.lifecycle_install,args.lifecycle_build_receipt)
     if manifest['lifecycle_manager_runtime']:
         shutil.copy2(args.lifecycle_build_receipt,out/'lifecycle_build_receipt.json')
@@ -473,12 +616,15 @@ def prepare(args):
         p=d[name][name]['ros__parameters'];p.update(footprint=json.dumps(footprint),footprint_padding=args.padding,
           rolling_window=True,width=size,height=size,resolution=.01,publish_frequency=frequency,
           update_frequency=2. if name=='global_costmap' else 10.,always_send_full_costmap=True)
+        if fullmap and name=='global_costmap':
+            warehouse_fullmap.apply_global_profile(p,full_geometry)
         # Preserve the original map's unknown-space hard boundary: with only
         # inflate_unknown=false, stock inflation may replace unknown by253.
         p['inflation_layer'].update(inflate_unknown=False,inflate_around_unknown=True)
         p['obstacle_layer']=dict(plugin='nav2_costmap_2d::ObstacleLayer',enabled=True,footprint_clearing_enabled=False,observation_sources='scan',
           scan=dict(topic=args.scan_topic,data_type='LaserScan',marking=True,clearing=True,inf_is_valid=False,
-            observation_persistence=0.,expected_update_rate=.3,min_obstacle_height=0.,max_obstacle_height=2.,
+            observation_persistence=0.,expected_update_rate=.9 if scan_profile['operational_max_age_sec']==.9 else .3,
+            min_obstacle_height=0.,max_obstacle_height=2.,
             raytrace_max_range=8.5,raytrace_min_range=.0,obstacle_max_range=8.,obstacle_min_range=.1))
     planner=d['planner_server']['ros__parameters']['GridBased'];planner.update(plugin=required_plugin,tolerance=0.,max_planning_time=2.,rotation_penalty=1.)
     controller=d['controller_server']['ros__parameters'];controller['Checker'].update(stateful=False,xy_goal_tolerance=args.xy_tolerance,yaw_goal_tolerance=args.yaw_tolerance,controller_name='FollowPath')
@@ -505,9 +651,19 @@ def prepare(args):
         else:
             planner['lattice_filepath']=str(selected_install/'share/official_lattice_rpp_adapter/params/stop_turn_1cm_h16_small_radius.json')
             planner.update(terminal_goal_binding=True,terminal_global_resolution=.01,cost_penalty=1.)
+            if private_approach:
+                planner.update(private_same_heading_approach=True,private_same_heading_distance=1.)
+                manifest['private_same_heading_approach']=dict(distance_m=1.,threshold=254,
+                    native_search_budget_sec=2., original_goal_unchanged=True)
+                if fullmap and scan_profile['operational_max_age_sec']==.9:
+                    # Private Warehouse continuation reuses only the native goal
+                    # heuristic; current-grid collision and filled sweeps remain active.
+                    planner['cache_obstacle_heuristic']=True
+                    manifest['private_warehouse_goal_heuristic_cache']=dict(enabled=True,
+                        boundary='same-goal heuristic only; current map collision and full swept footprint remain mandatory')
             entry_xy=min(.05,args.xy_tolerance)
             controller['FollowPath'].update(terminal_goal_binding=True,terminal_global_resolution=.01,
-                terminal_global_extent=20.,initial_goal_region_shortcut=True,
+                terminal_global_extent=warehouse_fullmap.terminal_extent(full_geometry) if fullmap else 20.,initial_goal_region_shortcut=True,
                 initial_goal_region_max_xy_error=args.xy_tolerance,terminal_track_xy_drift_limit=.05,
                 terminal_rotation_entry_xy_tolerance=entry_xy,terminal_original_region_pivot=True,
                 terminal_rotation_aim_yaw_tolerance=terminal_aim,
@@ -515,14 +671,38 @@ def prepare(args):
                 terminal_settle_timeout_sec=10.)
             controller['FollowPath']['terminal_stop_before_rotation']=True
             controller['FollowPath']['terminal_early_braking_min_linear_velocity']=.30
+            if private_approach:
+                controller['FollowPath']['private_early_braking_radius']=.18
+                manifest['private_early_braking']=dict(radius_m=.18,minimum_measured_speed_mps=.30,
+                    requires_ordered_terminal_track=True,original_goal_and_handoff_unchanged=True,
+                    boundary='Warehouse private comparison; measured stopping distance remains unproven.')
             controller['FollowPath']['rpp'].update(lookahead_dist=.75,min_lookahead_dist=.75,max_lookahead_dist=.75,use_velocity_scaled_lookahead_dist=False,rotate_to_heading_angular_vel=.3)
             controller['FollowPath']['max_command_angular_velocity']=.3
+            if terminal_repair:
+                if private_approach:
+                    controller['FollowPath']['private_straight_hold']=True
+                    controller['FollowPath']['private_straight_max_angular_velocity']=.10
+                    controller['FollowPath']['private_adaptive_braking']=True
+                    manifest['private_straight_hold']=dict(enabled=True, original_goal_and_certificate_unchanged=True)
+                    manifest['private_adaptive_braking']=dict(enabled=True, measured_projected_speed_range_mps=[.38325,.70929],
+                        braking_radius_upper_bound_m=.18, fallback='original fixed safety gates')
+                    manifest['private_straight_angular_limit']=dict(max_rad_s=.10,
+                        remaining_distance='existing RPP lookahead', measured_accel_limit=True)
+                controller['FollowPath'].update(terminal_settle_repair=True,terminal_progress_checker='Progress',
+                    terminal_settle_timeout_sec=30.,terminal_settle_max_angular_velocity=.10,
+                    terminal_settle_near_angle=.35,terminal_settle_angle_gain_per_sec=.5)
+                controller['Progress'].update(plugin='official_lattice_rpp_adapter::TerminalProgressChecker',
+                    controller_name='FollowPath')
+                manifest['terminal_settle_repair']=dict(enabled=True,aim_yaw_rad=.03,phase_timeout_sec=30.,
+                    max_corrections=2,max_angular_rad_per_sec=.10,near_angle_rad=.35,angle_gain_per_sec=.5,
+                    progress_checker='official_lattice_rpp_adapter::TerminalProgressChecker',
+                    scope='Experimental official controller only; no simulator or physical acceptance implied')
             manifest['experimental_rpp_profile']=dict(fixed_lookahead_m=.75,rotate_angular_velocity=.3,pre_sweep_angular_limit=.3)
             manifest['experimental_terminal_braking_profile']=dict(early_braking_min_measured_linear_mps=.30,
                 full_stop_linear_mps=.03,full_stop_angular_radps=.05,
                 min_approach_linear_mps=rpp['min_approach_linear_velocity'],
                 approach_velocity_scaling_dist_m=rpp['approach_velocity_scaling_dist'],
-                boundary='Simulation candidate: RPP speed floors and external velocity mapping are unchanged. SIM and physical acceptance remain unproven.')
+                boundary='Private same-heading candidate retains the original RPP speed floor and external velocity mapping. SIM and physical acceptance remain unproven.')
             manifest['terminal_zero_aim']=dict(enabled=bool(terminal_aim),entry_yaw_rad=terminal_aim,
                 original_acceptance_yaw_rad=args.yaw_tolerance,default_disabled=True,
                 anchor='Fresh original body pose at the first selected terminal hold zero; not child completion or visit passed.',
@@ -538,6 +718,9 @@ def prepare(args):
                 phase='First terminal hold zero starts one fixed phase; correction and same-goal plan do not renew it. Existing progress or task deadline may end sooner.',
                 evidence='Source17 observed 1s yaw spans at10/20/30s were .003632/.000635/.000210rad; subsequent recorded motion remained. No future tail prediction.',
                 boundary='Explicit simulation candidate for current finite-window stability; original final independent acceptance and one bounded mission correction still apply.')
+            if terminal_repair:
+                manifest['terminal_yaw_stability']['phase_timeout_sec']=30.
+                manifest['terminal_yaw_stability']['phase']='Fixed 30s monotonic phase shared with the health-checked progress plugin; independent task deadline remains in force.'
             manifest['terminal_track_execution_envelope']=dict(enabled=True,pivot_displacement_limit_m=.05,baseline_original_region_preserved=True,
                 original_goal_outer_m=args.xy_tolerance+.05,original_mandatory_track_only=True,admission_scope='fresh_unstarted_goal_shortcut_after_measured_stop',initial_shortcut_max_xy_error_m=args.xy_tolerance,
                 final_goal_tolerances_unchanged=True,continuous_collision_tube_certified=False,
@@ -548,7 +731,7 @@ def prepare(args):
                 original_region_pivots=['fresh_unstarted_initial_opt_in','completed_stopped_small_yaw_correction'],
                 nonterminal_handler_and_RPP_tolerances_unchanged=True,
                 evidence='B33 F013 actual pivots were .12825m and .14915m from the original goal before pure rotation; new inner entry is a simulation candidate, not runtime acceptance')
-            manifest['terminal_goal_binding']=dict(enabled=True,global_resolution=.01,global_extent=20.,
+            manifest['terminal_goal_binding']=dict(enabled=True,global_resolution=.01,global_extent=warehouse_fullmap.terminal_extent(full_geometry) if fullmap else 20.,
                 semantics='Original path.back goal is retained for server acceptance; RPP executes checked prefix and ordered actual-origin terminal headings, never an artificial quantization tail.')
             manifest['experimental_planner_profile']=dict(cost_penalty=1.,max_planning_time_sec=2.,
                 filled_output_validation_unchanged=True,
@@ -631,8 +814,27 @@ def prepare(args):
 
 def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
     if os.environ.get('ROS_DOMAIN_ID')!='185':raise RuntimeError('Matrix navigation requires the isolated domain185 environment from simulation_setup')
+    warehouse_900=manifest['simulation_scan_latency_profile']['operational_max_age_sec']==.9
+    if warehouse_900 and {entry.name for entry in pathlib.Path('/sys/class/net').iterdir()}!={'lo'}:
+        raise RuntimeError('900ms Warehouse scan profile requires a loopback-only private network')
     if not args.build_receipt:raise RuntimeError('--run requires a concrete selected-artifact --build-receipt')
     if not args.message_install:raise RuntimeError('--run requires an isolated custom-message --message-install for complete recording')
+    if (sha(args.build_receipt)!=manifest['build_receipt_sha256'] or
+        sha(out/'source_build_receipt.json')!=manifest['build_receipt_sha256']):
+        raise RuntimeError('Build receipt changed after preparation')
+    checked_snapshot,checked_raw=(None,None)
+    if args.source_snapshot:
+        checked_snapshot,checked_raw=source_snapshot(out/'deployment_source_snapshot.json',pathlib.Path(args.template).absolute(),args.with_waypoints)
+        if sha(args.source_snapshot)!=manifest['deployment_source_snapshot']['sha256'] or hashlib.sha256(checked_raw).hexdigest()!=manifest['deployment_source_snapshot']['sha256']:
+            raise RuntimeError('Source snapshot changed after preparation')
+    source_identity=validate_build_receipt(out/'source_build_receipt.json',selected_install,args.variant,
+      getattr(args,'terminal_settle_repair',False),checked_snapshot,checked_raw)
+    original_identity=validate_build_receipt(args.build_receipt,selected_install,args.variant,
+      getattr(args,'terminal_settle_repair',False),checked_snapshot,checked_raw)
+    if source_identity!=manifest['source_identity'] or original_identity!=source_identity:
+        raise RuntimeError('Build identity changed after preparation')
+    if args.with_waypoints and validate_waypoint_source_binding(source_identity,checked_snapshot,manifest['waypoint_runtime'])!=manifest['waypoint_source_binding']:
+        raise RuntimeError('Waypoint source binding changed after preparation')
     if lifecycle_artifacts(args.lifecycle_install,args.lifecycle_build_receipt)!=manifest['lifecycle_manager_runtime']:
         raise RuntimeError('Lifecycle artifacts changed after preparation')
     if args.source_snapshot:
@@ -842,9 +1044,6 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
     receipt=json.loads((out/'source_build_receipt.json').read_text())
     commit=receipt.get('repository_commit','')
     if len(commit)!=40 or any(c not in '0123456789abcdef' for c in commit):raise RuntimeError('Build receipt requires full repository_commit SHA')
-    if receipt.get('source_files_match_commit') is not True:raise RuntimeError('Build receipt must prove selected source files match its commit')
-    if args.with_waypoints and manifest['waypoint_runtime']['repository_commit']!=commit:
-        raise RuntimeError('Waypoint overlay and primary runtime commit differ')
     declared=receipt.get('artifact_sha256',{})
     required=['lib/libsegment_controller_core.so','lib/libsafe_lattice_planner.so','lib/robot_feasible_navigation/segment_controller_server'] if args.variant=='segmented' else ['lib/libofficial_lattice_rpp_adapter.so']
     for rel in required:
@@ -961,12 +1160,20 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
                 if not stopped and rclpy.ok() and time.monotonic()<deadline and state.current_state.id==3:break
             else:raise RuntimeError(name+' did not activate')
         params={}
-        for name in ['map_server','planner_server','controller_server','local_costmap/local_costmap','global_costmap/global_costmap','velocity_smoother','bt_navigator','nav_safety_gate']+(['matrix_zero_handoff'] if recovery else [])+(['waypoint_follower'] if args.with_waypoints else []):
+        names_to_read=['map_server','planner_server','controller_server','local_costmap/local_costmap','global_costmap/global_costmap','velocity_smoother','bt_navigator','nav_safety_gate']+(['matrix_zero_handoff'] if recovery else [])+(['waypoint_follower'] if args.with_waypoints else [])
+        projector='livox_scan_projector_nav_floor_v1'
+        for name in names_to_read+([projector] if warehouse_900 else []):
             lc=node.create_client(ListParameters,'/'+name+'/list_parameters');gc=node.create_client(GetParameters,'/'+name+'/get_parameters')
             if not lc.wait_for_service(timeout_sec=2.):raise RuntimeError('parameter service unavailable '+name)
             names=wait(lc.call_async(ListParameters.Request()),timeout=10.,operation='/'+name+'/list_parameters').result.names;req=GetParameters.Request();req.names=names
             params[name]={n:message_to_ordereddict(v) for n,v in zip(names,wait(gc.call_async(req),timeout=10.,operation='/'+name+'/get_parameters').values)}
         write(out/'runtime_parameters.json',params)
+        if warehouse_900:
+            verify_warehouse_scan_consumers(params,recovery,projector)
+            scan_publishers=node.get_publishers_info_by_topic(args.scan_topic)
+            if (len(scan_publishers)!=1 or scan_publishers[0].node_name!=projector
+                    or scan_publishers[0].node_namespace!='/'):
+                raise RuntimeError('Warehouse floor scan publisher identity mismatch')
         if recovery:
             for key in ['run_id','raw_topic']:
                 value=params['matrix_zero_handoff'].get(key,{})
@@ -983,8 +1190,38 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
             def parameter_value(node,key):
                 value=params[node].get(key,{})
                 return value.get('bool_value') if value.get('type')==1 else value.get('double_value')
+            if manifest.get('warehouse_fullmap'):
+                if parameter_value('global_costmap/global_costmap','rolling_window') is not False:
+                    raise RuntimeError('warehouse fullmap rolling_window not false in actual parameters')
+                if abs(parameter_value('controller_server','FollowPath.terminal_global_extent')-manifest['terminal_goal_binding']['global_extent'])>1e-9:
+                    raise RuntimeError('warehouse terminal global extent actual parameter mismatch')
             if parameter_value('planner_server','GridBased.terminal_goal_binding') is not True or parameter_value('controller_server','FollowPath.terminal_goal_binding') is not True:
                 raise RuntimeError('paired terminal goal-binding mode not active')
+            if getattr(args,'private_same_heading_approach',False):
+                if parameter_value('planner_server','GridBased.private_same_heading_approach') is not True or parameter_value('planner_server','GridBased.private_same_heading_distance')!=1.:
+                    raise RuntimeError('private same-heading planner parameters mismatch')
+                if manifest.get('private_warehouse_goal_heuristic_cache') and parameter_value('planner_server','GridBased.cache_obstacle_heuristic') is not True:
+                    raise RuntimeError('private Warehouse goal heuristic cache not active')
+                if parameter_value('controller_server','FollowPath.rpp.min_approach_linear_velocity') != .40:
+                    raise RuntimeError('private approach velocity floor mismatch')
+                if parameter_value('controller_server','FollowPath.private_early_braking_radius') != .18:
+                    raise RuntimeError('private early braking radius mismatch')
+            if getattr(args,'terminal_settle_repair',False):
+                if getattr(args,'private_same_heading_approach',False) and parameter_value('controller_server','FollowPath.private_straight_hold') is not True:
+                    raise RuntimeError('private straight hold effective parameter mismatch')
+                if getattr(args,'private_same_heading_approach',False) and parameter_value('controller_server','FollowPath.private_straight_max_angular_velocity') != .10:
+                    raise RuntimeError('private straight angular limit effective parameter mismatch')
+                if getattr(args,'private_same_heading_approach',False) and parameter_value('controller_server','FollowPath.private_adaptive_braking') is not True:
+                    raise RuntimeError('private adaptive braking effective parameter mismatch')
+                expected={'FollowPath.terminal_settle_repair':True,'FollowPath.terminal_rotation_aim_yaw_tolerance':.03,
+                  'FollowPath.terminal_settle_timeout_sec':30.,'FollowPath.terminal_settle_max_angular_velocity':.10,
+                  'FollowPath.terminal_settle_near_angle':.35,'FollowPath.terminal_settle_angle_gain_per_sec':.5}
+                if any(parameter_value('controller_server',key)!=value for key,value in expected.items()):
+                    raise RuntimeError('terminal settle repair effective parameter mismatch')
+                for key,value in {'Progress.plugin':'official_lattice_rpp_adapter::TerminalProgressChecker',
+                                  'Progress.controller_name':'FollowPath','FollowPath.terminal_progress_checker':'Progress'}.items():
+                    if params['controller_server'].get(key,{}).get('string_value')!=value:
+                        raise RuntimeError('terminal settle repair plugin binding mismatch: '+key)
             if any(abs(parameter_value(node,key)-.01)>1e-12 for node,key in [
                 ('planner_server','GridBased.terminal_global_resolution'),('controller_server','FollowPath.terminal_global_resolution'),
                 ('global_costmap/global_costmap','resolution'),('local_costmap/local_costmap','resolution')]):
@@ -992,11 +1229,27 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
         static_snapshots=capture_static_layers(node,out,recorder_name,pump,lambda:stopped)
         actual_maps={}
         for name,size in [('global_costmap',2000),('local_costmap',600)]:
-            client=node.create_client(GetCostmap,'/'+name+'/get_costmap')
+            service='/'+name+'/get_costmap'
+            client=node.create_client(GetCostmap,service)
             if not client.wait_for_service(timeout_sec=3.):raise RuntimeError('missing actual costmap service')
-            msg=wait(client.call_async(GetCostmap.Request())).map
-            if abs(msg.metadata.resolution-.01)>1e-6 or msg.metadata.size_x!=size or msg.metadata.size_y!=size:raise RuntimeError('actual rolling geometry mismatch '+name)
-            (out/(name+'_initial.cdr')).write_bytes(serialize_message(msg));actual_maps[name]=message_to_ordereddict(msg.metadata)
+            if warehouse_900 and name=='global_costmap':
+                # The full Warehouse grid is 76 MB. Allow a bounded re-request of
+                # this read-only startup evidence before issuing any READY lease.
+                for attempt in range(2):
+                    try:
+                        msg=wait(client.call_async(GetCostmap.Request()),timeout=10.,operation=service).map
+                        break
+                    except TimeoutError:
+                        if stopped or attempt:raise
+                        event('costmap_startup_read_retry',service=service)
+            else:
+                msg=wait(client.call_async(GetCostmap.Request())).map
+            metadata=message_to_ordereddict(msg.metadata)
+            if name=='global_costmap' and manifest.get('warehouse_fullmap'):
+                import warehouse_fullmap
+                warehouse_fullmap.validate_actual_geometry(metadata,manifest['warehouse_fullmap'])
+            elif abs(msg.metadata.resolution-.01)>1e-6 or msg.metadata.size_x!=size or msg.metadata.size_y!=size:raise RuntimeError('actual rolling geometry mismatch '+name)
+            (out/(name+'_initial.cdr')).write_bytes(serialize_message(msg));actual_maps[name]=metadata
         deadline=time.monotonic()+6.
         while time.monotonic()<deadline and any(counts.get('/'+n+'/costmap_raw',0)==0 for n in ['global_costmap','local_costmap']):pump(.1)
         if any(counts.get('/'+n+'/costmap_raw',0)==0 for n in ['global_costmap','local_costmap']):raise RuntimeError('full raw costmap publication not observed')
@@ -1068,6 +1321,8 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
           params_sha256=sha(out/'params.yaml'),build_receipt_sha256=manifest['build_receipt_sha256'],source_counts=counts,
           simulation_scan_latency_profile=manifest['simulation_scan_latency_profile'],
           action_server='/navigate_to_pose',goal_tolerances=manifest['goal_tolerances'],goal_client_authorization='Wait for root instruction; this file alone does not dispatch navigation')
+        if manifest.get('warehouse_fullmap') is not None:
+            readiness['warehouse_fullmap']=manifest['warehouse_fullmap']
         if args.with_waypoints:
             readiness.update(waypoint_action_server='/follow_waypoints',waypoint_contract=manifest['waypoint_contract'],
               waypoint_ownership=ownership,mission_deadline=dict(run_id=deadline_guard.manifest['run_id'],
@@ -1102,6 +1357,7 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
         camera_quality=dict(status='NO_CAMERA_FAULT_RECORDED',strict_timing_status='NO_CAMERA_FAULT_RECORDED',
             fault_checks=0,first_fault=None,boundary='Recording evidence only; mandatory decoded/calibrated preflight retained; not a navigation input')
         previous_write_timing=None;previous_audit_sequence=None;last_timing_flush=time.monotonic()
+        ownership_loss=None
         while not stopped:
             if not shutdown_started:deadline_guard.check_live()
             cycle_started=(time.monotonic_ns(),time.thread_time_ns());phase=cycle_started;timing={}
@@ -1120,13 +1376,20 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
                     # the latest full worker observation preceded that callback.
                     with ownership_observation_lock:
                         ingress_violated=private_goal_messages>0 or first_private_publisher_violation is not None
-                    if ingress_violated:raise RuntimeError('Native BT private goal ingress violated')
+                    if ingress_violated:
+                        ownership_loss='Native BT private goal ingress violated'
+                        raise RuntimeError(ownership_loss)
                     readiness['waypoint_ownership']=observed
                     if recovery:
                         readiness['recovery_runtime']=observed.get('recovery_runtime',{})
-                        if not readiness['recovery_runtime'].get('verified'):raise RuntimeError('Recovery publisher ownership changed')
+                        if not readiness['recovery_runtime'].get('verified'):
+                            ownership_loss='Recovery publisher ownership changed'
+                            raise RuntimeError(ownership_loss)
                     if not observed['exclusive_nav_client'] or not observed['status_publishers_match']:
-                        raise RuntimeError('Native waypoint action ownership changed; shared NavigateToPose is unsupported')
+                        ownership_loss='Native waypoint action ownership changed; shared NavigateToPose is unsupported'
+                        raise RuntimeError(ownership_loss)
+                    if warehouse_900 and ownership_loss:
+                        raise RuntimeError(ownership_loss)
                 phase=phase_mark(timing,'ownership_snapshot',phase)
                 # This recheck is AFTER graph work, immediately before publication.
                 health_started=(node.get_clock().now().nanoseconds,time.monotonic_ns())
@@ -1223,7 +1486,7 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--map',required=True);p.add_argument('--footprint',required=True,help='JSON list of body-frame [x,y] vertices')
     p.add_argument('--padding',required=True,type=float);p.add_argument('--variant',required=True,choices=['official','segmented','hybrid']);p.add_argument('--output',required=True)
-    p.add_argument('--simulation-scan-max-age-sec',type=float,choices=[.3,.5],default=.3,
+    p.add_argument('--simulation-scan-max-age-sec',type=float,choices=[.3,.5,.9],default=.3,
       help='Matrix only scan header/receive operational limit; original .3s strict timing remains separately reported')
     p.add_argument('--health-tf-latest-only',action='store_true',
       help='Simulation-only latest-depth1 read-only TF health listener; all original age/control checks remain')
@@ -1235,6 +1498,9 @@ def main():
     p.add_argument('--xy-tolerance',type=float,default=.15);p.add_argument('--yaw-tolerance',type=float,default=.08)
     p.add_argument('--terminal-rotation-aim-yaw-tolerance',type=float,choices=[0.,.03],default=0.,
       help='Explicit official-Lattice inner-aim experiment; default disabled, does not change original acceptance or prove a stopping envelope')
+    p.add_argument('--private-same-heading-approach',action='store_true',help='Private Warehouse same-heading planner experiment')
+    p.add_argument('--warehouse-fullmap',action='store_true',help='Simulation warehouse static global map; requires persistent official profile')
+    p.add_argument('--terminal-settle-repair',action='store_true',help='Enable the paired official terminal repair, .03 aim and bounded progress plugin')
     p.add_argument('--build-receipt');p.add_argument('--message-install');p.add_argument('--preflight-timeout',type=float,default=30.);p.add_argument('--run',action='store_true')
     p.add_argument('--lifecycle-install',help='Optional isolated lifecycle executable/core pair, shared by all variants')
     p.add_argument('--lifecycle-build-receipt',help='Exact lifecycle artifact receipt; required with --lifecycle-install')
