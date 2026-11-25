@@ -158,11 +158,19 @@ TEST_F(SameHeading, FrozenRealMasterAndActualStart) {
     EXPECT_NO_THROW(controller->setPlan(result));controller->deactivate();controller->cleanup();controller.reset();
   }
 }
-TEST_F(SameHeading, CancelAndLockDeadlineReject) {
+TEST_F(SameHeading, ExternalCancelInterruptsLockWaitAndNextRequestStillWorks) {
   EXPECT_THROW(planner->createPlan(pose(-1.6,.02),pose(0.,0.),[]{return true;}),nav2_core::PlannerCancelled);
+  std::atomic<bool> held{false};std::thread other([&] {std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> lock(*map->getCostmap()->getMutex());held=true;std::this_thread::sleep_for(250ms);});
+  while(!held)std::this_thread::yield();
+  const auto begin=std::chrono::steady_clock::now();
+  EXPECT_THROW(planner->createPlan(pose(-1.6,.02),pose(0.,0.),[&]{return std::chrono::steady_clock::now()-begin>=50ms;}),nav2_core::PlannerCancelled);
+  EXPECT_LT(std::chrono::steady_clock::now()-begin,200ms);other.join();
+  EXPECT_NO_THROW(makePlan());
+}
+TEST_F(SameHeading, LockWaitDoesNotConsumeNativeSearchBudget) {
   std::atomic<bool> held{false};std::thread other([&] {std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> lock(*map->getCostmap()->getMutex());held=true;std::this_thread::sleep_for(2300ms);});
   while(!held)std::this_thread::yield();
-  const auto begin=std::chrono::steady_clock::now();EXPECT_THROW(makePlan(),nav2_core::PlannerCancelled);
-  EXPECT_LT(std::chrono::steady_clock::now()-begin,2200ms);other.join();
+  const auto begin=std::chrono::steady_clock::now();EXPECT_NO_THROW(makePlan());
+  EXPECT_GE(std::chrono::steady_clock::now()-begin,2s);other.join();
 }
 }

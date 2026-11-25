@@ -1701,13 +1701,15 @@ public:
   void deactivate() override {planner_->deactivate();}
   nav_msgs::msg::Path createPlan(const geometry_msgs::msg::PoseStamped & start,
     const geometry_msgs::msg::PoseStamped & goal,std::function<bool()> cancel) override {
-    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(2);
-    const auto stop=[&] {return (cancel&&cancel()) ||
-      (straight_approach_&&std::chrono::steady_clock::now()>=deadline);};
-    const auto check=[&] {if (stop()) {throw nav2_core::PlannerCancelled("Private approach canceled or deadline exceeded");}};
+    // The configured 2 s belongs to the native Lattice search.  Costmap lock,
+    // snapshot and filled-path verification must not consume that search budget.
+    const auto stop=[&] {return cancel&&cancel();};
+    const auto check=[&] {if (stop()) {throw nav2_core::PlannerCancelled("Private approach externally canceled");}};
+    const auto request_begin=diagnostics::steadyNs();
     std::unique_lock<std::mutex> request_lock(mutex_,std::defer_lock);
     if (straight_approach_) {while (!request_lock.try_lock()) {check();std::this_thread::yield();}check();}
     else {request_lock.lock();}
+    const auto request_locked=diagnostics::steadyNs();
     require(finite(start.pose)&&finite(goal.pose),"invalid planar planner request");
     require(start.header.frame_id==map_->getGlobalFrameID()&&goal.header.frame_id==start.header.frame_id,
       "planner frame mismatch");
@@ -1715,6 +1717,7 @@ public:
     std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> lock(*map->getMutex(),std::defer_lock);
     if (straight_approach_) {while (!lock.try_lock()) {check();std::this_thread::yield();}check();}
     else {lock.lock();}
+    const auto map_locked=diagnostics::steadyNs();
     std::optional<diagnostics::FailureSnapshot> snapshot;
     const auto snapshot_sequence=++snapshot_sequence_;
     std::exception_ptr snapshot_capture_error;
@@ -1741,6 +1744,19 @@ public:
       saved.capture_end_ns=diagnostics::steadyNs();
       } catch (...) {snapshot_capture_error=std::current_exception();snapshot.reset();}
     }
+    const auto index_begin=diagnostics::steadyNs();
+    std::int64_t index_end=0,base_begin=0,base_end=0;
+    const auto log_timing=[&](const char * result) {
+      if (!straight_approach_) {return;}
+      if (auto node=node_.lock()) {
+        RCLCPP_INFO(node->get_logger(),"private_planner_timing_v1 result=%s request_wait_ns=%lld map_wait_ns=%lld capture_ns=%lld index_ns=%lld prebase_ns=%lld base_ns=%lld postbase_ns=%lld total_ns=%lld snapshot=%llu",
+          result,static_cast<long long>(request_locked-request_begin),static_cast<long long>(map_locked-request_locked),
+          static_cast<long long>(index_begin-map_locked),static_cast<long long>(index_end?index_end-index_begin:-1),
+          static_cast<long long>(base_begin&&index_end?base_begin-index_end:-1),static_cast<long long>(base_end&&base_begin?base_end-base_begin:-1),
+          static_cast<long long>(base_end?diagnostics::steadyNs()-base_end:-1),static_cast<long long>(diagnostics::steadyNs()-request_begin),
+          static_cast<unsigned long long>(snapshot_sequence));
+      }
+    };
     try {
     const auto fp=map_->getRobotFootprint();
     const unsigned char threshold=nav2_costmap_2d::LETHAL_OBSTACLE;
@@ -1748,6 +1764,7 @@ public:
     std::unique_ptr<private_sweep::ScopedObstacleIndex> strict_index;
     if (straight_approach_) {strict_index=std::make_unique<private_sweep::ScopedObstacleIndex>(*map,threshold);}
     else {standard_index=std::make_unique<sweep::ScopedObstacleIndex>(*map);}
+    index_end=diagnostics::steadyNs();
     if (straight_approach_) {check();}
     const auto checkedEdge=[&](const geometry_msgs::msg::Pose & a,const geometry_msgs::msg::Pose & b) {
       if (!straight_approach_) {return edgeFree(*map,fp,a,b);}
@@ -1806,10 +1823,11 @@ public:
         throw nav2_core::NoValidPathCouldBeFound("Private approach or final straight sweep blocked");
       }
     }
+    base_begin=diagnostics::steadyNs();
     if (snapshot) {snapshot->beginBase();}
     nav_msgs::msg::Path raw;
-    try {raw=planner_->createPlan(start,plan_goal,observed_cancel);if (straight_approach_) {check();}}
-    catch (...) {if (snapshot) {snapshot->endBase(false);}throw;}
+    try {raw=planner_->createPlan(start,plan_goal,observed_cancel);base_end=diagnostics::steadyNs();if (straight_approach_) {check();}}
+    catch (...) {base_end=diagnostics::steadyNs();if (snapshot) {snapshot->endBase(false);}throw;}
     if (snapshot) {snapshot->endBase(true);snapshot->raw_pose_count=raw.poses.size();
       snapshot->phase="filled_output_validation";}
     require(!raw.poses.empty()&&raw.poses.size()<1000000,"invalid official planner output");
@@ -1917,14 +1935,19 @@ public:
       auto original=goal;original.header=output.header;output.poses.push_back(original);
     } else {output.poses.back().pose=goal.pose;}
     if (straight_approach_) {check();}
+    log_timing("success");
     if (straight_approach_&&snapshot) {
       snapshot->phase="successful_private_approach";
       strict_index.reset();standard_index.reset();lock.unlock();request_lock.unlock();
       snapshot->save(std::filesystem::path(snapshot_directory_)/("success_"+std::to_string(snapshot_sequence)),{});
     }
+    // Diagnostic disk I/O runs after releasing the map; a cancellation during
+    // that I/O still belongs to this request and must not publish its path.
+    if (straight_approach_) {check();}
     return output;
     } catch (...) {
       const auto original_error=std::current_exception();
+      log_timing("failure");
       // ScopedObstacleIndex has unwound before either mutex is released.
       if (lock.owns_lock()) {lock.unlock();}
       if (request_lock.owns_lock()) {request_lock.unlock();}
