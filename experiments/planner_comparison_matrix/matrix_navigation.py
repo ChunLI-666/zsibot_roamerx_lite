@@ -653,6 +653,8 @@ def prepare(args):
             planner.update(terminal_goal_binding=True,terminal_global_resolution=.01,cost_penalty=1.)
             if private_approach:
                 planner.update(private_same_heading_approach=True,private_same_heading_distance=1.)
+                # Explicitly isolated approach-speed experiment; cruise and device defaults stay unchanged.
+                rpp['min_approach_linear_velocity']=.20
                 manifest['private_same_heading_approach']=dict(distance_m=1.,threshold=254,
                     deadline_sec=2., original_goal_unchanged=True)
             entry_xy=min(.05,args.xy_tolerance)
@@ -682,7 +684,7 @@ def prepare(args):
                 full_stop_linear_mps=.03,full_stop_angular_radps=.05,
                 min_approach_linear_mps=rpp['min_approach_linear_velocity'],
                 approach_velocity_scaling_dist_m=rpp['approach_velocity_scaling_dist'],
-                boundary='Simulation candidate: RPP speed floors and external velocity mapping are unchanged. SIM and physical acceptance remain unproven.')
+                boundary='Private same-heading candidate sets the RPP approach floor to 0.20 m/s; external velocity mapping is unchanged. SIM and physical acceptance remain unproven.')
             manifest['terminal_zero_aim']=dict(enabled=bool(terminal_aim),entry_yaw_rad=terminal_aim,
                 original_acceptance_yaw_rad=args.yaw_tolerance,default_disabled=True,
                 anchor='Fresh original body pose at the first selected terminal hold zero; not child completion or visit passed.',
@@ -1180,6 +1182,8 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
             if getattr(args,'private_same_heading_approach',False):
                 if parameter_value('planner_server','GridBased.private_same_heading_approach') is not True or parameter_value('planner_server','GridBased.private_same_heading_distance')!=1.:
                     raise RuntimeError('private same-heading planner parameters mismatch')
+                if parameter_value('controller_server','FollowPath.rpp.min_approach_linear_velocity') != .20:
+                    raise RuntimeError('private approach velocity floor mismatch')
             if getattr(args,'terminal_settle_repair',False):
                 expected={'FollowPath.terminal_settle_repair':True,'FollowPath.terminal_rotation_aim_yaw_tolerance':.03,
                   'FollowPath.terminal_settle_timeout_sec':30.,'FollowPath.terminal_settle_max_angular_velocity':.10,
