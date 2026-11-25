@@ -177,7 +177,7 @@ class WarehouseFullMapTests(unittest.TestCase):
                 return SimpleNamespace(done=lambda: True,
                                        result=lambda: SimpleNamespace(accepted=False, goal_id=goal_uuid))
 
-        clock = SimpleNamespace(time_ns=lambda: now, monotonic_ns=lambda: 10_000_000_000,
+        clock = SimpleNamespace(thread_time_ns=lambda: 0, time_ns=lambda: now, monotonic_ns=lambda: 10_000_000_000,
                                 monotonic=lambda: 10., clock_gettime=lambda clock_id: boottime,
                                 CLOCK_BOOTTIME=time.CLOCK_BOOTTIME)
 
