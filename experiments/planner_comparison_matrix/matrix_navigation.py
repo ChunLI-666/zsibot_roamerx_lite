@@ -653,7 +653,7 @@ def prepare(args):
             planner.update(terminal_goal_binding=True,terminal_global_resolution=.01,cost_penalty=1.)
             if private_approach:
                 planner.update(private_same_heading_approach=True,private_same_heading_distance=1.)
-                manifest['private_same_heading_approach']=dict(distance_m=1.,threshold=253,
+                manifest['private_same_heading_approach']=dict(distance_m=1.,threshold=254,
                     deadline_sec=2., original_goal_unchanged=True)
             entry_xy=min(.05,args.xy_tolerance)
             controller['FollowPath'].update(terminal_goal_binding=True,terminal_global_resolution=.01,

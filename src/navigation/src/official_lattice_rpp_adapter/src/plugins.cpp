@@ -1489,8 +1489,7 @@ public:
     }
     try {
     const auto fp=map_->getRobotFootprint();
-    const unsigned char threshold=straight_approach_?nav2_costmap_2d::INSCRIBED_INFLATED_OBSTACLE:
-      nav2_costmap_2d::LETHAL_OBSTACLE;
+    const unsigned char threshold=nav2_costmap_2d::LETHAL_OBSTACLE;
     std::unique_ptr<sweep::ScopedObstacleIndex> standard_index;
     std::unique_ptr<private_sweep::ScopedObstacleIndex> strict_index;
     if (straight_approach_) {strict_index=std::make_unique<private_sweep::ScopedObstacleIndex>(*map,threshold);}
@@ -1513,6 +1512,26 @@ public:
       }
       return ok;
     };
+    const auto checkedStraightCenters=[&](const geometry_msgs::msg::Pose & a,const geometry_msgs::msg::Pose & b) {
+      const auto distance=std::hypot(b.position.x-a.position.x,b.position.y-a.position.y);
+      const auto steps=std::max(1,static_cast<int>(std::ceil(distance/(.5*map->getResolution()))));
+      for (int i=0;i<=steps;++i) {
+        check();const double t=double(i)/steps;unsigned int cx,cy;
+        const double x=a.position.x+t*(b.position.x-a.position.x);
+        const double y=a.position.y+t*(b.position.y-a.position.y);
+        if (!map->worldToMap(x,y,cx,cy)) {return false;}
+        const auto cost=map->getCost(cx,cy);
+        if (cost>=nav2_costmap_2d::INSCRIBED_INFLATED_OBSTACLE) {
+          if (auto node=node_.lock()) {
+            RCLCPP_ERROR(node->get_logger(),"private_approach_center_block frame=%s resolution=%.9f cell=%u,%u cost=%u pose=%.9f,%.9f,%.9f steady_ns=%lld snapshot=%llu",
+              start.header.frame_id.c_str(),map->getResolution(),cx,cy,static_cast<unsigned>(cost),x,y,yaw(a),
+              static_cast<long long>(diagnostics::steadyNs()),static_cast<unsigned long long>(snapshot_sequence));
+          }
+          return false;
+        }
+      }
+      return true;
+    };
     if (!sweep::footprintFree(*map,fp,start.pose.position.x,start.pose.position.y,yaw(start.pose))) {
       throw nav2_core::StartOccupied("Filled start footprint occupied");
     }
@@ -1529,7 +1548,7 @@ public:
       const double h=yaw(goal.pose);
       plan_goal.pose.position.x-=straight_approach_distance_*std::cos(h);
       plan_goal.pose.position.y-=straight_approach_distance_*std::sin(h);
-      if (!checkedEdge(plan_goal.pose,goal.pose)) {
+      if (!checkedEdge(plan_goal.pose,goal.pose)||!checkedStraightCenters(plan_goal.pose,goal.pose)) {
         throw nav2_core::NoValidPathCouldBeFound("Private approach or final straight sweep blocked");
       }
     }
@@ -1634,7 +1653,8 @@ public:
         require(std::hypot(endpoint.pose.position.x-goal.pose.position.x,endpoint.pose.position.y-goal.pose.position.y)<=
           goal_region::consumerBudget(map->getResolution(),std::max(map->getSizeInMetersX(),map->getSizeInMetersY()),goal.pose),
           "lattice endpoint cannot join goal heading within original binding budget");
-        if (!checkedEdge(output.poses.back().pose,endpoint.pose)) {
+        if (!checkedEdge(output.poses.back().pose,endpoint.pose)||
+          !checkedStraightCenters(output.poses.back().pose,endpoint.pose)) {
           throw nav2_core::NoValidPathCouldBeFound("Filled private straight sweep blocked");
         }
         output.poses.push_back(endpoint);
@@ -1643,11 +1663,17 @@ public:
       auto original=goal;original.header=output.header;output.poses.push_back(original);
     } else {output.poses.back().pose=goal.pose;}
     if (straight_approach_) {check();}
+    if (straight_approach_&&snapshot) {
+      snapshot->phase="successful_private_approach";
+      strict_index.reset();standard_index.reset();lock.unlock();request_lock.unlock();
+      snapshot->save(std::filesystem::path(snapshot_directory_)/("success_"+std::to_string(snapshot_sequence)),{});
+    }
     return output;
     } catch (...) {
       const auto original_error=std::current_exception();
       // ScopedObstacleIndex has unwound before either mutex is released.
-      lock.unlock();request_lock.unlock();
+      if (lock.owns_lock()) {lock.unlock();}
+      if (request_lock.owns_lock()) {request_lock.unlock();}
       if (snapshot_capture_error) {
         try {std::rethrow_exception(snapshot_capture_error);}
         catch (const std::exception & e) {

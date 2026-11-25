@@ -86,10 +86,12 @@ struct FailureSnapshot {
   }
   void save(const std::filesystem::path & directory,std::exception_ptr error) const {
     // Caller has already unwound all costmap/index guards and released request mutex.
-    std::string failure_type="unknown_non_std_exception",failure_message;
-    try {std::rethrow_exception(error);}
-    catch (const std::exception & e) {failure_type=typeid(e).name();failure_message=e.what();}
-    catch (...) {}
+    std::string failure_type=error?"unknown_non_std_exception":"success",failure_message;
+    if (error) {
+      try {std::rethrow_exception(error);}
+      catch (const std::exception & e) {failure_type=typeid(e).name();failure_message=e.what();}
+      catch (...) {}
+    }
     const auto write_started=steadyNs();
     // A fresh numbered directory makes any collision explicit; nothing is truncated.
     if (!std::filesystem::create_directory(directory)) {throw std::runtime_error("Diagnostic output exists: "+directory.string());}
