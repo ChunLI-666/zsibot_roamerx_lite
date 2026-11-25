@@ -310,9 +310,10 @@ def validate_initial_request(requested, ready, simulation_scan_age, start, route
     if profile is None:
         limit = initial_leg_limit(requested, ready, simulation_scan_age)
         return math.hypot(goal[0]-start['x'], goal[1]-start['y']) < limit
-    if (len(route) != 1 or simulation_scan_age != .3 or not ready.get('mission_identity', {}).get('verified')
+    if (len(route) != 1 or simulation_scan_age not in (.3,.9) or not ready.get('mission_identity', {}).get('verified')
             or len(ready['mission_identity'].get('effective_config_sha256', '')) != 64):
         raise ValueError('Fullmap requires one persistent goal and strict bound mission identity')
+    validate_simulation_scan_latency_profile(ready,simulation_scan_age)
     from PIL import Image
     m = ready.get('actual_costmaps', {}).get('global_costmap', {})
     o = m.get('origin', {}); pos = o.get('position', {}); rot = o.get('orientation', {})
@@ -714,10 +715,11 @@ class OrderedVisits:
 
 # Explicit simulation-only scan age profile. No sensor/clock/metadata rewriting.
 def simulation_scan_latency_profile(max_age_sec=.3):
-    if type(max_age_sec) not in (int,float) or max_age_sec not in (.3,.5):
-        raise ValueError('simulation scan max age must be .3 or .5')
+    modes={.3:'strict_300ms',.5:'simulation_500ms',.9:'warehouse_simulation_900ms'}
+    if type(max_age_sec) not in (int,float) or max_age_sec not in modes:
+        raise ValueError('simulation scan max age must be .3, .5 or .9')
     return dict(schema='matrix.simulation_scan_latency.v1',
-        mode='strict_300ms' if max_age_sec==.3 else 'simulation_500ms',
+        mode=modes[max_age_sec],
         operational_max_age_sec=max_age_sec,strict_max_age_sec=.3,future_tolerance_sec=.05,
         original_header_and_receive_timestamps=True,applies_only_to='scan_header_and_receive_age')
 
@@ -729,6 +731,8 @@ def validate_simulation_scan_latency_profile(ready,max_age_sec=.3):
     if actual is None and max_age_sec==.3:return expected
     if actual!=expected or actual.get('original_header_and_receive_timestamps') is not True:
         raise ValueError('simulation_scan_latency_profile_mismatch')
+    if max_age_sec==.9 and not ready.get('warehouse_fullmap'):
+        raise ValueError('900ms scan profile requires Warehouse fullmap')
     return expected
 
 
@@ -765,6 +769,34 @@ def producer_scan_signed_age_bounds(ready, *, clock_ns=None, steady_ns=None):
         receive_age_bounds_s=[sb/1e9-received,se/1e9-received],original_observation=obs)
 
 
+def recoverable_warehouse_scan_pause(issues, snapshot, ready, scan_topic, clock_ns, steady_ns):
+    """Classify age-only failures from original samples. Everything else holds."""
+    allowed={
+        'scan:missing_or_stale_receive','scan:invalid_header_age',
+        'scan:simulation_operational_age_or_payload_invalid','scan:producer_strict_300ms_age_exceeded',
+        'readiness:scan:producer_observation_outside_simulation_bound',
+        'readiness:launcher_not_ready:Stale receive '+scan_topic,
+        'readiness:launcher_not_ready:Stale/future stamp '+scan_topic,
+    }
+    if not issues or not set(issues)<=allowed:
+        return None
+    scan=snapshot.get('last',{}).get('scan',{})
+    stamp=scan.get('stamp_ns')
+    header,receive=scan.get('header_age_s'),scan.get('receive_age_s')
+    if (scan.get('confirmation_payload_valid') is not True or type(stamp) is not int or stamp<=0
+            or type(header) not in (int,float) or type(receive) not in (int,float)
+            or not math.isfinite(header) or not math.isfinite(receive) or header<-.05 or receive<0):
+        return None
+    bounds=producer_scan_signed_age_bounds(ready,clock_ns=clock_ns,steady_ns=steady_ns)
+    producer_header=bounds['header_age_bounds_s'][0];producer_receive=bounds['receive_age_bounds_s'][0]
+    if producer_header<-.05 or producer_receive<0 or max(header,receive,producer_header,producer_receive)<=.9:
+        return None
+    return dict(schema='matrix.mission.warehouse_scan_pause.v1',
+        last_original_scan_ns=max(stamp,bounds['original_observation']['header_ns']),
+        launcher_deadline=ready['mission_deadline'],issues=list(issues),
+        consumer_scan_age_sec=[header,receive],producer_scan_age_sec=[producer_header,producer_receive])
+
+
 def strict_simulation_scan_deviations(snapshot,ready,*,producer_bounds=None):
     deviations=[];scan=snapshot.get('last',{}).get('scan',{})
     own={k:scan.get(k) for k in ['stamp_ns','receive_age_s','header_age_s','received_unix_ns','received_steady']}
@@ -799,7 +831,8 @@ def record_scan_timing_health(pilot, require_stopped, issues, snapshot, entered_
                 producer_evidence_context=producer_evidence_context,
                 failed_READY_raw_sha256=None if getattr(pilot,'current_ready_read_failure',None) is None else pilot.current_ready_read_failure['metadata']['sha256'],
                 latest_validated_READY_sha256=getattr(pilot,'latest_ready_sha',None),strict_timing_status='FAIL')
-        pilot.invalidate_artifact(['scan:strict_300ms_latency_violation'])
+        if pilot.simulation_scan_max_age_sec!=.9:
+            pilot.invalidate_artifact(['scan:strict_300ms_latency_violation'])
         for deviation in deviations:
             stamp=(deviation.get('original_scan',{}).get('stamp_ns') if deviation['source']=='consumer_original_scan'
                 else deviation['original_observation'].get('header_ns'))

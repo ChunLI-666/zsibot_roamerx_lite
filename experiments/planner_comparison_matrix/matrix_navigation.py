@@ -491,11 +491,31 @@ def navigation_tree(variant,recovery=None):
     return '<root BTCPP_format="4" main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree"><Sequence><ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/><FollowPath path="{path}" controller_id="FollowPath" goal_checker_id="Checker" progress_checker_id="Progress"/></Sequence></BehaviorTree></root>\n'
 
 def simulation_scan_latency_profile(max_age=.3):
-    if max_age not in (.3,.5):raise ValueError('Matrix scan operational age must be .3 or .5 seconds')
+    modes={.3:'strict_300ms',.5:'simulation_500ms',.9:'warehouse_simulation_900ms'}
+    if max_age not in modes:raise ValueError('Matrix scan operational age must be .3, .5 or .9 seconds')
     return dict(schema='matrix.simulation_scan_latency.v1',
-      mode='strict_300ms' if max_age==.3 else 'simulation_500ms',
+      mode=modes[max_age],
       operational_max_age_sec=max_age,strict_max_age_sec=.3,future_tolerance_sec=.05,
       original_header_and_receive_timestamps=True,applies_only_to='scan_header_and_receive_age')
+
+def verify_warehouse_scan_consumers(parameters,recovery,projector):
+    expected={
+        projector:{
+            'max_sensor_age_sec':(3,'double_value',.9),
+            'use_sim_time':(1,'bool_value',False),
+            'imu_max_stamp_delta_sec':(3,'double_value',.03),
+            'laserscan_output_topic':(4,'string_value','/laser_scan_leveled_nav_floor_v1'),
+        },
+        **{f'{name}/{name}':{'obstacle_layer.scan.expected_update_rate':(3,'double_value',.9)}
+           for name in ('local_costmap','global_costmap')},
+    }
+    for role, fields in expected.items():
+        for key,(kind,field,value) in fields.items():
+            actual=parameters[role].get(key,{})
+            if actual.get('type')!=kind or actual.get(field)!=value:
+                raise RuntimeError(f'Warehouse scan consumer parameter mismatch: {role}.{key}')
+    if recovery['scan_max_age']!=.9:
+        raise RuntimeError('Warehouse recovery BT scan age mismatch')
 
 
 def prepare(args):
@@ -511,6 +531,10 @@ def prepare(args):
     waypoint_binding=waypoint_runtime.artifacts(getattr(args,'waypoint_install',None),
       getattr(args,'waypoint_build_receipt',None),NAV) if args.with_waypoints else None
     scan_profile=simulation_scan_latency_profile(getattr(args,'simulation_scan_max_age_sec',.3))
+    if scan_profile['operational_max_age_sec']==.9 and not (
+            getattr(args,'warehouse_fullmap',False) and args.with_waypoints and args.with_mission_recovery
+            and args.variant=='official' and args.scan_topic=='/laser_scan_leveled_nav_floor_v1'):
+        raise ValueError('900ms scan age requires the official Warehouse fullmap mission and floor scan topic')
     if getattr(args,'health_tf_latest_only',False) and scan_profile['operational_max_age_sec']!=.5:
         raise ValueError('Latest-only health TF observation requires the explicit simulation profile')
     template=pathlib.Path(args.template).absolute()
@@ -596,7 +620,8 @@ def prepare(args):
         p['inflation_layer'].update(inflate_unknown=False,inflate_around_unknown=True)
         p['obstacle_layer']=dict(plugin='nav2_costmap_2d::ObstacleLayer',enabled=True,footprint_clearing_enabled=False,observation_sources='scan',
           scan=dict(topic=args.scan_topic,data_type='LaserScan',marking=True,clearing=True,inf_is_valid=False,
-            observation_persistence=0.,expected_update_rate=.3,min_obstacle_height=0.,max_obstacle_height=2.,
+            observation_persistence=0.,expected_update_rate=.9 if scan_profile['operational_max_age_sec']==.9 else .3,
+            min_obstacle_height=0.,max_obstacle_height=2.,
             raytrace_max_range=8.5,raytrace_min_range=.0,obstacle_max_range=8.,obstacle_min_range=.1))
     planner=d['planner_server']['ros__parameters']['GridBased'];planner.update(plugin=required_plugin,tolerance=0.,max_planning_time=2.,rotation_penalty=1.)
     controller=d['controller_server']['ros__parameters'];controller['Checker'].update(stateful=False,xy_goal_tolerance=args.xy_tolerance,yaw_goal_tolerance=args.yaw_tolerance,controller_name='FollowPath')
@@ -762,6 +787,9 @@ def prepare(args):
 
 def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
     if os.environ.get('ROS_DOMAIN_ID')!='185':raise RuntimeError('Matrix navigation requires the isolated domain185 environment from simulation_setup')
+    warehouse_900=manifest['simulation_scan_latency_profile']['operational_max_age_sec']==.9
+    if warehouse_900 and {entry.name for entry in pathlib.Path('/sys/class/net').iterdir()}!={'lo'}:
+        raise RuntimeError('900ms Warehouse scan profile requires a loopback-only private network')
     if not args.build_receipt:raise RuntimeError('--run requires a concrete selected-artifact --build-receipt')
     if not args.message_install:raise RuntimeError('--run requires an isolated custom-message --message-install for complete recording')
     if (sha(args.build_receipt)!=manifest['build_receipt_sha256'] or
@@ -1105,12 +1133,20 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
                 if not stopped and rclpy.ok() and time.monotonic()<deadline and state.current_state.id==3:break
             else:raise RuntimeError(name+' did not activate')
         params={}
-        for name in ['map_server','planner_server','controller_server','local_costmap/local_costmap','global_costmap/global_costmap','velocity_smoother','bt_navigator','nav_safety_gate']+(['matrix_zero_handoff'] if recovery else [])+(['waypoint_follower'] if args.with_waypoints else []):
+        names_to_read=['map_server','planner_server','controller_server','local_costmap/local_costmap','global_costmap/global_costmap','velocity_smoother','bt_navigator','nav_safety_gate']+(['matrix_zero_handoff'] if recovery else [])+(['waypoint_follower'] if args.with_waypoints else [])
+        projector='livox_scan_projector_nav_floor_v1'
+        for name in names_to_read+([projector] if warehouse_900 else []):
             lc=node.create_client(ListParameters,'/'+name+'/list_parameters');gc=node.create_client(GetParameters,'/'+name+'/get_parameters')
             if not lc.wait_for_service(timeout_sec=2.):raise RuntimeError('parameter service unavailable '+name)
             names=wait(lc.call_async(ListParameters.Request()),timeout=10.,operation='/'+name+'/list_parameters').result.names;req=GetParameters.Request();req.names=names
             params[name]={n:message_to_ordereddict(v) for n,v in zip(names,wait(gc.call_async(req),timeout=10.,operation='/'+name+'/get_parameters').values)}
         write(out/'runtime_parameters.json',params)
+        if warehouse_900:
+            verify_warehouse_scan_consumers(params,recovery,projector)
+            scan_publishers=node.get_publishers_info_by_topic(args.scan_topic)
+            if (len(scan_publishers)!=1 or scan_publishers[0].node_name!=projector
+                    or scan_publishers[0].node_namespace!='/'):
+                raise RuntimeError('Warehouse floor scan publisher identity mismatch')
         if recovery:
             for key in ['run_id','raw_topic']:
                 value=params['matrix_zero_handoff'].get(key,{})
@@ -1151,9 +1187,21 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
         static_snapshots=capture_static_layers(node,out,recorder_name,pump,lambda:stopped)
         actual_maps={}
         for name,size in [('global_costmap',2000),('local_costmap',600)]:
-            client=node.create_client(GetCostmap,'/'+name+'/get_costmap')
+            service='/'+name+'/get_costmap'
+            client=node.create_client(GetCostmap,service)
             if not client.wait_for_service(timeout_sec=3.):raise RuntimeError('missing actual costmap service')
-            msg=wait(client.call_async(GetCostmap.Request())).map
+            if warehouse_900 and name=='global_costmap':
+                # The full Warehouse grid is 76 MB. Allow a bounded re-request of
+                # this read-only startup evidence before issuing any READY lease.
+                for attempt in range(2):
+                    try:
+                        msg=wait(client.call_async(GetCostmap.Request()),timeout=10.,operation=service).map
+                        break
+                    except TimeoutError:
+                        if stopped or attempt:raise
+                        event('costmap_startup_read_retry',service=service)
+            else:
+                msg=wait(client.call_async(GetCostmap.Request())).map
             metadata=message_to_ordereddict(msg.metadata)
             if name=='global_costmap' and manifest.get('warehouse_fullmap'):
                 import warehouse_fullmap
@@ -1267,6 +1315,7 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
         camera_quality=dict(status='NO_CAMERA_FAULT_RECORDED',strict_timing_status='NO_CAMERA_FAULT_RECORDED',
             fault_checks=0,first_fault=None,boundary='Recording evidence only; mandatory decoded/calibrated preflight retained; not a navigation input')
         previous_write_timing=None;previous_audit_sequence=None;last_timing_flush=time.monotonic()
+        ownership_loss=None
         while not stopped:
             if not shutdown_started:deadline_guard.check_live()
             cycle_started=(time.monotonic_ns(),time.thread_time_ns());phase=cycle_started;timing={}
@@ -1285,13 +1334,20 @@ def run(args,out,selected_install,manifest,deadline_guard,ready_storage):
                     # the latest full worker observation preceded that callback.
                     with ownership_observation_lock:
                         ingress_violated=private_goal_messages>0 or first_private_publisher_violation is not None
-                    if ingress_violated:raise RuntimeError('Native BT private goal ingress violated')
+                    if ingress_violated:
+                        ownership_loss='Native BT private goal ingress violated'
+                        raise RuntimeError(ownership_loss)
                     readiness['waypoint_ownership']=observed
                     if recovery:
                         readiness['recovery_runtime']=observed.get('recovery_runtime',{})
-                        if not readiness['recovery_runtime'].get('verified'):raise RuntimeError('Recovery publisher ownership changed')
+                        if not readiness['recovery_runtime'].get('verified'):
+                            ownership_loss='Recovery publisher ownership changed'
+                            raise RuntimeError(ownership_loss)
                     if not observed['exclusive_nav_client'] or not observed['status_publishers_match']:
-                        raise RuntimeError('Native waypoint action ownership changed; shared NavigateToPose is unsupported')
+                        ownership_loss='Native waypoint action ownership changed; shared NavigateToPose is unsupported'
+                        raise RuntimeError(ownership_loss)
+                    if warehouse_900 and ownership_loss:
+                        raise RuntimeError(ownership_loss)
                 phase=phase_mark(timing,'ownership_snapshot',phase)
                 # This recheck is AFTER graph work, immediately before publication.
                 health_started=(node.get_clock().now().nanoseconds,time.monotonic_ns())
@@ -1388,7 +1444,7 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--map',required=True);p.add_argument('--footprint',required=True,help='JSON list of body-frame [x,y] vertices')
     p.add_argument('--padding',required=True,type=float);p.add_argument('--variant',required=True,choices=['official','segmented','hybrid']);p.add_argument('--output',required=True)
-    p.add_argument('--simulation-scan-max-age-sec',type=float,choices=[.3,.5],default=.3,
+    p.add_argument('--simulation-scan-max-age-sec',type=float,choices=[.3,.5,.9],default=.3,
       help='Matrix only scan header/receive operational limit; original .3s strict timing remains separately reported')
     p.add_argument('--health-tf-latest-only',action='store_true',
       help='Simulation-only latest-depth1 read-only TF health listener; all original age/control checks remain')
